@@ -1,0 +1,65 @@
+{
+  "name": "justboats",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@babel/runtime": "^7.26.0",
+    "@sendgrid/mail": "^8.1.4",
+    "d3-array": "^3.2.4",
+    "d3-interpolate": "^3.0.1",
+    "d3-scale": "^4.0.2",
+    "d3-time-format": "^4.1.0",
+    "date-fns": "^2.30.0",
+    "dom-helpers": "^5.2.1",
+    "dotenv": "^16.4.7",
+    "firebase": "^10.8.0",
+    "lucide-react": "^0.469.0",
+    "nodemailer": "^6.9.16",
+    "papaparse": "^5.4.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-error-boundary": "^4.1.2",
+    "react-responsive": "^10.0.0",
+    "react-router-dom": "^6.28.1",
+    "react-scripts": "^5.0.1",
+    "react-webcam": "^7.2.0",
+    "recharts": "^2.15.0",
+    "web-vitals": "^3.5.2",
+    "xlsx": "^0.18.5"
+  },
+  "scripts": {
+    "start": "set NODE_OPTIONS=--openssl-legacy-provider && react-scripts start",
+    "build": "set NODE_OPTIONS=--openssl-legacy-provider && react-scripts build",
+    "test": "set NODE_OPTIONS=--openssl-legacy-provider && react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
+    "@babel/preset-env": "^7.26.0",
+    "@babel/preset-react": "^7.26.3",
+    "@craco/craco": "^5.9.0",
+    "autoprefixer": "^10.4.20",
+    "babel-loader": "^9.2.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17"
+  }
+}

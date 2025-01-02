@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="icon" href="%PUBLIC_URL%/favicon-16x16.png" sizes="16x16" type="image/png" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon-32x32.png" sizes="32x32" type="image/png" /> 
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#0099cc" />
+    <meta name="description" content="Just Enjoy Boat Booking System" />
+
+    <!-- iOS specific meta tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Just Boats">
+    <meta name="format-detection" content="telephone=no">
+
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/WhiteLogo-Just-Enjoy.png" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+
+    <title>Just Boats</title>
+
+    <!-- Prevent Flash of Unstyled Content -->
+    <script>
+        document.documentElement.classList.add('loading');
+    </script>
+
+    <style>
+        .loading {
+            visibility: hidden;
+        }
+
+        /* Global styles for Tailwind compatibility */
+        html {
+            height: 100%;
+            scroll-behavior: smooth;
+            -webkit-text-size-adjust: 100%; /* Prevent iOS text resizing */
+        }
+
+        body {
+            margin: 0;
+            height: 100%;
+            background-color: #f3f4f6; /* Tailwind's gray-100 */
+            overflow-y: auto; /* Enable scrolling */
+            -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+        }
+
+        #root {
+            height: 100%;
+        }
+
+        /* Remove tap highlight and native text effects */
+        * {
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+    <style>
+        /* Splash screen styles */
+        #splash-screen {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          background-color: #0099cc; /* Your brand's primary color */
+        }
+    
+        #splash-screen img {
+          width: 150px; /* Adjust size as needed */
+          height: auto;
+        }
+      </style>
+</head>
+<body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    
+    <div id="splash-screen">
+        <img src="%PUBLIC_URL%/WhiteLogo-Just-Enjoy.png" alt="Just Boats Logo" />
+      </div>
+    
+      <script>
+        window.addEventListener('load', function() {
+          const splashScreen = document.getElementById('splash-screen');
+          const rootElement = document.getElementById('root');
+    
+          // Ensure both elements exist before proceeding
+          if (splashScreen && rootElement) {
+            // Hide the splash screen
+            splashScreen.style.display = 'none';
+    
+            // Remove the 'loading' class from the document element
+            document.documentElement.classList.remove('loading');
+          }
+        });
+      </script>
+</body>
+</html>
