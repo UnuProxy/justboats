@@ -1,0 +1,16 @@
+[debug] [2025-01-01T16:44:54.729Z] ----------------------------------------------------------------------
+[debug] [2025-01-01T16:44:54.730Z] Command:       /Users/Julian/.nvm/versions/node/v18.20.5/bin/node /Users/Julian/.nvm/versions/node/v18.20.5/bin/firebase deploy --only functions
+[debug] [2025-01-01T16:44:54.730Z] CLI Version:   13.29.1
+[debug] [2025-01-01T16:44:54.730Z] Platform:      darwin
+[debug] [2025-01-01T16:44:54.730Z] Node Version:  v18.20.5
+[debug] [2025-01-01T16:44:54.731Z] Time:          Wed Jan 01 2025 17:44:54 GMT+0100 (Central European Standard Time)
+[debug] [2025-01-01T16:44:54.731Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-01-01T16:44:54.769Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-01-01T16:44:54.769Z] > authorizing via signed-in user (team@personalibiza.com)
+[debug] [2025-01-01T16:44:54.769Z] [iam] checking project crm-boats-29a7e for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2025-01-01T16:44:54.770Z] Checked if tokens are valid: true, expires at: 1735751424813
+[debug] [2025-01-01T16:44:54.770Z] Checked if tokens are valid: true, expires at: 1735751424813
+[debug] [2025-01-01T16:44:54.771Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/crm-boats-29a7e:testIamPermissions [none]
+[debug] [2025-01-01T16:44:54.771Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/crm-boats-29a7e:testIamPermissions x-goog-quota-user=projects/crm-boats-29a7e
+[debug] [2025-01-01T16:44:54.771Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/crm-boats-29a7e:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
