@@ -1,3 +1,4 @@
+// src/context/AuthContext.js
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { auth, googleProvider, db } from '../firebase/firebaseConfig';
 import {
@@ -5,17 +6,16 @@ import {
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
-import { 
-  doc, 
-  setDoc, 
-  deleteDoc, 
-  collection, 
-  query, 
-  where, 
-  getDocs 
-} from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 const AuthContext = createContext({});
+
+/**
+ * Fetch admin emails from environment variables.
+ * Ensure that these emails correspond to users who should have admin privileges.
+ * Since role assignments are now handled via the 'approvedUsers' collection in 'userManagement.js',
+ * 'adminEmails' is no longer required here and can be removed.
+ */
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -25,8 +25,6 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
-      console.log('Auth State Changed:', authUser?.email); // Debug log
-      
       if (authUser) {
         try {
           // Check if user already exists in 'users' collection
@@ -34,26 +32,20 @@ export function AuthProvider({ children }) {
           const userQuery = query(usersRef, where('email', '==', authUser.email));
           const userSnapshot = await getDocs(userQuery);
 
-          console.log('User query completed:', !userSnapshot.empty); // Debug log
-
           if (!userSnapshot.empty) {
             // User exists in 'users' collection
             const userDoc = userSnapshot.docs[0];
             setUser(authUser);
             setUserRole(userDoc.data().role);
             setAuthError(null);
-            console.log('Existing user role:', userDoc.data().role); // Debug log
           } else {
             // Check if user is in 'approvedUsers' collection
             const approvedUsersRef = collection(db, 'approvedUsers');
             const approvedQuery = query(approvedUsersRef, where('email', '==', authUser.email));
             const approvedSnapshot = await getDocs(approvedQuery);
 
-            console.log('Approved users query completed:', !approvedSnapshot.empty); // Debug log
-
             if (approvedSnapshot.empty) {
               // No approved user, unauthorized
-              console.log('User not approved:', authUser.email); // Debug log
               await signOut(auth);
               setAuthError("Unauthorized user. Please contact the administrator for access.");
               setUser(null);
@@ -66,8 +58,6 @@ export function AuthProvider({ children }) {
             const approvedUser = approvedSnapshot.docs[0].data();
             const role = approvedUser.role;
 
-            console.log('Creating new user with role:', role); // Debug log
-
             // Create 'users' document
             const userDocRef = doc(db, 'users', authUser.uid);
             await setDoc(userDocRef, {
@@ -77,7 +67,7 @@ export function AuthProvider({ children }) {
               createdAt: new Date()
             });
 
-            // Remove from 'approvedUsers' to prevent duplicate approvals
+            // Optionally, remove from 'approvedUsers' to prevent duplicate approvals
             const approvedUserDocRef = doc(db, 'approvedUsers', authUser.email);
             await deleteDoc(approvedUserDocRef);
 
@@ -86,14 +76,13 @@ export function AuthProvider({ children }) {
             setAuthError(null);
           }
         } catch (error) {
-          console.error('Error in auth state change:', error); // Debug log
+          console.error('Error assigning role:', error);
           await signOut(auth);
           setAuthError("Failed to assign role. Please contact the administrator.");
           setUser(null);
           setUserRole(null);
         }
       } else {
-        console.log('No authenticated user'); // Debug log
         setUser(null);
         setUserRole(null);
       }
@@ -105,66 +94,55 @@ export function AuthProvider({ children }) {
 
   const loginWithGoogle = async () => {
     try {
-      console.log('Attempting Google sign-in...'); // Debug log
+      console.log('Attempting Google sign-in...');
       setAuthError(null);
       
-      // Log current environment
-      console.log('Current environment:', {
-        authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-        currentUrl: window.location.origin
+      // Configure Google Auth Provider settings
+      googleProvider.setCustomParameters({
+        prompt: 'select_account',
+        domain_hint: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN
       });
-
-      const result = await signInWithPopup(auth, googleProvider);
-      console.log('Sign-in successful:', result.user.email); // Debug log
+      
+      // Log authentication attempt details
+      console.log('Auth attempt details:', {
+        authDomain: auth.config.authDomain,
+        currentUrl: window.location.origin,
+        provider: 'Google'
+      });
+  
+      // Attempt sign in with extended error handling
+      const result = await signInWithPopup(auth, googleProvider)
+        .catch((popupError) => {
+          console.error('Popup Error Details:', {
+            code: popupError.code,
+            message: popupError.message,
+            email: popupError.email,
+            credential: popupError.credential,
+            domain: window.location.hostname
+          });
+          throw popupError;
+        });
+        
+      console.log('Sign-in successful:', result.user.email);
       return { success: true };
     } catch (error) {
       console.error('Google sign-in error:', {
         code: error.code,
         message: error.message,
-        credential: error.credential
+        domain: window.location.hostname,
+        authDomain: auth.config.authDomain
       });
-      setAuthError(error.message);
-      return { success: false, error: error.message };
+      
+      // Set a more user-friendly error message
+      let errorMessage = "Failed to sign in with Google. Please try again.";
+      if (error.code === 'auth/unauthorized-domain') {
+        errorMessage = "This domain is not authorized for sign-in. Please contact the administrator.";
+      }
+      
+      setAuthError(errorMessage);
+      return { success: false, error: errorMessage };
     }
   };
-
-  const logout = async () => {
-    try {
-      console.log('Attempting logout...'); // Debug log
-      await signOut(auth);
-      console.log('Logout successful'); // Debug log
-      return { success: true };
-    } catch (error) {
-      console.error('Logout error:', error);
-      return { success: false, error: error.message };
-    }
-  };
-
-  const isAdmin = () => userRole === 'admin';
-  const isStaff = () => userRole === 'staff';
-
-  // Debug values
-  console.log('Auth Context State:', {
-    userEmail: user?.email,
-    userRole,
-    loading,
-    authError
-  });
-
-  return (
-    <AuthContext.Provider value={{
-      user,
-      userRole,
-      loginWithGoogle,
-      logout,
-      isAdmin,
-      isStaff,
-      loading,
-      authError
-    }}>
-      {!loading && children}
-    </AuthContext.Provider>
-  );
 }
 
 export const useAuth = () => useContext(AuthContext);
