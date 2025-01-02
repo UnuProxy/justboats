@@ -97,50 +97,52 @@ export function AuthProvider({ children }) {
       console.log('Attempting Google sign-in...');
       setAuthError(null);
       
-      // Configure Google Auth Provider settings
-      googleProvider.setCustomParameters({
-        prompt: 'select_account',
-        domain_hint: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN
-      });
+      // Reset and reconfigure GoogleAuthProvider
+      const provider = new GoogleAuthProvider();
+      provider.addScope('email');
+      provider.addScope('profile');
       
-      // Log authentication attempt details
-      console.log('Auth attempt details:', {
-        authDomain: auth.config.authDomain,
-        currentUrl: window.location.origin,
-        provider: 'Google'
-      });
+      // Configure popup settings
+      const auth = getAuth();
+      const settings = {
+        // Popup configuration
+        signInFlow: 'popup',
+        signInOptions: [
+          {
+            provider: GoogleAuthProvider.PROVIDER_ID,
+            customParameters: {
+              prompt: 'select_account'
+            }
+          }
+        ]
+      };
   
-      // Attempt sign in with extended error handling
-      const result = await signInWithPopup(auth, googleProvider)
-        .catch((popupError) => {
-          console.error('Popup Error Details:', {
-            code: popupError.code,
-            message: popupError.message,
-            email: popupError.email,
-            credential: popupError.credential,
-            domain: window.location.hostname
-          });
-          throw popupError;
-        });
-        
-      console.log('Sign-in successful:', result.user.email);
-      return { success: true };
-    } catch (error) {
-      console.error('Google sign-in error:', {
-        code: error.code,
-        message: error.message,
+      // Log authorization attempt
+      console.log('Authorization attempt:', {
         domain: window.location.hostname,
         authDomain: auth.config.authDomain
       });
-      
-      // Set a more user-friendly error message
-      let errorMessage = "Failed to sign in with Google. Please try again.";
-      if (error.code === 'auth/unauthorized-domain') {
-        errorMessage = "This domain is not authorized for sign-in. Please contact the administrator.";
+  
+      try {
+        const result = await signInWithPopup(auth, provider);
+        console.log('Sign-in successful:', result.user.email);
+        return { success: true };
+      } catch (popupError) {
+        console.error('Popup Error:', {
+          code: popupError.code,
+          message: popupError.message,
+          domain: window.location.hostname
+        });
+        throw popupError;
       }
-      
-      setAuthError(errorMessage);
-      return { success: false, error: errorMessage };
+    } catch (error) {
+      console.error('Authentication Error:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
+      setAuthError(error.message);
+      return { success: false, error: error.message };
     }
   };
 }
