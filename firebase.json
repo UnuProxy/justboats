@@ -1,6 +1,9 @@
 {
-    "functions": {
-      "predeploy": []
-    }
+  "functions": {
+    "predeploy": [],
+    "source": "functions"
+  },
+  "storage": {
+    "rules": "storage.rules"
   }
-  
+}

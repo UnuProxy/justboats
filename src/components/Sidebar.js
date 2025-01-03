@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3, User, Wallet, MessageSquare, CreditCard, Euro } from 'lucide-react';
+import { Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3, User, Wallet, MessageSquare, CreditCard, Euro, Ship } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router';
 
@@ -98,7 +98,13 @@ const Sidebar = () => {
             icon: React.createElement(Euro, { className: 'mr-3', size: 20 }),
             path: '/expenses',
             allowed: true
-           }
+           },
+           {
+            name: 'Boat Fleet',
+            icon: React.createElement(Ship, { className: 'mr-3', size: 20 }), // Using Ship icon instead of Anchor
+            path: '/boats',
+            allowed: true
+        },
     ];
 
     return React.createElement(
