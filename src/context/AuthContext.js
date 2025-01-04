@@ -94,57 +94,43 @@ export function AuthProvider({ children }) {
 
   const loginWithGoogle = async () => {
     try {
-      console.log('Attempting Google sign-in...');
       setAuthError(null);
-      
-      // Reset and reconfigure GoogleAuthProvider
-      const provider = new GoogleAuthProvider();
-      provider.addScope('email');
-      provider.addScope('profile');
-      
-      // Configure popup settings
-      const auth = getAuth();
-      const settings = {
-        // Popup configuration
-        signInFlow: 'popup',
-        signInOptions: [
-          {
-            provider: GoogleAuthProvider.PROVIDER_ID,
-            customParameters: {
-              prompt: 'select_account'
-            }
-          }
-        ]
-      };
-  
-      // Log authorization attempt
-      console.log('Authorization attempt:', {
-        domain: window.location.hostname,
-        authDomain: auth.config.authDomain
-      });
-  
-      try {
-        const result = await signInWithPopup(auth, provider);
-        console.log('Sign-in successful:', result.user.email);
-        return { success: true };
-      } catch (popupError) {
-        console.error('Popup Error:', {
-          code: popupError.code,
-          message: popupError.message,
-          domain: window.location.hostname
-        });
-        throw popupError;
-      }
+      await signInWithPopup(auth, googleProvider);
+      return { success: true };
     } catch (error) {
-      console.error('Authentication Error:', {
-        code: error.code,
-        message: error.message,
-        stack: error.stack
-      });
+      console.error('Google sign-in error:', error);
       setAuthError(error.message);
       return { success: false, error: error.message };
     }
   };
+
+  const logout = async () => {
+    try {
+      await signOut(auth);
+      return { success: true };
+    } catch (error) {
+      console.error('Logout error:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  const isAdmin = () => userRole === 'admin';
+  const isStaff = () => userRole === 'staff';
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      userRole,
+      loginWithGoogle,
+      logout,
+      isAdmin,
+      isStaff,
+      loading,
+      authError
+    }}>
+      {!loading && children}
+    </AuthContext.Provider>
+  );
 }
 
 export const useAuth = () => useContext(AuthContext);

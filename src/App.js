@@ -8,13 +8,15 @@ import ManagePartners from './components/ManagePartners';
 import UserManagement from './components/UserManagement';
 import UpcomingBookings from './components/UpcomingBookings';
 import FirestoreTest from "./FirestoreTest";
-import Login from './components/Login'; 
+import Login from './components/Login';
 import Analytics from './components/Analytics';
 import ClientDirectory from './components/ClientDirectory';
 import AddExpense from './components/AddExpense';
 import AutomatedBookings from './components/AutomatedBookings';
 import PaymentTracking from './components/PaymentTracking';
 import ExpenseOverview from './components/ExpenseOverview';
+import BoatManagement from './components/BoatManagement';
+import AddBoat from './components/AddBoat';
 
 function ErrorFallback({ error }) {
     return (
@@ -75,6 +77,16 @@ function App() {
                 <Router>
                     <Routes>
                         <Route path="/login" element={<Login />} />
+                        <Route
+                            path="/add-boat"  // Added route for adding a new boat
+                            element={
+                                <ProtectedRoute>
+                                    <ProtectedLayout>
+                                        <AddBoat />
+                                    </ProtectedLayout>
+                                </ProtectedRoute>
+                            }
+                        />
                         <Route
                             path="/"
                             element={
@@ -175,16 +187,36 @@ function App() {
                                 </ProtectedRoute>
                             }
                         />
-                            <Route
-                                path="/expenses"
-                                element={
-                                    <ProtectedRoute>
+                        <Route
+                            path="/expenses"
+                            element={
+                                <ProtectedRoute>
                                     <ProtectedLayout>
                                         <ExpenseOverview />
                                     </ProtectedLayout>
-                                    </ProtectedRoute>
-                                }
-                                />
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/boats"
+                            element={
+                                <ProtectedRoute>
+                                    <ProtectedLayout>
+                                        <BoatManagement />
+                                    </ProtectedLayout>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/edit-boat/:id"
+                            element={
+                                <ProtectedRoute>
+                                    <ProtectedLayout>
+                                        <AddBoat />
+                                    </ProtectedLayout>
+                                </ProtectedRoute>
+                            }
+                        />
                         <Route path="*" element={<Navigate to="/" />} />
                     </Routes>
                 </Router>
@@ -192,5 +224,4 @@ function App() {
         </ErrorBoundary>
     );
 }
-
 export default App;
