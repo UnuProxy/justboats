@@ -70,6 +70,7 @@ const UpcomingBookings = () => {
       pickupAddress: booking.transfer?.pickup?.address || "",
       dropoffAddress: booking.transfer?.dropoff?.address || "",
       clientNotes: booking.notes || "None",
+      restaurantName: booking.restaurantName || "",
       isCancelled: booking.status === "cancelled" || false,
     };
   }, []);
@@ -178,7 +179,6 @@ const filterBookings = () => {
   
 
   // Save booking
-  // In UpcomingBookings.js
 const handleBookingSave = async (bookingId, updatedBooking) => {
   try {
     const docRef = doc(db, "bookings", bookingId);
@@ -188,6 +188,7 @@ const handleBookingSave = async (bookingId, updatedBooking) => {
       clientType: updatedBooking.clientType,
       status: updatedBooking.isCancelled ? 'cancelled' : 'active',
       lastUpdated: new Date().toISOString(),
+      restaurantName: updatedBooking.restaurantName || '',
       
       // Client Details
       clientDetails: {

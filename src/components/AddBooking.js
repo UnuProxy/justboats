@@ -52,6 +52,7 @@ function AddBooking() {
   const [partners, setPartners] = useState([]);
   const [existingClients, setExistingClients] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [restaurantName, setRestaurantName] = useState('');
 
   // Load partners based on type
   useEffect(() => {
@@ -481,7 +482,6 @@ function AddBooking() {
   );
 
   const renderStep4 = () => (
-    // ... (rest of your renderStep4 function - no changes needed)
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
         <MapPin className="w-5 h-5 text-gray-600" />
@@ -585,6 +585,19 @@ function AddBooking() {
             value={formData.notes}
             onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
             placeholder="Any special requirements or notes..."
+          />
+        </div>
+
+        <div className="mt-6">
+          <label className="block text-sm font-medium text-gray-700">
+            Restaurant Name (if applicable)
+          </label>
+          <input
+            type="text"
+            className="mt-1 w-full p-2 border rounded"
+            value={restaurantName}
+            onChange={(e) => setRestaurantName(e.target.value)}
+            placeholder="Enter the name of the restaurant"
           />
         </div>
       </div>
@@ -714,6 +727,7 @@ function AddBooking() {
         lastUpdated: new Date().toISOString(),
         status: "active",
         createdBy: createdByInfo,
+        restaurantName: restaurantName,
       };
 
       if (formData.clientType === "Direct" || ["Hotel", "Collaborator"].includes(formData.clientType)) {

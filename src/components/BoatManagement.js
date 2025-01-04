@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, deleteDoc, doc, getDoc } from 'firebase/firestore';
-import { db,storage } from "../firebase/firebaseConfig";
+import { db, storage } from "../firebase/firebaseConfig";
 import { useNavigate } from 'react-router-dom';
 import { PenSquare, Trash2, Download } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -52,9 +52,9 @@ const BoatManagement = () => {
         navigate(`/edit-boat/${boatId}`);
     };
 
-   
-const handleGeneratePdf = async (boatId) => {
+    const handleGeneratePdf = async (boatId) => {
     setPdfLoading(prev => ({ ...prev, [boatId]: true }));
+
     try {
         const boatDoc = await getDoc(doc(db, 'boats', boatId));
         if (!boatDoc.exists()) {
@@ -63,168 +63,157 @@ const handleGeneratePdf = async (boatId) => {
         }
         const boatData = boatDoc.data();
 
-        // Create PDF with A4 format
         const pdf = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
             format: 'a4'
         });
 
-        // Define colors
-        const softBlue = [32, 149, 174];   // #2095AE
+        const softBlue = [32, 149, 174];
         const white = [255, 255, 255];
 
-        // First Page - Overview & Specifications
         pdf.setFillColor(...white);
         pdf.rect(0, 0, 210, 297, 'F');
 
-        // Header
+        // Add header
         pdf.setTextColor(...softBlue);
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(36);
         pdf.text(boatData.name, 20, 30);
 
-        // Add main image
-         if (boatData.images && boatData.images.length > 0) {
-             try {
-                 // Use firebase storage getDownloadURL to ensure you are getting the valid url
-                 const storageRef = ref(storage, boatData.images[0])
-                 console.log("Fetching image from:", storageRef);
-                const url = await getDownloadURL(storageRef);
-                  console.log("Resolved image url:", url)
-                const imgData = await fetch(url)
-                   .then(res => res.blob())
-                   .then(blob => new Promise((resolve) => {
-                         const reader = new FileReader();
-                           reader.onloadend = () => {
-                               console.log("Reader finished, result:", reader.result);
-                               resolve(reader.result);
-                          };
-                        reader.readAsDataURL(blob);
-                   })
-                );
-                 pdf.addImage(imgData, 'JPEG', 20, 40, 170, 75);
+        // Handle image loading
+        if (boatData.images && boatData.images.length > 0) {
+            try {
+                const storageRef = ref(storage, boatData.images[0]);
+                const imageUrl = await getDownloadURL(storageRef);
 
-            } catch (imageError) {
-               console.error("Error adding image:", imageError);
-             }
-         }
+                await new Promise((resolve, reject) => { // eslint-disable-line no-unused-vars
+                    const img = new Image();
+                    img.crossOrigin = "Anonymous";
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        const dataUrl = canvas.toDataURL('image/jpeg', 1.0);
+                        pdf.addImage(dataUrl, 'JPEG', 20, 40, 170, 75, undefined, 'FAST');
+                        resolve();
+                    };
+                    img.onerror = (error) => {
+                        const errorMsg = `Failed to load image for PDF: ${imageUrl}`;
+                        console.error(errorMsg, error);
+                        pdf.setFontSize(12);
+                        pdf.setTextColor(255, 0, 0); // Red color for error
+                        pdf.text("Image not available", 20, 70);
+                        resolve(); // Still resolve to continue PDF generation
+                        // If you wanted to stop PDF generation on image failure, you would call reject:
+                        // reject(new Error(errorMsg));
+                    };
+                    img.src = `${imageUrl}?t=${new Date().getTime()}`; // Add cache-busting
+                });
 
-        // Overview section
+            } catch (error) {
+                console.error('Image processing error:', error);
+                pdf.setFontSize(12);
+                pdf.setTextColor(255, 0, 0); // Red color for error
+                pdf.text("Image not available", 20, 70);
+            }
+        } else {
+            pdf.setFontSize(12);
+            pdf.setTextColor(100, 100, 100);
+            pdf.text("No image available", 20, 40);
+        }
+
+        // Add description
         pdf.setTextColor(...softBlue);
         pdf.setFontSize(12);
         const splitDescription = pdf.splitTextToSize(boatData.description || "", 170);
         pdf.text(splitDescription, 20, 130);
 
-         // Specifications
-        pdf.setTextColor(...softBlue);
+        // Add specifications section
         pdf.setFontSize(20);
         pdf.text("SPECIFICATIONS", 20, 180);
 
-        // Create specs grid
-         const specs = [
+        // Create specifications table
+        const specs = [
             ["Length", boatData.detailedSpecs?.Length],
             ["Beam", boatData.detailedSpecs?.Beam],
             ["Guests", boatData.detailedSpecs?.Guests],
             ["Cabins", boatData.detailedSpecs?.Cabins],
+            ["Crew", boatData.detailedSpecs?.Crew],
+            ["Price", boatData.detailedSpecs?.Price],
             ["Cruising Speed", boatData.detailedSpecs?.['Cruising Speed']],
-            ["Maximum Speed", boatData.detailedSpecs?.['Maximum speed']],
-            ["Fuel Consumption", boatData.detailedSpecs?.['Fuel consumption']],
-            ["Engines", boatData.detailedSpecs?.Engines]
-        ];
+            ["Max Speed", boatData.detailedSpecs?.['Max Speed']],
+            ["Class", boatData.detailedSpecs?.Class],
+            ["Engine", boatData.detailedSpecs?.Engine]
+        ].filter(([, value]) => value);
 
-        let yPos = 200;
-        specs.forEach(([label, value]) => {
-            if (value) { // Only display if value exists
-                pdf.setTextColor(...softBlue);
-                pdf.setFont("helvetica", "bold");
-                pdf.setFontSize(10);
-                pdf.text(label.toUpperCase(), 20, yPos);
-                pdf.setFont("helvetica", "normal");
-                pdf.setFontSize(10);
-                pdf.text(value, 100, yPos);
-                yPos += 10;
-            }
+        pdf.autoTable({
+            startY: 190,
+            head: [['Specification', 'Details']],
+            body: specs,
+            theme: 'grid',
+            headStyles: {
+                fillColor: [...softBlue],
+                textColor: [255, 255, 255],
+                fontSize: 12,
+                fontStyle: 'bold'
+            },
+            styles: {
+                fontSize: 10,
+                cellPadding: 5
+            },
+            columnStyles: {
+                0: { fontStyle: 'bold' }
+            },
+            margin: { left: 20, right: 20 }
         });
 
-        // Rates Section
+        // Add seasonal prices if available
         if (boatData.seasonalPrices && Object.keys(boatData.seasonalPrices).length > 0) {
-            pdf.addPage(); // Add new page
-            pdf.setFillColor(...white);
-            pdf.rect(0, 0, 210, 297, 'F');
+            const priceData = Object.entries(boatData.seasonalPrices)
+                .filter(([, price]) => price)
+                .map(([season, price]) => [season, price]);
 
-            pdf.setTextColor(...softBlue);
-            pdf.setFont("helvetica", "bold");
-            pdf.setFontSize(20);
-            pdf.text("RATES", 20, 20);
-
-            const priceData = Object.entries(boatData.seasonalPrices).map(([season, price]) => [
-                season,
-                typeof price === 'number' ? `€${price.toLocaleString()}` : price
-            ]);
-
-            pdf.autoTable({
-                startY: 30,
-                head: [['SEASON', 'RATE']],
-                body: priceData,
-                theme: 'plain',
-                styles: {
-                    fontSize: 10,
-                    textColor: [...softBlue],
-                    cellPadding: 8,
-                },
-                headStyles: {
-                    fillColor: [...softBlue],
-                    textColor: [...white],
-                    fontSize: 12,
-                    fontStyle: 'bold'
-                },
-                columnStyles: {
-                    0: { cellWidth: 90 },
-                    1: { cellWidth: 80, halign: 'right' }
-                },
-                margin: { left: 20 }
-            });
-
-            pdf.setTextColor(...softBlue);
-            pdf.setFont("helvetica", "italic");
-            pdf.setFontSize(8);
-            pdf.text("* Prices do not include VAT and fuel costs", 20, pdf.internal.pageSize.height - 20);
+            if (priceData.length > 0) {
+                pdf.autoTable({
+                    startY: pdf.previousAutoTable.finalY + 15,
+                    head: [['Season', 'Rate']],
+                    body: priceData,
+                    theme: 'grid',
+                    headStyles: {
+                        fillColor: [...softBlue],
+                        textColor: [255, 255, 255],
+                        fontSize: 12,
+                        fontStyle: 'bold'
+                    },
+                    styles: {
+                        fontSize: 10,
+                        cellPadding: 5
+                    },
+                    margin: { left: 20, right: 20 }
+                });
+            }
         }
 
-         // Add footer
-         const pageCount = pdf.internal.getNumberOfPages();
-         for (let i = 1; i <= pageCount; i++) {
-             pdf.setPage(i);
+        // Add footer
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 100, 100);
+        pdf.text(
+            'For more information or to make a reservation, please contact us',
+            pdf.internal.pageSize.width / 2,
+            287,
+            { align: 'center' }
+        );
 
-             // Add subtle footer line
-             pdf.setDrawColor(...softBlue);
-             pdf.setLineWidth(0.5);
-             pdf.line(20, pdf.internal.pageSize.height - 15, 190, pdf.internal.pageSize.height - 15);
-
-            // Add footer text
-             pdf.setTextColor(...softBlue);
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(8);
-              pdf.text(
-                 boatData.name,
-                20,
-                pdf.internal.pageSize.height - 10
-             );
-
-              pdf.text(
-                `${i}/${pageCount}`,
-                 190,
-                 pdf.internal.pageSize.height - 10,
-               { align: 'right' }
-            );
-       }
         // Save the PDF
-        pdf.save(`${boatData.name?.replace(/\s+/g, '-').toLowerCase() || 'boat'}-details.pdf`);
+        const fileName = `${boatData.name.replace(/\s+/g, '-').toLowerCase()}-specification.pdf`;
+        pdf.save(fileName);
 
     } catch (error) {
-        console.error("Error generating PDF: ", error);
-        alert("Failed to generate PDF.");
+        console.error("PDF generation error:", error);
+        alert("Failed to generate PDF. Please try again.");
     } finally {
         setPdfLoading(prev => ({ ...prev, [boatId]: false }));
     }
@@ -281,15 +270,15 @@ const handleGeneratePdf = async (boatId) => {
                                 >
                                     <Trash2 size={20} className="text-red-600" />
                                 </button>
-                                 <button
-                                      onClick={() => handleGeneratePdf(boat.id)}
-                                        disabled={pdfLoading[boat.id]}
-                                      className="p-2.5 bg-white rounded-full shadow-lg hover:bg-gray-100 transition-colors"
+                                <button
+                                    onClick={() => handleGeneratePdf(boat.id)}
+                                    disabled={pdfLoading[boat.id]}
+                                    className="p-2.5 bg-white rounded-full shadow-lg hover:bg-gray-100 transition-colors"
                                     title="Download PDF"
-                                  >
-                                      {pdfLoading[boat.id] ?
-                                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500" />
-                                          : <Download size={20} className="text-gray-700" />}
+                                >
+                                    {pdfLoading[boat.id] ?
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500" />
+                                        : <Download size={20} className="text-gray-700" />}
                                 </button>
                             </div>
                         </div>
