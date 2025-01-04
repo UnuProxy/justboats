@@ -186,7 +186,6 @@ const handleGeneratePdf = async (boatId) => {
                 margin: { left: 20 }
             });
 
-            // Add VAT note if prices exist
             pdf.setTextColor(...softBlue);
             pdf.setFont("helvetica", "italic");
             pdf.setFontSize(8);
