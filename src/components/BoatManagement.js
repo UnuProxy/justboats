@@ -95,7 +95,22 @@ const BoatManagement = () => {
                 try {
                     const storageRef = ref(storage, boatData.images[0]);
                     const imageUrl = await getDownloadURL(storageRef);
-                    const response = await fetch(imageUrl);
+                    
+                    // Add timestamp to bypass cache
+                    const timeStamp = new Date().getTime();
+                    const urlWithTimestamp = `${imageUrl}&t=${timeStamp}`;
+                    
+                    const response = await fetch(urlWithTimestamp, {
+                        mode: 'cors',
+                        headers: {
+                            'Origin': window.location.origin
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
                     const blob = await response.blob();
                     const blobUrl = URL.createObjectURL(blob);
     
@@ -175,7 +190,22 @@ const BoatManagement = () => {
                     try {
                         const storageRef = ref(storage, boatData.images[i]);
                         const imageUrl = await getDownloadURL(storageRef);
-                        const response = await fetch(imageUrl);
+                        
+                        // Add timestamp to bypass cache
+                        const timeStamp = new Date().getTime();
+                        const urlWithTimestamp = `${imageUrl}&t=${timeStamp}`;
+                        
+                        const response = await fetch(urlWithTimestamp, {
+                            mode: 'cors',
+                            headers: {
+                                'Origin': window.location.origin
+                            }
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        
                         const blob = await response.blob();
                         const blobUrl = URL.createObjectURL(blob);
     
