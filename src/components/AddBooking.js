@@ -81,7 +81,7 @@ function AddBooking() {
         setExistingClients([]);
         return;
       }
-
+    
       try {
         const q = query(
           collection(db, "clients"),
@@ -730,43 +730,74 @@ function AddBooking() {
         restaurantName: restaurantName,
       };
 
+      let clientId = null;
       if (formData.clientType === "Direct" || ["Hotel", "Collaborator"].includes(formData.clientType)) {
         const clientsRef = collection(db, "clients");
-
-        // Get the hotel/collaborator name from the selected partner
-        let partnerDetails = null;
-        if (["Hotel", "Collaborator"].includes(formData.clientType) && formData.selectedPartner) {
-          // Find the selected partner from our partners array
-          const selectedPartner = partners.find(p => p.id === formData.selectedPartner);
-          if (selectedPartner) {
-            partnerDetails = {
-              id: selectedPartner.id,
-              name: selectedPartner.name, // This will be the actual hotel/collaborator name
-            };
-          }
+      
+        // First try exact email match
+        let existingClientQuery = query(
+          clientsRef,
+          where("email", "==", formData.clientDetails.email)
+        );
+        let existingClientSnapshot = await getDocs(existingClientQuery);
+      
+        if (existingClientSnapshot.empty) {
+          // If no email match, try phone match
+          existingClientQuery = query(
+            clientsRef,
+            where("phone", "==", formData.clientDetails.phone)
+          );
+          existingClientSnapshot = await getDocs(existingClientQuery);
         }
-
-        const clientData = {
-          name: formData.clientDetails.name,
-          email: formData.clientDetails.email,
-          phone: formData.clientDetails.phone,
-          passportNumber: formData.clientDetails.passportNumber,
-          source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
-          clientType: formData.clientType,
-          // Store hotel/collaborator specific details
-          hotelName: formData.clientType === "Hotel" ? partnerDetails?.name : null,     // Add hotel name
-          collaboratorName: formData.clientType === "Collaborator" ? partnerDetails?.name : null,  // Add collaborator name
-          partnerName: partnerDetails?.name || null,
-          partnerId: partnerDetails?.id || null,
-          createdAt: new Date().toISOString(),
-          createdBy: createdByInfo,
-          bookings: [],
-          totalBookings: 1,
-          totalSpent: bookingData.pricing.finalPrice
-        };
-
-        const clientDoc = await addDoc(clientsRef, clientData);
-        bookingData.clientId = clientDoc.id;
+      
+        if (!existingClientSnapshot.empty) {
+          // Client exists - update their details if needed
+          clientId = existingClientSnapshot.docs[0].id;
+          
+          // Update existing client with any new information
+          await updateDoc(doc(db, "clients", clientId), {
+            name: formData.clientDetails.name,
+            email: formData.clientDetails.email,
+            phone: formData.clientDetails.phone,
+            passportNumber: formData.clientDetails.passportNumber,
+            lastUpdated: new Date().toISOString()
+          });
+          
+          console.log("Updated existing client with ID:", clientId);
+        } else {
+          // No existing client, create a new one
+          let partnerDetails = null;
+          if (["Hotel", "Collaborator"].includes(formData.clientType) && formData.selectedPartner) {
+            const selectedPartner = partners.find(p => p.id === formData.selectedPartner);
+            if (selectedPartner) {
+              partnerDetails = {
+                id: selectedPartner.id,
+                name: selectedPartner.name,
+              };
+            }
+          }
+      
+          const clientData = {
+            name: formData.clientDetails.name,
+            email: formData.clientDetails.email,
+            phone: formData.clientDetails.phone,
+            passportNumber: formData.clientDetails.passportNumber,
+            source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
+            clientType: formData.clientType,
+            hotelName: formData.clientType === "Hotel" ? partnerDetails?.name : null,
+            collaboratorName: formData.clientType === "Collaborator" ? partnerDetails?.name : null,
+            partnerName: partnerDetails?.name || null,
+            partnerId: partnerDetails?.id || null,
+            createdAt: new Date().toISOString(),
+            createdBy: createdByInfo,
+            bookings: [],
+            totalBookings: 1,
+            totalSpent: bookingData.pricing.finalPrice
+          };
+          const clientDoc = await addDoc(clientsRef, clientData);
+          clientId = clientDoc.id;
+        }
+        bookingData.clientId = clientId;
       }
 
       const bookingRef = await addDoc(collection(db, "bookings"), bookingData);

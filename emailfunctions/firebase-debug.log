@@ -1,0 +1,51 @@
+[debug] [2025-01-05T15:14:09.949Z] ----------------------------------------------------------------------
+[debug] [2025-01-05T15:14:09.950Z] Command:       /Users/Julian/.nvm/versions/node/v18.20.5/bin/node /Users/Julian/.nvm/versions/node/v18.20.5/bin/firebase init hosting
+[debug] [2025-01-05T15:14:09.951Z] CLI Version:   13.29.1
+[debug] [2025-01-05T15:14:09.951Z] Platform:      darwin
+[debug] [2025-01-05T15:14:09.951Z] Node Version:  v18.20.5
+[debug] [2025-01-05T15:14:09.952Z] Time:          Sun Jan 05 2025 16:14:09 GMT+0100 (Central European Standard Time)
+[debug] [2025-01-05T15:14:09.952Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-01-05T15:14:09.991Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-01-05T15:14:09.991Z] > authorizing via signed-in user (julian.pirvu@gmail.com)
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  /Users/Julian/Desktop/justboats
+
+Before we get started, keep in mind:
+
+  * You are initializing within an existing Firebase project directory
+
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] but for now we'll just set up a default project.
+[info] 
+[debug] [2025-01-05T15:14:09.993Z] Using project from CLI flag: crm-boats
+[debug] [2025-01-05T15:14:09.993Z] Checked if tokens are valid: true, expires at: 1736093360861
+[debug] [2025-01-05T15:14:09.994Z] Checked if tokens are valid: true, expires at: 1736093360861
+[debug] [2025-01-05T15:14:09.994Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/crm-boats [none]
+[debug] [2025-01-05T15:14:11.387Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/crm-boats 200
+[debug] [2025-01-05T15:14:11.387Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/crm-boats {"projectId":"crm-boats","projectNumber":"129588517789","displayName":"CRM-Boats","name":"projects/crm-boats","resources":{"hostingSite":"crm-boats"},"state":"ACTIVE","etag":"1_4f48a7e1-b7e9-4d2f-b740-c92fd82ec08d"}
+[info] i  Using project crm-boats (CRM-Boats) 
+[info] 
+=== Hosting Setup
+[debug] [2025-01-05T15:14:11.396Z] Checked if tokens are valid: true, expires at: 1736093360861
+[debug] [2025-01-05T15:14:11.396Z] Checked if tokens are valid: true, expires at: 1736093360861
+[debug] [2025-01-05T15:14:11.396Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/crm-boats [none]
+[debug] [2025-01-05T15:14:11.673Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/crm-boats 200
+[debug] [2025-01-05T15:14:11.674Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/crm-boats {"projectId":"crm-boats","projectNumber":"129588517789","displayName":"CRM-Boats","name":"projects/crm-boats","resources":{"hostingSite":"crm-boats"},"state":"ACTIVE","etag":"1_4f48a7e1-b7e9-4d2f-b740-c92fd82ec08d"}
+[info] 
+[info] Your public directory is the folder (relative to your project directory) that
+[info] will contain Hosting assets to be uploaded with firebase deploy. If you
+[info] have a build process for your assets, use your build's output directory.
+[info] 
