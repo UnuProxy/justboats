@@ -107,8 +107,7 @@ const BoatManagement = () => {
                         pdf.setTextColor(255, 0, 0); // Red color for error
                         pdf.text("Image not available", 20, 70);
                         resolve(); // Still resolve to continue PDF generation
-                        // If you wanted to stop PDF generation on image failure, you would call reject:
-                        // reject(new Error(errorMsg));
+                        
                     };
                     img.src = `${imageUrl}?t=${new Date().getTime()}`; // Add cache-busting
                 });
