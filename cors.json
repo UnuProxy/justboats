@@ -2,7 +2,8 @@
   {
     "origin": [
       "http://localhost:3000",
-      "https://justboats.vercel.app"
+      "https://justboats.vercel.app",
+      "http://localhost:3001"
     ],
     "method": ["GET"],
     "maxAgeSeconds": 3600
