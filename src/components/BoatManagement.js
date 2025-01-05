@@ -56,6 +56,7 @@ const BoatManagement = () => {
         setPdfLoading(prev => ({ ...prev, [boatId]: true }));
         
         try {
+            // Fetch boat data
             const boatDoc = await getDoc(doc(db, 'boats', boatId));
             if (!boatDoc.exists()) {
                 throw new Error("Boat data not found");
@@ -71,10 +72,41 @@ const BoatManagement = () => {
     
             // Define colors
             const colors = {
-                primary: [32, 149, 243],    // Blue
-                secondary: [96, 125, 139],  // Blue Grey
-                text: [33, 33, 33],         // Dark Grey
+                primary: [32, 149, 243],
+                secondary: [96, 125, 139],
+                text: [33, 33, 33],
                 white: [255, 255, 255]
+            };
+    
+            // Helper function to safely load and process images
+            const loadImage = async (imageRef) => {
+                try {
+                    const storageRef = ref(storage, imageRef);
+                    const url = await getDownloadURL(storageRef);
+                    
+                    // Use XMLHttpRequest to bypass CORS issues
+                    const imageData = await new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        xhr.onload = function() {
+                            const reader = new FileReader();
+                            reader.onloadend = function() {
+                                resolve(reader.result);
+                            };
+                            reader.readAsDataURL(xhr.response);
+                        };
+                        xhr.onerror = function() {
+                            reject(new Error('Failed to load image'));
+                        };
+                        xhr.open('GET', url);
+                        xhr.responseType = 'blob';
+                        xhr.send();
+                    });
+    
+                    return imageData;
+                } catch (error) {
+                    console.error('Image processing error:', error);
+                    return null;
+                }
             };
     
             // PAGE 1: Overview and Main Image
@@ -91,65 +123,17 @@ const BoatManagement = () => {
             pdf.text(boatData.name, 20, 30);
     
             // Main image
-            if (boatData.images && boatData.images.length > 0) {
-                try {
-                    const storageRef = ref(storage, boatData.images[0]);
-                    const imageUrl = await getDownloadURL(storageRef);
-                    
-                    // Add timestamp to bypass cache
-                    const timeStamp = new Date().getTime();
-                    const urlWithTimestamp = `${imageUrl}&t=${timeStamp}`;
-                    
-                    const response = await fetch(urlWithTimestamp, {
-                        mode: 'cors',
-                        headers: {
-                            'Origin': window.location.origin
-                        }
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    
-                    const blob = await response.blob();
-                    const blobUrl = URL.createObjectURL(blob);
-    
-                    await new Promise((resolve, reject) => {
-                        const img = new Image();
-                        img.onload = () => {
-                            const canvas = document.createElement('canvas');
-                            canvas.width = img.width;
-                            canvas.height = img.height;
-                            const ctx = canvas.getContext('2d');
-                            ctx.drawImage(img, 0, 0);
-                            pdf.addImage(
-                                canvas.toDataURL('image/jpeg', 0.95),
-                                'JPEG',
-                                20,
-                                47,
-                                170,
-                                81,
-                                undefined,
-                                'FAST'
-                            );
-                            URL.revokeObjectURL(blobUrl);
-                            resolve();
-                        };
-                        img.onerror = reject;
-                        img.src = blobUrl;
-                    });
-                } catch (error) {
-                    console.error('Main image error:', error);
+            if (boatData.images?.[0]) {
+                const mainImageData = await loadImage(boatData.images[0]);
+                if (mainImageData) {
+                    pdf.addImage(mainImageData, 'JPEG', 20, 47, 170, 81, undefined, 'FAST');
                 }
             }
     
             // Overview section
             pdf.setTextColor(...colors.text);
             pdf.setFontSize(16);
-            pdf.setFont("helvetica", "bold");
             pdf.text("OVERVIEW", 20, 150);
-            
-            // Blue underline
             pdf.setDrawColor(...colors.primary);
             pdf.setLineWidth(0.5);
             pdf.line(20, 153, 190, 153);
@@ -161,80 +145,34 @@ const BoatManagement = () => {
             pdf.text(splitDescription, 20, 165);
     
             // PAGE 2: Gallery
-            if (boatData.images && boatData.images.length > 1) {
+            if (boatData.images?.length > 1) {
                 pdf.addPage();
     
                 // Gallery header
                 pdf.setFillColor(...colors.primary);
                 pdf.rect(0, 0, 210, 40, 'F');
-                
                 pdf.setTextColor(...colors.white);
                 pdf.setFont("helvetica", "bold");
                 pdf.setFontSize(28);
                 pdf.text("GALLERY", 20, 30);
     
-                // Gallery layout settings
+                // Gallery layout
                 const imagesPerRow = 2;
                 const imageWidth = 85;
                 const imageHeight = 60;
                 const spacing = 10;
                 let currentY = 50;
     
-                // Process gallery images
+                // Load and place gallery images
                 for (let i = 1; i < boatData.images.length; i++) {
                     const row = Math.floor((i - 1) / imagesPerRow);
                     const col = (i - 1) % imagesPerRow;
                     const xPos = 20 + (col * (imageWidth + spacing));
                     const yPos = currentY + (row * (imageHeight + spacing));
     
-                    try {
-                        const storageRef = ref(storage, boatData.images[i]);
-                        const imageUrl = await getDownloadURL(storageRef);
-                        
-                        // Add timestamp to bypass cache
-                        const timeStamp = new Date().getTime();
-                        const urlWithTimestamp = `${imageUrl}&t=${timeStamp}`;
-                        
-                        const response = await fetch(urlWithTimestamp, {
-                            mode: 'cors',
-                            headers: {
-                                'Origin': window.location.origin
-                            }
-                        });
-                        
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-                        
-                        const blob = await response.blob();
-                        const blobUrl = URL.createObjectURL(blob);
-    
-                        await new Promise((resolve, reject) => {
-                            const img = new Image();
-                            img.onload = () => {
-                                const canvas = document.createElement('canvas');
-                                canvas.width = img.width;
-                                canvas.height = img.height;
-                                const ctx = canvas.getContext('2d');
-                                ctx.drawImage(img, 0, 0);
-                                pdf.addImage(
-                                    canvas.toDataURL('image/jpeg', 0.95),
-                                    'JPEG',
-                                    xPos,
-                                    yPos,
-                                    imageWidth,
-                                    imageHeight,
-                                    undefined,
-                                    'FAST'
-                                );
-                                URL.revokeObjectURL(blobUrl);
-                                resolve();
-                            };
-                            img.onerror = reject;
-                            img.src = blobUrl;
-                        });
-                    } catch (error) {
-                        console.error(`Gallery image ${i} error:`, error);
+                    const imageData = await loadImage(boatData.images[i]);
+                    if (imageData) {
+                        pdf.addImage(imageData, 'JPEG', xPos, yPos, imageWidth, imageHeight, undefined, 'FAST');
                     }
                 }
             }
@@ -245,13 +183,11 @@ const BoatManagement = () => {
             // Header
             pdf.setFillColor(...colors.primary);
             pdf.rect(0, 0, 210, 40, 'F');
-            
             pdf.setTextColor(...colors.white);
-            pdf.setFont("helvetica", "bold");
             pdf.setFontSize(28);
             pdf.text("SPECIFICATIONS", 20, 30);
     
-            // Create specifications table
+            // Specifications table
             const specs = [
                 ["Length", boatData.detailedSpecs?.Length],
                 ["Guests", boatData.detailedSpecs?.Guests],
@@ -285,7 +221,7 @@ const BoatManagement = () => {
                 margin: { left: 20, right: 20 }
             });
     
-            // Seasonal prices table
+            // Seasonal prices
             if (boatData.seasonalPrices) {
                 const priceData = Object.entries(boatData.seasonalPrices)
                     .filter(([, price]) => price)
@@ -320,7 +256,6 @@ const BoatManagement = () => {
             const pageCount = pdf.internal.getNumberOfPages();
             for (let i = 1; i <= pageCount; i++) {
                 pdf.setPage(i);
-                
                 pdf.setDrawColor(...colors.primary);
                 pdf.setLineWidth(0.1);
                 pdf.line(20, 280, 190, 280);
