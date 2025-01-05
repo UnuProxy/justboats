@@ -81,30 +81,31 @@ const BoatManagement = () => {
             // Helper function to safely load and process images
             const loadImage = async (imageRef) => {
                 try {
+                    // Get download URL from Firebase Storage
                     const storageRef = ref(storage, imageRef);
                     const url = await getDownloadURL(storageRef);
                     
-                    // Use XMLHttpRequest to bypass CORS issues
-                    const imageData = await new Promise((resolve, reject) => {
-                        const xhr = new XMLHttpRequest();
-                        xhr.onload = function() {
-                            const reader = new FileReader();
-                            reader.onloadend = function() {
-                                resolve(reader.result);
-                            };
-                            reader.readAsDataURL(xhr.response);
-                        };
-                        xhr.onerror = function() {
-                            reject(new Error('Failed to load image'));
-                        };
-                        xhr.open('GET', url);
-                        xhr.responseType = 'blob';
-                        xhr.send();
+                    // Convert URL to base64
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        mode: 'no-cors',
+                        cache: 'no-cache',
+                        headers: {
+                            'Accept': 'image/jpeg,image/png,*/*'
+                        }
                     });
-    
-                    return imageData;
+                    
+                    const blob = await response.blob();
+                    
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
                 } catch (error) {
                     console.error('Image processing error:', error);
+                    // Return a placeholder or default image data URL
                     return null;
                 }
             };
