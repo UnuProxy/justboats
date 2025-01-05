@@ -52,244 +52,328 @@ const BoatManagement = () => {
         navigate(`/edit-boat/${boatId}`);
     };
 
+   
+
+    
     const handleGeneratePdf = async (boatId) => {
-        setPdfLoading(prev => ({ ...prev, [boatId]: true }));
-        
-        try {
-            // Fetch boat data
-            const boatDoc = await getDoc(doc(db, 'boats', boatId));
-            if (!boatDoc.exists()) {
-                throw new Error("Boat data not found");
-            }
-            const boatData = boatDoc.data();
+      setPdfLoading(prev => ({ ...prev, [boatId]: true }));
     
-            // Initialize PDF
-            const pdf = new jsPDF({
-                orientation: 'portrait',
-                unit: 'mm',
-                format: 'a4'
-            });
-    
-            // Define colors
-            const colors = {
-                primary: [32, 149, 243],
-                secondary: [96, 125, 139],
-                text: [33, 33, 33],
-                white: [255, 255, 255]
-            };
-    
-            // Helper function to safely load and process images
-            const loadImage = async (imageRef) => {
-                try {
-                    const storageRef = ref(storage, imageRef);
-                    const url = await getDownloadURL(storageRef);
-                    
-                    // Use XMLHttpRequest to bypass CORS issues
-                    const imageData = await new Promise((resolve, reject) => {
-                        const xhr = new XMLHttpRequest();
-                        xhr.onload = function() {
-                            const reader = new FileReader();
-                            reader.onloadend = function() {
-                                resolve(reader.result);
-                            };
-                            reader.readAsDataURL(xhr.response);
-                        };
-                        xhr.onerror = function() {
-                            reject(new Error('Failed to load image'));
-                        };
-                        xhr.open('GET', url);
-                        xhr.responseType = 'blob';
-                        xhr.send();
-                    });
-    
-                    return imageData;
-                } catch (error) {
-                    console.error('Image processing error:', error);
-                    return null;
-                }
-            };
-    
-            // PAGE 1: Overview and Main Image
-            // Header bar
-            pdf.setFillColor(...colors.primary);
-            pdf.rect(0, 0, 210, 40, 'F');
-    
-            // Company name and boat name
-            pdf.setTextColor(...colors.white);
-            pdf.setFont("helvetica", "bold");
-            pdf.setFontSize(14);
-            pdf.text("LUXURY YACHTS", 20, 15);
-            pdf.setFontSize(28);
-            pdf.text(boatData.name, 20, 30);
-    
-            // Main image
-            if (boatData.images?.[0]) {
-                const mainImageData = await loadImage(boatData.images[0]);
-                if (mainImageData) {
-                    pdf.addImage(mainImageData, 'JPEG', 20, 47, 170, 81, undefined, 'FAST');
-                }
-            }
-    
-            // Overview section
-            pdf.setTextColor(...colors.text);
-            pdf.setFontSize(16);
-            pdf.text("OVERVIEW", 20, 150);
-            pdf.setDrawColor(...colors.primary);
-            pdf.setLineWidth(0.5);
-            pdf.line(20, 153, 190, 153);
-    
-            // Overview text
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(11);
-            const splitDescription = pdf.splitTextToSize(boatData.description || "", 170);
-            pdf.text(splitDescription, 20, 165);
-    
-            // PAGE 2: Gallery
-            if (boatData.images?.length > 1) {
-                pdf.addPage();
-    
-                // Gallery header
-                pdf.setFillColor(...colors.primary);
-                pdf.rect(0, 0, 210, 40, 'F');
-                pdf.setTextColor(...colors.white);
-                pdf.setFont("helvetica", "bold");
-                pdf.setFontSize(28);
-                pdf.text("GALLERY", 20, 30);
-    
-                // Gallery layout
-                const imagesPerRow = 2;
-                const imageWidth = 85;
-                const imageHeight = 60;
-                const spacing = 10;
-                let currentY = 50;
-    
-                // Load and place gallery images
-                for (let i = 1; i < boatData.images.length; i++) {
-                    const row = Math.floor((i - 1) / imagesPerRow);
-                    const col = (i - 1) % imagesPerRow;
-                    const xPos = 20 + (col * (imageWidth + spacing));
-                    const yPos = currentY + (row * (imageHeight + spacing));
-    
-                    const imageData = await loadImage(boatData.images[i]);
-                    if (imageData) {
-                        pdf.addImage(imageData, 'JPEG', xPos, yPos, imageWidth, imageHeight, undefined, 'FAST');
-                    }
-                }
-            }
-    
-            // PAGE 3: Specifications and Pricing
-            pdf.addPage();
-            
-            // Header
-            pdf.setFillColor(...colors.primary);
-            pdf.rect(0, 0, 210, 40, 'F');
-            pdf.setTextColor(...colors.white);
-            pdf.setFontSize(28);
-            pdf.text("SPECIFICATIONS", 20, 30);
-    
-            // Specifications table
-            const specs = [
-                ["Length", boatData.detailedSpecs?.Length],
-                ["Guests", boatData.detailedSpecs?.Guests],
-                ["Crew", boatData.detailedSpecs?.Crew],
-                ["Price", boatData.detailedSpecs?.Price],
-                ["Cruising Speed", boatData.detailedSpecs?.['Cruising Speed']],
-                ["Max Speed", boatData.detailedSpecs?.['Max Speed']],
-                ["Class", boatData.detailedSpecs?.Class],
-                ["Engine", boatData.detailedSpecs?.Engine]
-            ].filter(([, value]) => value);
-    
-            pdf.autoTable({
-                startY: 50,
-                head: [['Specification', 'Details']],
-                body: specs,
-                theme: 'grid',
-                headStyles: {
-                    fillColor: [...colors.primary],
-                    textColor: [...colors.white],
-                    fontSize: 12,
-                    fontStyle: 'bold'
-                },
-                styles: {
-                    fontSize: 10,
-                    cellPadding: 5
-                },
-                columnStyles: {
-                    0: { fontStyle: 'bold', cellWidth: 60 },
-                    1: { cellWidth: 110 }
-                },
-                margin: { left: 20, right: 20 }
-            });
-    
-            // Seasonal prices
-            if (boatData.seasonalPrices) {
-                const priceData = Object.entries(boatData.seasonalPrices)
-                    .filter(([, price]) => price)
-                    .map(([season, price]) => [season, price]);
-    
-                if (priceData.length > 0) {
-                    pdf.autoTable({
-                        startY: pdf.previousAutoTable.finalY + 20,
-                        head: [['Season', 'Rate']],
-                        body: priceData,
-                        theme: 'grid',
-                        headStyles: {
-                            fillColor: [...colors.secondary],
-                            textColor: [...colors.white],
-                            fontSize: 12,
-                            fontStyle: 'bold'
-                        },
-                        styles: {
-                            fontSize: 10,
-                            cellPadding: 5
-                        },
-                        columnStyles: {
-                            0: { fontStyle: 'bold', cellWidth: 60 },
-                            1: { cellWidth: 110 }
-                        },
-                        margin: { left: 20, right: 20 }
-                    });
-                }
-            }
-    
-            // Add footer to all pages
-            const pageCount = pdf.internal.getNumberOfPages();
-            for (let i = 1; i <= pageCount; i++) {
-                pdf.setPage(i);
-                pdf.setDrawColor(...colors.primary);
-                pdf.setLineWidth(0.1);
-                pdf.line(20, 280, 190, 280);
-                
-                pdf.setFont("helvetica", "normal");
-                pdf.setFontSize(8);
-                pdf.setTextColor(...colors.text);
-                
-                pdf.text(
-                    'For more information or to make a reservation, please contact us',
-                    pdf.internal.pageSize.width / 2,
-                    285,
-                    { align: 'center' }
-                );
-                
-                pdf.text(
-                    `Page ${i} of ${pageCount}`,
-                    pdf.internal.pageSize.width / 2,
-                    290,
-                    { align: 'center' }
-                );
-            }
-    
-            // Save PDF
-            const fileName = `${boatData.name.replace(/\s+/g, '-').toLowerCase()}-specification.pdf`;
-            pdf.save(fileName);
-    
-        } catch (error) {
-            console.error("PDF generation error:", error);
-            alert("Failed to generate PDF. Please try again.");
-        } finally {
-            setPdfLoading(prev => ({ ...prev, [boatId]: false }));
+      try {
+        // 1) Fetch boat data
+        const boatDoc = await getDoc(doc(db, 'boats', boatId));
+        if (!boatDoc.exists()) {
+          throw new Error("Boat data not found");
         }
+        const boatData = boatDoc.data();
+    
+        // 2) Initialise PDF (A4 portrait, minimal margins)
+        const pdf = new jsPDF({
+          orientation: 'portrait',
+          unit: 'mm',
+          format: 'a4'
+        });
+    
+        // Colour palette
+        const colors = {
+          deepBlue: [26, 61, 93], // #1A3D5D
+          white: [255, 255, 255],
+          charcoal: [50, 50, 50]
+        };
+    
+        // Helper to load images from storage
+        const loadImage = async (imageRef) => {
+          try {
+            const storageRef = ref(storage, imageRef);
+            const url = await getDownloadURL(storageRef);
+            const imageData = await new Promise((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              xhr.onload = function() {
+                const reader = new FileReader();
+                reader.onloadend = function() {
+                  resolve(reader.result);
+                };
+                reader.readAsDataURL(xhr.response);
+              };
+              xhr.onerror = function() {
+                reject(new Error('Failed to load image'));
+              };
+              xhr.open('GET', url);
+              xhr.responseType = 'blob';
+              xhr.send();
+            });
+            return imageData;
+          } catch (error) {
+            console.error('Image processing error:', error);
+            return null;
+          }
+        };
+    
+                // --------------------
+        // PAGE 1: OVERVIEW
+        // --------------------
+        pdf.setFont('helvetica', 'normal');
+
+        // 1) Fill A4 background in deep blue
+        pdf.setFillColor(...colors.deepBlue);
+        pdf.rect(0, 0, 210, 297, 'F');
+
+        // 2) Large, centred boat name in white (uppercase, 22pt)
+        pdf.setTextColor(...colors.white);
+        pdf.setFontSize(22);
+        pdf.text(
+        (boatData.name || "BOAT").toUpperCase(),
+        105, // center horizontally
+        25,  // y offset
+        { align: 'center' }
+        );
+
+        // 3) Main image – enlarged
+        const imageWidth = 180;
+        const imageHeight = 110;
+        let imageX = (210 - imageWidth) / 2;  // center horizontally
+        let imageY = 35;
+
+        if (boatData.images?.[0]) {
+        const mainImageData = await loadImage(boatData.images[0]);
+        if (mainImageData) {
+            pdf.addImage(
+            mainImageData,
+            'JPEG',
+            imageX,
+            imageY,
+            imageWidth,
+            imageHeight,
+            undefined,
+            'FAST'
+            );
+            imageY += imageHeight + 15; // spacing below image
+        }
+        }
+
+        // 4) "OVERVIEW" heading (white, uppercase, 16pt)
+        pdf.setFontSize(16);
+        pdf.setTextColor(...colors.white);
+        pdf.text("OVERVIEW", 20, imageY);
+        imageY += 8;
+
+        // 5) Description text (white, 12–13pt for improved legibility)
+        pdf.setFontSize(12);
+        if (boatData.description) {
+        const maxWidth = 170; 
+        const wrappedText = pdf.splitTextToSize(boatData.description, maxWidth);
+        pdf.text(wrappedText, 20, imageY);
+        imageY += wrappedText.length * 5 + 10;
+        }
+
+        // 6) Optional: Key Features / Bullet Points
+        // This fills space and highlights what makes the boat special.
+        // Adjust these bullets to show unique selling points.
+        const keyFeatures = [
+        "High-speed cruising for thrill-seekers",
+        "Luxurious interior with modern amenities",
+        "Professional and experienced crew",
+        "Spacious decks for sunbathing and socialising"
+        ];
+
+        // Add a subheading
+        pdf.setFontSize(16);
+        pdf.setTextColor(...colors.white);
+        pdf.text("KEY FEATURES", 20, imageY);
+        imageY += 8;
+
+        // List the bullet points (white, 12pt)
+        pdf.setFontSize(12);
+        pdf.setTextColor(...colors.white);
+
+        keyFeatures.forEach((feature) => {
+        // A simple bullet can be an asterisk, dash, or a nicer shape if using custom fonts.
+        // We'll do a short bullet '•'.
+        pdf.text(`•  ${feature}`, 25, imageY);
+        imageY += 6;  
+        });
+
+        // 7) Optional: Contact or CTA at the bottom
+        // If you still have space, add a "Contact us" section or a call-to-action.
+        imageY += 10; // some spacing
+        pdf.setFontSize(14);
+        pdf.setTextColor(...colors.white);
+        pdf.text("Ready to set sail?", 20, imageY);
+        imageY += 8;
+
+        pdf.setFontSize(12);
+        pdf.text(
+        "Book your unforgettable experience today! Call us at +XX XXXX XXXX or visit example.com",
+        20,
+        imageY
+        );
+
+    
+        // --------------------
+        // PAGE 2: GALLERY (since people like seeing images first)
+        // --------------------
+        if (boatData.images && boatData.images.length > 1) {
+          pdf.addPage();
+    
+          // Title bar
+          pdf.setFillColor(...colors.deepBlue);
+          pdf.rect(0, 0, 210, 25, 'F');
+    
+          pdf.setFontSize(16);
+          pdf.setTextColor(...colors.white);
+          pdf.text("GALLERY", 10, 15);
+    
+          // Gallery images
+          pdf.setFontSize(11);
+          pdf.setTextColor(...colors.charcoal);
+    
+          let pageWidth = 210;
+          let pageHeight = 297;
+          let margin = 10;
+          let imagesPerRow = 2;
+          let maxImageWidth = (pageWidth - margin * 2 - 5) / imagesPerRow;
+          let maxImageHeight = 70; 
+    
+          let xPos = margin;
+          let yPosImg = 30;
+    
+          // images.slice(1) because the first was used on the Overview page
+          const galleryImages = boatData.images.slice(1);
+    
+          for (let i = 0; i < galleryImages.length; i++) {
+            const imageData = await loadImage(galleryImages[i]);
+            if (imageData) {
+              pdf.addImage(imageData, 'JPEG', xPos, yPosImg, maxImageWidth, maxImageHeight, undefined, 'FAST');
+            }
+            // Move xPos for next image
+            xPos += maxImageWidth + 5;
+    
+            // If we've placed imagesPerRow images, wrap to next row
+            if ((i + 1) % imagesPerRow === 0) {
+              xPos = margin;
+              yPosImg += maxImageHeight + 5;
+            }
+    
+            // If we are near the bottom, add another page
+            if (yPosImg + maxImageHeight + 20 > pageHeight) {
+              pdf.addPage();
+              pdf.setFillColor(...colors.deepBlue);
+              pdf.rect(0, 0, 210, 25, 'F');
+              pdf.setFontSize(16);
+              pdf.setTextColor(...colors.white);
+              pdf.text("GALLERY", 10, 15);
+    
+              xPos = margin;
+              yPosImg = 30;
+            }
+          }
+        }
+    
+        // --------------------
+        // PAGE 3: SPECIFICATIONS
+        // --------------------
+        pdf.addPage();
+        // Title bar
+        pdf.setFillColor(...colors.deepBlue);
+        pdf.rect(0, 0, 210, 25, 'F');
+    
+        pdf.setFontSize(16);
+        pdf.setTextColor(...colors.white);
+        pdf.text("SPECIFICATIONS", 10, 15);
+    
+        // Collect specifications
+        // We'll put them in a consistent table to match the Seasonal Prices design
+        pdf.setFontSize(11);
+        pdf.setTextColor(...colors.charcoal);
+    
+        // Specs array: label, value
+        // We'll unify everything inside a single table to maintain consistency
+        const specsData = [
+          ["Class", boatData.detailedSpecs?.Class || boatData.Class || ""],
+          ["Length", boatData.detailedSpecs?.Length || boatData.Length || ""],
+          ["Beam", boatData.detailedSpecs?.Beam || ""],
+          ["Guests", boatData.detailedSpecs?.Guests || boatData.Guests || ""],
+          ["Cabins", boatData.detailedSpecs?.Cabins || ""],
+          ["Crew", boatData.detailedSpecs?.Crew || boatData.Crew || ""],
+          ["Cruising Area", boatData.detailedSpecs?.["Cruising Area"] || boatData["Cruising Area"] || ""],
+          ["Cruising Speed", boatData.detailedSpecs?.["Cruising Speed"] || boatData["Cruising Speed"] || ""],
+          ["Engine", boatData.detailedSpecs?.Engine || boatData.Engine || ""],
+          ["HP", boatData.detailedSpecs?.HP || boatData.HP || ""],
+          ["Max Speed", boatData.detailedSpecs?.["Max Speed"] || boatData["Max Speed"] || ""],
+          ["Price", boatData.detailedSpecs?.Price || boatData.Price || ""]
+        ].filter(([, val]) => val); // Only rows with non-empty values
+    
+        // Convert to the format for autoTable
+        const specsTableBody = specsData.map(([label, value]) => ([
+          label,
+          value
+        ]));
+    
+        let startY = 35; 
+        pdf.autoTable({
+          startY,
+          head: [['Specification', 'Value']],
+          body: specsTableBody,
+          theme: 'grid',
+          styles: {
+            cellPadding: 2,
+            fontSize: 10,
+            textColor: colors.charcoal
+          },
+          headStyles: {
+            fillColor: colors.deepBlue,
+            textColor: colors.white
+          },
+          margin: { left: 10, right: 10 }
+        });
+    
+        // Move below the specs table
+        startY = pdf.autoTable.previous.finalY + 10;
+    
+        // If Seasonal Prices exist, show them in a separate table 
+        if (boatData.seasonalPrices) {
+          // Title
+          pdf.setFontSize(12);
+          pdf.setTextColor(...colors.deepBlue);
+          pdf.text("SEASONAL PRICES", 10, startY);
+          startY += 5;
+    
+          // Convert seasonalPrices into table format
+          const priceTableData = Object.entries(boatData.seasonalPrices).map(([season, price]) => [season, price]);
+    
+          pdf.setFontSize(10);
+          pdf.setTextColor(...colors.charcoal);
+          pdf.autoTable({
+            startY,
+            head: [['Season', 'Price']],
+            body: priceTableData,
+            theme: 'grid',
+            styles: {
+              fontSize: 10,
+              textColor: colors.charcoal
+            },
+            headStyles: {
+              fillColor: colors.deepBlue,
+              textColor: colors.white
+            },
+            margin: { left: 10, right: 10 }
+          });
+        }
+    
+        // Finally, save
+        const fileName = (boatData.name || "boat")
+          .replace(/\s+/g, '-')
+          .toLowerCase() + "-details.pdf";
+        pdf.save(fileName);
+    
+      } catch (error) {
+        console.error("PDF generation error:", error);
+        alert("Failed to generate PDF. Please try again.");
+      } finally {
+        setPdfLoading(prev => ({ ...prev, [boatId]: false }));
+      }
     };
+    
+
 
     if (loading) {
         return (
