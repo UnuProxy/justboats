@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3, User, Wallet, MessageSquare, CreditCard, Euro, Ship } from 'lucide-react';
+import { Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3, User, Wallet, CreditCard, Euro, Ship } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router';
 
@@ -40,21 +40,21 @@ const Sidebar = () => {
 
     const navigationItems = [
         {
+            name: 'Dashboard',
+            icon: React.createElement(BarChart3, { className: 'mr-3', size: 20 }),
+            path: '/',
+            allowed: true
+        },
+        {
             name: 'Upcoming Bookings',
             icon: React.createElement(Calendar, { className: 'mr-3', size: 20 }),
-            path: '/',
+            path: '/bookings',
             allowed: true
         },
         {
             name: 'Add New Booking',
             icon: React.createElement(PlusCircle, { className: 'mr-3', size: 20 }),
             path: '/add-booking',
-            allowed: true
-        },
-        {
-            name: 'Booking Communications',
-            icon: React.createElement(MessageSquare, { className: 'mr-3', size: 20 }),
-            path: '/booking-communications',
             allowed: true
         },
         {
@@ -98,10 +98,10 @@ const Sidebar = () => {
             icon: React.createElement(Euro, { className: 'mr-3', size: 20 }),
             path: '/expenses',
             allowed: true
-           },
-           {
+        },
+        {
             name: 'Boat Fleet',
-            icon: React.createElement(Ship, { className: 'mr-3', size: 20 }), // Using Ship icon instead of Anchor
+            icon: React.createElement(Ship, { className: 'mr-3', size: 20 }), 
             path: '/boats',
             allowed: true
         },
@@ -145,7 +145,7 @@ const Sidebar = () => {
                 React.createElement(
                     'div',
                     { className: 'mt-4' },
-                    React.createElement('h1', { className: 'text-xl font-bold' }, 'JustBoats'),
+                    React.createElement('h1', { className: 'text-xl font-bold' }, 'Just Enjoy Ibiza'),
                     React.createElement(
                         'div',
                         { className: 'mt-4 flex items-center space-x-2 p-2 rounded-lg bg-gray-700' },
