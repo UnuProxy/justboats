@@ -8,7 +8,7 @@ import {
   Users, 
   PlusCircle, 
   List, 
-  DollarSign 
+  Euro 
 } from 'lucide-react';
 
 function Dashboard() {
@@ -86,14 +86,26 @@ function Dashboard() {
   }, []);
 
   const quickActions = [
-    { label: "New Booking", icon: PlusCircle, action: () => navigate("/add-booking") },
-    { label: "View Bookings", icon: List, action: () => navigate("/") },
+    { 
+      label: "New Booking", 
+      icon: PlusCircle, 
+      action: () => navigate("/add-booking"),
+      bgColor: "bg-blue-100 hover:bg-blue-200",
+      iconColor: "text-blue-600"
+    },
+    { 
+      label: "View Bookings", 
+      icon: List, 
+      action: () => navigate("/bookings"),
+      bgColor: "bg-green-100 hover:bg-green-200",
+      iconColor: "text-green-600"
+    },
   ];
 
   if (loading) {
     return (
       <div className="w-full h-full flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
       </div>
     );
   }
@@ -101,13 +113,13 @@ function Dashboard() {
   return (
     <div className="w-full h-full p-4 overflow-x-hidden">
       <div className="max-w-full mx-auto space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Analytics Dashboard</h1>
-          <p className="text-gray-500">Welcome back! Here&apos;s what&apos;s happening.</p>
-        </div>
+      <div className="mb-8">
+  <h1 className="text-3xl font-bold text-gray-900">Welcome to Just Enjoy Ibiza</h1>
+  <p className="text-gray-600 mt-2">Here&apos;s your business overview</p>
+</div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          <div className="bg-white rounded-lg shadow p-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+          <div className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow p-6">
             <div className="flex items-center">
               <div className="bg-blue-500 p-3 rounded-lg">
                 <Ship className="w-6 h-6 text-white" />
@@ -119,7 +131,7 @@ function Dashboard() {
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow p-6">
             <div className="flex items-center">
               <div className="bg-green-500 p-3 rounded-lg">
                 <Calendar className="w-6 h-6 text-white" />
@@ -131,7 +143,7 @@ function Dashboard() {
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow p-6">
             <div className="flex items-center">
               <div className="bg-purple-500 p-3 rounded-lg">
                 <Users className="w-6 h-6 text-white" />
@@ -143,30 +155,31 @@ function Dashboard() {
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow p-6">
             <div className="flex items-center">
               <div className="bg-yellow-500 p-3 rounded-lg">
-                <DollarSign className="w-6 h-6 text-white" />
+                <Euro className="w-6 h-6 text-white" />
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Total Revenue</p>
-                <p className="text-2xl font-semibold text-gray-900">&euro;{stats.totalRevenue.toLocaleString()}</p>
+                <p className="text-2xl font-semibold text-gray-900">€{stats.totalRevenue.toLocaleString()}</p>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-4">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h2>
+        <div className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow">
+          <div className="p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Quick Actions</h2>
             <div className="grid grid-cols-2 gap-4">
               {quickActions.map((action) => (
                 <button
                   key={action.label}
                   onClick={action.action}
-                  className="flex flex-col items-center justify-center p-4 border rounded-lg hover:bg-gray-50 transition-colors"
+                  className={`flex flex-col items-center justify-center p-6 rounded-lg transition-all 
+                    ${action.bgColor} transform hover:scale-[1.02]`}
                 >
-                  <action.icon className="w-6 h-6 text-gray-600 mb-2" />
+                  <action.icon className={`w-8 h-8 ${action.iconColor} mb-3`} />
                   <span className="text-sm font-medium text-gray-900">{action.label}</span>
                 </button>
               ))}
@@ -174,23 +187,23 @@ function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-4">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Recent Bookings</h2>
+        <div className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow">
+          <div className="p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Recent Bookings</h2>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead>
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Boat</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Boat</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-gray-200">
                   {recentBookings.map((booking) => (
-                    <tr key={booking.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <tr key={booking.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
                         {booking.clientDetails.name}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -200,7 +213,7 @@ function Dashboard() {
                         {new Date(booking.bookingDetails.date).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                        <span className="px-3 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
                           {booking.pricing.paymentStatus}
                         </span>
                       </td>

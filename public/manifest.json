@@ -37,7 +37,7 @@
       "purpose": "maskable"
     },
     {
-      "src": "/icon-512x512.png",
+      "src": "public/JustEnjoyBookings.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any"
