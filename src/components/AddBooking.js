@@ -4,7 +4,8 @@ import { db } from '../firebase/firebaseConfig.js';
 import { Users, Ship, Euro, MapPin } from "lucide-react";
 import { getAuth } from 'firebase/auth';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { sendBookingEmail } from '../services/emailService';
+import GoogleAutocomplete from "./GoogleAutocomplete";
+
 
 function AddBooking() {
   const [activeStep, setActiveStep] = useState(1);
@@ -173,24 +174,59 @@ function AddBooking() {
 
   const handleInputChange = (section, field, value) => {
     setFormData((prev) => {
-      if (section === 'clientDetails') {
+        if (typeof value === 'string') {
+            value = value.trim(); // Trim only if it's a string
+        }
+
+        // Handle client details
+        if (section === 'clientDetails') {
+            return {
+                ...prev,
+                clientDetails: {
+                    ...prev.clientDetails,
+                    [field]: value || "", // Ensure no undefined values
+                },
+            };
+        }
+
+        // Handle booking details
+        if (section === 'bookingDetails') {
+            return {
+                ...prev,
+                bookingDetails: {
+                    ...prev.bookingDetails,
+                    [field]: value || "", // Ensure no undefined values
+                },
+            };
+        }
+
+        // Handle transfer details (nested structure)
+        if (section === 'transfer') {
+            return {
+                ...prev,
+                transfer: {
+                    ...prev.transfer,
+                    [field]: {
+                        ...prev.transfer[field], // Maintain existing sub-fields
+                        ...value, // Update the changed value (expects an object)
+                    },
+                },
+            };
+        }
+
+        // Default case for other sections
         return {
-          ...prev,
-          clientDetails: {
-            ...prev.clientDetails,
-            [field]: value === "" ? "" : value,
-          },
+            ...prev,
+            [section]: {
+                ...prev[section],
+                [field]: value || "", // Ensure no undefined values
+            },
         };
-      }
-      return {
-        ...prev,
-        [section]: {
-          ...prev[section],
-          [field]: value === "" ? "" : value,
-        },
-      };
     });
-  };
+};
+
+  
+  
 
   const renderStep1 = () => (
     <div className="space-y-4">
@@ -295,18 +331,15 @@ function AddBooking() {
   );
 
   const renderStep2 = () => (
-    // ... (rest of your renderStep2 function - no changes needed)
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
         <Ship className="w-5 h-5 text-gray-600" />
         <h3 className="text-lg font-semibold">Boat Details</h3>
       </div>
-
+  
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Boat Company
-          </label>
+          <label className="block text-sm font-medium text-gray-700">Boat Company</label>
           <input
             type="text"
             className="mt-1 w-full p-2 border rounded"
@@ -316,11 +349,9 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Boat Name
-          </label>
+          <label className="block text-sm font-medium text-gray-700">Boat Name</label>
           <input
             type="text"
             className="mt-1 w-full p-2 border rounded"
@@ -330,11 +361,9 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Number of Passengers
-          </label>
+          <label className="block text-sm font-medium text-gray-700">Number of Passengers</label>
           <input
             type="number"
             className="mt-1 w-full p-2 border rounded"
@@ -344,7 +373,7 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
           <label className="block text-sm font-medium text-gray-700">Date</label>
           <input
@@ -356,11 +385,9 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Start Time
-          </label>
+          <label className="block text-sm font-medium text-gray-700">Start Time</label>
           <input
             type="time"
             className="mt-1 w-full p-2 border rounded"
@@ -370,11 +397,9 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            End Time
-          </label>
+          <label className="block text-sm font-medium text-gray-700">End Time</label>
           <input
             type="time"
             className="mt-1 w-full p-2 border rounded"
@@ -387,9 +412,9 @@ function AddBooking() {
       </div>
     </div>
   );
+  
 
   const renderStep3 = () => (
-    // ... (rest of your renderStep3 function - no changes needed)
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
         <Euro className="w-5 h-5 text-gray-600" />
@@ -487,7 +512,7 @@ function AddBooking() {
         <MapPin className="w-5 h-5 text-gray-600" />
         <h3 className="text-lg font-semibold">Transfer & Additional Details</h3>
       </div>
-
+  
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700">
@@ -504,9 +529,10 @@ function AddBooking() {
             <option value="true">Yes</option>
           </select>
         </div>
-
+  
         {formData.transfer.required && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Pickup Details */}
             <div>
               <h4 className="font-medium mb-2">Pickup Details</h4>
               <div className="space-y-2">
@@ -525,21 +551,22 @@ function AddBooking() {
                   <option value="Airport">Airport</option>
                   <option value="Other">Other</option>
                 </select>
-                <input
-                  type="text"
-                  placeholder="Address details"
-                  className="w-full p-2 border rounded"
-                  value={formData.transfer.pickup.address}
-                  onChange={(e) =>
+  
+                <GoogleAutocomplete
+                  placeholder="Search Pickup Address"
+                  onPlaceSelected={(place) =>
                     handleInputChange("transfer", "pickup", {
                       ...formData.transfer.pickup,
-                      address: e.target.value,
+                      address: place.address,
+                      latitude: place.latitude,
+                      longitude: place.longitude,
                     })
                   }
                 />
               </div>
             </div>
-
+  
+            {/* Drop-off Details */}
             <div>
               <h4 className="font-medium mb-2">Drop-off Details</h4>
               <div className="space-y-2">
@@ -558,15 +585,15 @@ function AddBooking() {
                   <option value="Hotel">Hotel</option>
                   <option value="Other">Other</option>
                 </select>
-                <input
-                  type="text"
-                  placeholder="Address details"
-                  className="w-full p-2 border rounded"
-                  value={formData.transfer.dropoff.address}
-                  onChange={(e) =>
+  
+                <GoogleAutocomplete
+                  placeholder="Search Drop-off Address"
+                  onPlaceSelected={(place) =>
                     handleInputChange("transfer", "dropoff", {
                       ...formData.transfer.dropoff,
-                      address: e.target.value,
+                      address: place.address,
+                      latitude: place.latitude,
+                      longitude: place.longitude,
                     })
                   }
                 />
@@ -574,7 +601,7 @@ function AddBooking() {
             </div>
           </div>
         )}
-
+  
         <div className="mt-6">
           <label className="block text-sm font-medium text-gray-700">
             Additional Notes
@@ -587,7 +614,7 @@ function AddBooking() {
             placeholder="Any special requirements or notes..."
           />
         </div>
-
+  
         <div className="mt-6">
           <label className="block text-sm font-medium text-gray-700">
             Restaurant Name (if applicable)
@@ -603,6 +630,7 @@ function AddBooking() {
       </div>
     </div>
   );
+  
   const validateForm = () => {
     switch (activeStep) {
       case 1:
@@ -669,171 +697,176 @@ function AddBooking() {
     }
     return true;
   };
-
+  
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (activeStep !== 4 || !validateForm()) return;
 
     const auth = getAuth();
     const user = auth.currentUser;
-    const createdByInfo = user ? {
-      uid: user.uid,
-      displayName: user.displayName,
-      email: user.email,
-    } : null;
+    const createdByInfo = user
+        ? {
+              uid: user.uid,
+              displayName: user.displayName,
+              email: user.email,
+          }
+        : null;
 
     try {
-      setLoading(true);
-      const bookingData = {
-        ...formData,
-        clientSource: formData.clientSource || "",
-        clientType: formData.clientType || "",
-        selectedPartner: formData.selectedPartner || "",
-        clientDetails: {
-          name: formData.clientDetails.name || "",
-          phone: formData.clientDetails.phone || "",
-          email: formData.clientDetails.email || "",
-          passportNumber: formData.clientDetails.passportNumber || "",
-        },
-        bookingDetails: {
-          boatCompany: formData.bookingDetails.boatCompany || "",
-          boatName: formData.bookingDetails.boatName || "",
-          passengers: parseInt(formData.bookingDetails.passengers || 0, 10),
-          date: formData.bookingDetails.date || "",
-          startTime: formData.bookingDetails.startTime || "",
-          endTime: formData.bookingDetails.endTime || "",
-        },
-        pricing: {
-          basePrice: parseFloat(formData.pricing.basePrice || 0),
-          discount: parseFloat(formData.pricing.discount || 0),
-          finalPrice: parseFloat(formData.pricing.finalPrice || 0),
-          deposit: parseFloat(formData.pricing.deposit || 0),
-          remainingPayment: parseFloat(formData.pricing.remainingPayment || 0),
-          paymentStatus: formData.pricing.paymentStatus || "No Payment",
-        },
-        transfer: {
-          required: formData.transfer.required || false,
-          pickup: {
-            location: formData.transfer.pickup.location || "",
-            address: formData.transfer.pickup.address || "",
-          },
-          dropoff: {
-            location: formData.transfer.dropoff.location || "",
-            address: formData.transfer.dropoff.address || "",
-          },
-        },
-        notes: formData.notes || "",
-        createdAt: new Date().toISOString(),
-        lastUpdated: new Date().toISOString(),
-        status: "active",
-        createdBy: createdByInfo,
-        restaurantName: restaurantName,
-      };
+        setLoading(true);
 
-      let clientId = null;
-      if (formData.clientType === "Direct" || ["Hotel", "Collaborator"].includes(formData.clientType)) {
-        const clientsRef = collection(db, "clients");
-      
-        // First try exact email match
-        let existingClientQuery = query(
-          clientsRef,
-          where("email", "==", formData.clientDetails.email)
-        );
-        let existingClientSnapshot = await getDocs(existingClientQuery);
-      
-        if (existingClientSnapshot.empty) {
-          // If no email match, try phone match
-          existingClientQuery = query(
-            clientsRef,
-            where("phone", "==", formData.clientDetails.phone)
-          );
-          existingClientSnapshot = await getDocs(existingClientQuery);
-        }
-      
-        if (!existingClientSnapshot.empty) {
-          // Client exists - update their details if needed
-          clientId = existingClientSnapshot.docs[0].id;
-          
-          // Update existing client with any new information
-          await updateDoc(doc(db, "clients", clientId), {
-            name: formData.clientDetails.name,
-            email: formData.clientDetails.email,
-            phone: formData.clientDetails.phone,
-            passportNumber: formData.clientDetails.passportNumber,
-            lastUpdated: new Date().toISOString()
-          });
-          
-          console.log("Updated existing client with ID:", clientId);
-        } else {
-          // No existing client, create a new one
-          let partnerDetails = null;
-          if (["Hotel", "Collaborator"].includes(formData.clientType) && formData.selectedPartner) {
-            const selectedPartner = partners.find(p => p.id === formData.selectedPartner);
-            if (selectedPartner) {
-              partnerDetails = {
-                id: selectedPartner.id,
-                name: selectedPartner.name,
-              };
-            }
-          }
-      
-          const clientData = {
-            name: formData.clientDetails.name,
-            email: formData.clientDetails.email,
-            phone: formData.clientDetails.phone,
-            passportNumber: formData.clientDetails.passportNumber,
-            source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
-            clientType: formData.clientType,
-            hotelName: formData.clientType === "Hotel" ? partnerDetails?.name : null,
-            collaboratorName: formData.clientType === "Collaborator" ? partnerDetails?.name : null,
-            partnerName: partnerDetails?.name || null,
-            partnerId: partnerDetails?.id || null,
+        const bookingData = {
+            clientType: formData.clientType || "",
+            selectedPartner: formData.selectedPartner || "",
+            clientSource: formData.clientSource || "",
+            clientDetails: {
+                name: formData.clientDetails.name || "",
+                phone: formData.clientDetails.phone || "",
+                email: formData.clientDetails.email || "",
+                passportNumber: formData.clientDetails.passportNumber || "",
+            },
+            bookingDetails: {
+                boatCompany: formData.bookingDetails.boatCompany || "",
+                boatName: formData.bookingDetails.boatName || "",
+                passengers: formData.bookingDetails.passengers || "",
+                date: formData.bookingDetails.date || "",
+                startTime: formData.bookingDetails.startTime || "",
+                endTime: formData.bookingDetails.endTime || "",
+                transferAddress: formData.transfer.required
+                    ? {
+                          pickup: formData.transfer.pickup || {},
+                          dropoff: formData.transfer.dropoff || {},
+                      }
+                    : null,
+            },
+            pricing: {
+                basePrice: parseFloat(formData.pricing.basePrice || 0),
+                discount: parseFloat(formData.pricing.discount || 0),
+                finalPrice: parseFloat(formData.pricing.finalPrice || 0),
+                deposit: parseFloat(formData.pricing.deposit || 0),
+                remainingPayment: parseFloat(formData.pricing.remainingPayment || 0),
+                paymentStatus: formData.pricing.paymentStatus || "No Payment",
+            },
+            transfer: formData.transfer || {},
+            notes: formData.notes || "",
             createdAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString(),
+            status: "active",
             createdBy: createdByInfo,
-            bookings: [],
-            totalBookings: 1,
-            totalSpent: bookingData.pricing.finalPrice
-          };
-          const clientDoc = await addDoc(clientsRef, clientData);
-          clientId = clientDoc.id;
+            restaurantName: restaurantName || "",
+        };
+
+        let clientId = null;
+        if (
+            formData.clientType === "Direct" ||
+            ["Hotel", "Collaborator"].includes(formData.clientType)
+        ) {
+            const clientsRef = collection(db, "clients");
+
+            let existingClientQuery = query(
+                clientsRef,
+                where("email", "==", formData.clientDetails.email)
+            );
+            let existingClientSnapshot = await getDocs(existingClientQuery);
+
+            if (existingClientSnapshot.empty) {
+                existingClientQuery = query(
+                    clientsRef,
+                    where("phone", "==", formData.clientDetails.phone)
+                );
+                existingClientSnapshot = await getDocs(existingClientQuery);
+            }
+
+            if (!existingClientSnapshot.empty) {
+                clientId = existingClientSnapshot.docs[0].id;
+
+                await updateDoc(doc(db, "clients", clientId), {
+                    name: formData.clientDetails.name,
+                    email: formData.clientDetails.email,
+                    phone: formData.clientDetails.phone,
+                    passportNumber: formData.clientDetails.passportNumber,
+                    lastUpdated: new Date().toISOString(),
+                });
+
+                console.log("Updated existing client with ID:", clientId);
+            } else {
+                const clientData = {
+                    name: formData.clientDetails.name,
+                    email: formData.clientDetails.email,
+                    phone: formData.clientDetails.phone,
+                    passportNumber: formData.clientDetails.passportNumber,
+                    source:
+                        formData.clientType === "Direct"
+                            ? formData.clientSource
+                            : formData.clientType,
+                    createdAt: new Date().toISOString(),
+                    createdBy: createdByInfo,
+                    bookings: [],
+                    totalBookings: 1,
+                    totalSpent: bookingData.pricing.finalPrice,
+                };
+
+                const clientDoc = await addDoc(clientsRef, clientData);
+                clientId = clientDoc.id;
+            }
+            bookingData.clientId = clientId;
         }
-        bookingData.clientId = clientId;
-      }
 
-      const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
+        console.log("Full Booking Data:", JSON.stringify(bookingData, null, 2));
 
-      try {
-        await sendBookingEmail(bookingData);
-        console.log('Confirmation email sent successfully');
-      } catch (emailError) {
-        console.error('Error sending confirmation email:', emailError);
-        // Continue with the booking process even if email fails
-      }
-      if (formData.clientType === "Direct") {
-        await updateDoc(doc(db, "clients", bookingData.clientId), {
-          bookings: arrayUnion(bookingRef.id)
+        const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
+        console.log("Booking created with ID:", bookingRef.id);
+
+        if (formData.clientType === "Direct") {
+            await updateDoc(doc(db, "clients", bookingData.clientId), {
+                bookings: arrayUnion(bookingRef.id),
+            });
+        }
+
+        alert("Booking saved successfully");
+        setFormData({
+            clientType: "",
+            selectedPartner: "",
+            clientSource: "",
+            clientDetails: {
+                name: "",
+                phone: "",
+                email: "",
+                passportNumber: "",
+            },
+            bookingDetails: {
+                boatCompany: "",
+                boatName: "",
+                passengers: "",
+                date: "",
+                startTime: "",
+                endTime: "",
+            },
+            pricing: {
+                basePrice: 0,
+                discount: 0,
+                finalPrice: 0,
+                deposit: 0,
+                remainingPayment: 0,
+                paymentStatus: "No Payment",
+            },
+            transfer: {
+                required: false,
+                pickup: { location: "", address: "" },
+                dropoff: { location: "", address: "" },
+            },
+            notes: "",
         });
-      }
-
-      alert("Booking saved successfully and confirmation email queued!");
-      setFormData({
-        clientType: "",
-        selectedPartner: "",
-        clientSource: "",
-        clientDetails: { name: "", phone: "", email: "", passportNumber: "" },
-        bookingDetails: { boatCompany: "", boatName: "", passengers: "", date: "", startTime: "", endTime: "" },
-        pricing: { basePrice: 0, discount: 0, finalPrice: 0, deposit: 0, remainingPayment: 0, paymentStatus: "No Payment" },
-        transfer: { required: false, pickup: { location: "", address: "" }, dropoff: { location: "", address: "" } },
-        notes: "",
-      });
-      setActiveStep(1);
+        setActiveStep(1);
     } catch (error) {
-      console.error("Error saving booking:", error);
-      alert("Error saving booking. Please try again.");
+        console.error("Error saving booking:", error);
+        alert("Error saving booking. Please try again.");
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  };
+};
+
+
 
   return (
     <div className="min-h-screen bg-gray-50 p-2 sm:p-6">

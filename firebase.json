@@ -1,6 +1,6 @@
 {
   "functions": {
-    "source": "emailfunctions",
+    "source": "functions",
     "ignore": [
       "node_modules",
       ".git",
@@ -43,4 +43,3 @@
     }
   }
 }
-

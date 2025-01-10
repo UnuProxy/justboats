@@ -4,6 +4,8 @@
   "private": true,
   "dependencies": {
     "@babel/runtime": "^7.26.0",
+    "@googlemaps/js-api-loader": "^1.16.8",
+    "@react-google-maps/api": "^2.20.5",
     "@sendgrid/mail": "^8.1.4",
     "d3-array": "^3.2.4",
     "d3-interpolate": "^3.0.1",

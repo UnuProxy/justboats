@@ -1,9 +1,10 @@
-// src/services/emailService.js
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 
 export const sendBookingEmail = async (bookingData) => {
   try {
+    console.log('Starting sendBookingEmail for:', bookingData.clientDetails.email);
+    
     // Create email data object
     const emailData = {
       to: bookingData.clientDetails.email,
@@ -27,18 +28,27 @@ export const sendBookingEmail = async (bookingData) => {
       }
     };
 
-    // Add to mail queue collection in Firestore
-    await addDoc(collection(db, 'mail'), emailData);
+    console.log('Prepared email data:', emailData);
 
-    return { success: true };
+    // Add to mail queue collection in Firestore
+    const docRef = await addDoc(collection(db, 'mail'), emailData);
+    console.log('Successfully added email to queue with ID:', docRef.id);
+
+    return { success: true, emailId: docRef.id };
   } catch (error) {
-    console.error('Error queueing email:', error);
+    console.error('Error in sendBookingEmail:', {
+      error: error.message,
+      stack: error.stack,
+      bookingEmail: bookingData.clientDetails.email
+    });
     throw error;
   }
 };
 
 export const sendBookingUpdateEmail = async (bookingData, changes) => {
   try {
+    console.log('Starting sendBookingUpdateEmail for:', bookingData.clientDetails.email);
+
     const emailData = {
       to: bookingData.clientDetails.email,
       template: 'booking-update',
@@ -52,16 +62,27 @@ export const sendBookingUpdateEmail = async (bookingData, changes) => {
       }
     };
 
-    await addDoc(collection(db, 'mail'), emailData);
-    return { success: true };
+    console.log('Prepared update email data:', emailData);
+
+    const docRef = await addDoc(collection(db, 'mail'), emailData);
+    console.log('Successfully added update email to queue with ID:', docRef.id);
+
+    return { success: true, emailId: docRef.id };
   } catch (error) {
-    console.error('Error queueing update email:', error);
+    console.error('Error in sendBookingUpdateEmail:', {
+      error: error.message,
+      stack: error.stack,
+      bookingEmail: bookingData.clientDetails.email,
+      changes: changes
+    });
     throw error;
   }
 };
 
 export const sendCancellationEmail = async (bookingData) => {
   try {
+    console.log('Starting sendCancellationEmail for:', bookingData.clientDetails.email);
+
     const emailData = {
       to: bookingData.clientDetails.email,
       template: 'booking-cancellation',
@@ -73,10 +94,18 @@ export const sendCancellationEmail = async (bookingData) => {
       }
     };
 
-    await addDoc(collection(db, 'mail'), emailData);
-    return { success: true };
+    console.log('Prepared cancellation email data:', emailData);
+
+    const docRef = await addDoc(collection(db, 'mail'), emailData);
+    console.log('Successfully added cancellation email to queue with ID:', docRef.id);
+
+    return { success: true, emailId: docRef.id };
   } catch (error) {
-    console.error('Error queueing cancellation email:', error);
+    console.error('Error in sendCancellationEmail:', {
+      error: error.message,
+      stack: error.stack,
+      bookingEmail: bookingData.clientDetails.email
+    });
     throw error;
   }
 };
