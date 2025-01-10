@@ -8,8 +8,8 @@ const GoogleAutocomplete = ({ placeholder, onPlaceSelected }) => {
 
     // Define the geographical bounds for Ibiza
     const ibizaBounds = new window.google.maps.LatLngBounds(
-      { lat: 38.8, lng: 1.2 }, // Southwest corner of Ibiza
-      { lat: 39.1, lng: 1.6 }  // Northeast corner of Ibiza
+      { lat: 38.8, lng: 1.2 }, 
+      { lat: 39.1, lng: 1.6 }  
     );
 
     const autocomplete = new window.google.maps.places.Autocomplete(inputRef.current, {
