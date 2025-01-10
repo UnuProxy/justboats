@@ -41,6 +41,5 @@ const GoogleAutocomplete = ({ placeholder, onPlaceSelected }) => {
     />
   );
 };
-
 export default GoogleAutocomplete;
 
