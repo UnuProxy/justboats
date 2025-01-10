@@ -13,9 +13,9 @@ const GoogleAutocomplete = ({ placeholder, onPlaceSelected }) => {
     );
 
     const autocomplete = new window.google.maps.places.Autocomplete(inputRef.current, {
-      componentRestrictions: { country: "ES" }, // Restrict results to Spain
+      componentRestrictions: { country: "ES" }, 
       bounds: ibizaBounds, // Prioritise Ibiza
-      strictBounds: false, // Allow results outside bounds but prioritise within
+      strictBounds: false, 
     });
 
     autocomplete.addListener("place_changed", () => {
