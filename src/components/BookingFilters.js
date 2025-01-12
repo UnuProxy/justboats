@@ -114,7 +114,6 @@ const BookingFilters = ({ filters, onFilterChange, onClear, onApply }) => {
             </div>
         </div>
     );
-
 };
 
 export default BookingFilters;
