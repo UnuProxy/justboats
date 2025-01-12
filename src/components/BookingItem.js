@@ -35,7 +35,6 @@ const BookingItem = ({ booking, onBookingSelect }) => {
       );
     }
     
-    
     return (
       <h3 className="font-semibold text-gray-900">
         {booking.clientName}
