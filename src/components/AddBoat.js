@@ -4,6 +4,28 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from "../firebase/firebaseConfig";
 import { useNavigate, useParams } from 'react-router-dom';
 
+const CheckboxGroup = ({ title, items, values, onChange }) => (
+    <div className="space-y-3">
+        <h3 className="text-lg font-medium">{title}</h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {Object.entries(items).map(([key, label]) => (
+                <div key={key} className="flex items-center space-x-2">
+                    <input
+                        type="checkbox"
+                        id={key}
+                        checked={values[key] || false}
+                        onChange={(e) => onChange(null, key, e.target.checked)}
+                        className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+                    />
+                    <label htmlFor={key} className="text-sm text-gray-700">
+                        {label}
+                    </label>
+                </div>
+            ))}
+        </div>
+    </div>
+);
+
 const AddBoat = () => {
     const navigate = useNavigate();
     const { id } = useParams();
@@ -15,12 +37,15 @@ const AddBoat = () => {
     const [isEditing, setIsEditing] = useState(false);
 
     const initialBoatState = {
+        // Basic Information
         name: '',
         images: [],
         specs: '',
         price: '',
         cruisingArea: '',
         description: '',
+
+        // Detailed Specifications
         detailedSpecs: {
             Length: '',
             Guests: '',
@@ -33,10 +58,152 @@ const AddBoat = () => {
             Engine: '',
             HP: ''
         },
+
+        // Seasonal Prices
         seasonalPrices: {
             'May / October': '',
             'June / September': '',
             'July / August': ''
+        },
+
+        // Equipment
+        equipment: {
+            tenders: {
+                limousineTenders: false,
+                regularTenders: false,
+                tenderCount: ''
+            },
+            jacuzziAndPool: {
+                deckJacuzzi: false,
+                deckJacuzziCount: '',
+                pool: false,
+                antiJellyfishPool: false,
+                aquapark: false,
+                inflatablePlatform: false
+            }
+        },
+
+        // Water Sports
+        waterSports: {
+            jetSkis: {
+                waverunners: false,
+                waverunnerCount: '',
+                standUpJetskis: false,
+                standUpJetskiCount: ''
+            },
+            seaBobs: {
+                hasSeaBobs: false,
+                seaBobCount: ''
+            },
+            eFoils: {
+                hasEFoils: false,
+                eFoilCount: ''
+            },
+            waterToys: {
+                paddleboards: false,
+                paddleboardCount: '',
+                wakeboard: false,
+                waterSkis: false,
+                kayaks: false,
+                inflatableTows: false,
+                waterScooter: false,
+                kneeBoard: false,
+                windsurf: false
+            },
+            diving: {
+                scubaDiving: false,
+                snorkelingGear: false,
+                fishingGear: false
+            },
+            inflatables: {
+                hasInflatables: false,
+                trampoline: false
+            }
+        },
+
+        // Amenities
+        amenities: {
+            entertainment: {
+                wifi: false,
+                satellite: false,
+                appleTV: false,
+                sonos: false,
+                indoorCinema: false,
+                outdoorCinema: false,
+                ipodDockingStation: false,
+                gameConsole: false
+            },
+            comfort: {
+                airConditioning: false,
+                heating: false,
+                stabilizers: false,
+                deck: {
+                    sunAwning: false,
+                    outdoorBar: false,
+                    outdoorDining: false,
+                    outdoorLounge: false,
+                    sunpads: false,
+                    sundeckShower: false
+                }
+            },
+            wellness: {
+                gym: false,
+                gymEquipment: false,
+                spa: false,
+                massage: false,
+                sauna: false,
+                steamRoom: false,
+                beautyRoom: false
+            },
+            dining: {
+                formalDiningArea: false,
+                casualDiningArea: false,
+                alFrescoDining: false,
+                profesionalGalley: false,
+                wineStorage: false,
+                bbqGrill: false
+            },
+            kids: {
+                childFriendly: false,
+                babyEquipment: false,
+                childProtectionGates: false,
+                toysAndGames: false
+            },
+            access: {
+                wheelchairAccessible: false,
+                elevatorLift: false,
+                disabledFacilities: false
+            }
+        },
+
+        // Additional Features
+        additional: {
+            safety: {
+                lifeJackets: false,
+                firstAidKit: false,
+                emergencyFlares: false,
+                fireExtinguishers: false,
+                emergencyRadio: false,
+                epirb: false
+            },
+            crew: {
+                captain: false,
+                chef: false,
+                steward: false,
+                deckhand: false,
+                engineer: false,
+                masseur: false
+            },
+            services: {
+                concierge: false,
+                security: false,
+                housekeeping: false,
+                laundry: false,
+                breakfast: false,
+                lunch: false,
+                dinner: false,
+                barService: false
+            }
         }
     };
 
@@ -97,24 +264,64 @@ const AddBoat = () => {
         setImagePreviews(prev => prev.filter((_, i) => i !== index));
     };
 
-    const handleInputChange = (e, section = null) => {
-        const { name, value } = e.target;
-
+    // First, modify the handleInputChange function to handle nested objects better:
+const handleInputChange = (e, section = null) => {
+    const { name, value } = e.target;
+    
+    setBoatData(prev => {
+        // Handle doubly nested sections (e.g., 'amenities.comfort.deck')
+        if (section && section.includes('.')) {
+            const parts = section.split('.');
+            if (parts.length === 3) {
+                // Handle triple nesting (e.g., amenities.comfort.deck)
+                const [mainSection, subSection, subSubSection] = parts;
+                return {
+                    ...prev,
+                    [mainSection]: {
+                        ...prev[mainSection],
+                        [subSection]: {
+                            ...prev[mainSection][subSection],
+                            [subSubSection]: {
+                                ...prev[mainSection][subSection][subSubSection],
+                                [name]: value
+                            }
+                        }
+                    }
+                };
+            } else {
+                // Handle double nesting
+                const [mainSection, subSection] = parts;
+                return {
+                    ...prev,
+                    [mainSection]: {
+                        ...prev[mainSection],
+                        [subSection]: {
+                            ...prev[mainSection][subSection],
+                            [name]: value
+                        }
+                    }
+                };
+            }
+        }
+        
+        // Handle single-level nesting
         if (section) {
-            setBoatData(prev => ({
+            return {
                 ...prev,
                 [section]: {
                     ...prev[section],
                     [name]: value
                 }
-            }));
-        } else {
-            setBoatData(prev => ({
-                ...prev,
-                [name]: value
-            }));
+            };
         }
-    };
+        
+        // Handle top-level fields
+        return {
+            ...prev,
+            [name]: value
+        };
+    });
+};
 
     const uploadImages = async (files) => {
         const uploadPromises = files.map(async (file) => {
@@ -327,6 +534,232 @@ const AddBoat = () => {
                         ))}
                     </div>
                 </div>
+
+                {/* Add this inside your form, after the Seasonal Prices section */}
+{/* Entertainment Section */}
+<div className="space-y-4 border-b pb-6">
+    <CheckboxGroup
+        title="Entertainment"
+        items={{
+            wifi: "Wi-Fi",
+            satellite: "Satellite TV",
+            appleTV: "Apple TV",
+            sonos: "Sonos Sound System",
+            indoorCinema: "Indoor Cinema",
+            outdoorCinema: "Outdoor Cinema",
+            ipodDockingStation: "iPod Docking",
+            gameConsole: "Game Console"
+        }}
+        values={boatData.amenities.entertainment}
+        onChange={(section, key, value) => 
+            handleInputChange({
+                target: {
+                    name: key,
+                    value
+                }
+            }, 'amenities.entertainment')}
+    />
+</div>
+
+{/* Comfort & Deck */}
+<div className="space-y-4 border-b pb-6">
+    <h3 className="text-lg font-medium">Comfort & Deck Features</h3>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CheckboxGroup
+            title="Indoor Comfort"
+            items={{
+                airConditioning: "Air Conditioning",
+                heating: "Heating",
+                stabilisers: "Stabilisers"
+            }}
+            values={boatData.amenities.comfort}
+            onChange={(section, key, value) => 
+                handleInputChange({
+                    target: {
+                        name: key,
+                        value
+                    }
+                }, 'amenities.comfort')}
+        />
+        <CheckboxGroup
+    title="Deck Features"
+    items={{
+        sunAwning: "Sun Awning",
+        outdoorBar: "Outdoor Bar",
+        outdoorDining: "Outdoor Dining",
+        outdoorLounge: "Outdoor Lounge Area",
+        sunpads: "Sunpads",
+        sundeckShower: "Sundeck Shower"
+    }}
+    values={boatData.amenities.comfort.deck}
+    onChange={(_, key, value) => 
+        handleInputChange({
+            target: {
+                name: key,
+                value
+            }
+        }, 'amenities.comfort.deck')} 
+/>
+    </div>
+</div>
+
+{/* Dining */}
+<div className="space-y-4 border-b pb-6">
+    <CheckboxGroup
+        title="Dining Facilities"
+        items={{
+            formalDiningArea: "Formal Dining Area",
+            casualDiningArea: "Casual Dining Area",
+            alFrescoDining: "Al Fresco Dining",
+            profesionalGalley: "Professional Galley",
+            wineStorage: "Wine Storage",
+            bbqGrill: "BBQ Grill"
+        }}
+        values={boatData.amenities.dining}
+        onChange={(section, key, value) => 
+            handleInputChange({
+                target: {
+                    name: key,
+                    value
+                }
+            }, 'amenities.dining')}
+    />
+</div>
+
+{/* Wellness */}
+<div className="space-y-4 border-b pb-6">
+    <CheckboxGroup
+        title="Wellness & Fitness"
+        items={{
+            gym: "Gym",
+            gymEquipment: "Gym Equipment",
+            spa: "Spa",
+            massage: "Massage Room",
+            sauna: "Sauna",
+            steamRoom: "Steam Room",
+            beautyRoom: "Beauty Room"
+        }}
+        values={boatData.amenities.wellness}
+        onChange={(section, key, value) => 
+            handleInputChange({
+                target: {
+                    name: key,
+                    value
+                }
+            }, 'amenities.wellness')}
+    />
+</div>
+
+{/* Kids */}
+<div className="space-y-4 border-b pb-6">
+    <CheckboxGroup
+        title="Kids Amenities"
+        items={{
+            childFriendly: "Child Friendly",
+            babyEquipment: "Baby Equipment",
+            childProtectionGates: "Child Protection Gates",
+            toysAndGames: "Toys and Games"
+        }}
+        values={boatData.amenities.kids}
+        onChange={(section, key, value) => 
+            handleInputChange({
+                target: {
+                    name: key,
+                    value
+                }
+            }, 'amenities.kids')}
+    />
+</div>
+
+{/* Accessibility */}
+<div className="space-y-4 border-b pb-6">
+    <CheckboxGroup
+        title="Accessibility"
+        items={{
+            wheelchairAccessible: "Wheelchair Accessible",
+            elevatorLift: "Elevator/Lift",
+            disabledFacilities: "Disabled Facilities"
+        }}
+        values={boatData.amenities.access}
+        onChange={(section, key, value) => 
+            handleInputChange({
+                target: {
+                    name: key,
+                    value
+                }
+            }, 'amenities.access')}
+    />
+</div>
+
+{/* Additional Services */}
+<div className="space-y-4 border-b pb-6">
+    <h3 className="text-lg font-medium">Additional Services</h3>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <CheckboxGroup
+            title="Crew"
+            items={{
+                captain: "Captain",
+                chef: "Chef",
+                steward: "Steward",
+                deckhand: "Deckhand",
+                engineer: "Engineer",
+                masseur: "Masseur"
+            }}
+            values={boatData.additional.crew}
+            onChange={(section, key, value) => 
+                handleInputChange({
+                    target: {
+                        name: key,
+                        value
+                    }
+                }, 'additional.crew')}
+        />
+        <CheckboxGroup
+            title="Services"
+            items={{
+                concierge: "Concierge",
+                security: "Security",
+                housekeeping: "Housekeeping",
+                laundry: "Laundry",
+                breakfast: "Breakfast",
+                lunch: "Lunch",
+                dinner: "Dinner",
+                barService: "Bar Service"
+            }}
+            values={boatData.additional.services}
+            onChange={(section, key, value) => 
+                handleInputChange({
+                    target: {
+                        name: key,
+                        value
+                    }
+                }, 'additional.services')}
+        />
+    </div>
+</div>
+
+{/* Safety */}
+<div className="space-y-4">
+    <CheckboxGroup
+        title="Safety Equipment"
+        items={{
+            lifeJackets: "Life Jackets",
+            firstAidKit: "First Aid Kit",
+            emergencyFlares: "Emergency Flares",
+            fireExtinguishers: "Fire Extinguishers",
+            emergencyRadio: "Emergency Radio",
+            epirb: "EPIRB"
+        }}
+        values={boatData.additional.safety}
+        onChange={(section, key, value) => 
+            handleInputChange({
+                target: {
+                    name: key,
+                    value
+                }
+            }, 'additional.safety')}
+    />
+</div>
 
                 <div className="flex justify-end space-x-4">
                     <button

@@ -1,62 +1,86 @@
-const functions = require("firebase-functions/v2");
-const sgMail = require("@sendgrid/mail");
-const admin = require("firebase-admin");
+const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const admin = require('firebase-admin');
+const functions = require('firebase-functions');
 
-admin.initializeApp();
-
-// Initialise SendGrid
-const sendgridApiKey = functions.config().sendgrid.key;
-
-
-if (!sendgridApiKey) {
-  throw new Error("SendGrid API key is missing. Please set it in your environment variables.");
+if (!admin.apps.length) {
+    admin.initializeApp();
 }
 
-sgMail.setApiKey(sendgridApiKey);
+const sgMail = require('@sendgrid/mail');
+const sendGridApiKey = functions.config()?.sendgrid?.api_key;
+if (!sendGridApiKey) {
+    throw new Error('SendGrid API key is missing');
+}
 
-exports.sendEmail = functions.firestore
-  .document("mail/{emailId}")
-  .onCreate(async (snap, context) => {
-    const emailData = snap.data();
+sgMail.setApiKey(sendGridApiKey);
+const SENDGRID_TEMPLATE_ID = 'd-a0536d03f0c74ef2b52e722e8b26ef4e';
 
-    if (!emailData.to || !emailData.message || !emailData.message.subject || !emailData.message.text) {
-      console.error("Invalid email data. Missing required fields.");
-      await snap.ref.update({
-        status: "error",
-        error: "Missing required fields in email data.",
-        errorTimestamp: admin.firestore.FieldValue.serverTimestamp()
-      });
-      return null;
-    }
-
+exports.processNewBookingEmailV2 = onDocumentCreated('bookings/{bookingId}', async (event) => {
     try {
-      const msg = {
-        to: emailData.to,
-        from: "info@justenjoyibiza.com",
-        subject: emailData.message.subject,
-        text: emailData.message.text,
-      };
+        const booking = event.data.data();
+        if (!booking) {
+            console.error('No booking data found');
+            return null;
+        }
 
-      console.log(`Sending email to ${emailData.to} with subject: "${emailData.message.subject}"`);
+        // Prepare template data
+        const templateData = {
+            clientName: booking.clientDetails?.name || 'Guest',
+            bookingDate: booking.bookingDetails?.date || 'N/A',
+            startTime: booking.bookingDetails?.startTime || 'N/A',
+            endTime: booking.bookingDetails?.endTime || 'N/A',
+            boatName: booking.bookingDetails?.boatName || 'N/A',
+            passengers: booking.bookingDetails?.passengers || 'N/A',
+            totalAmount: booking.pricing?.finalPrice || 0,
+            depositRequired: booking.pricing?.deposit || 0,
+        };
 
-      await sgMail.send(msg);
+        console.log('Email template data:', templateData);
 
-      await snap.ref.update({
-        status: "sent",
-        sentAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+        const emailData = {
+            to: booking.clientDetails?.email,
+            from: 'info@justenjoyibiza.com',
+            templateId: SENDGRID_TEMPLATE_ID,
+            dynamic_template_data: templateData
+        };
 
-      console.log(`Email sent successfully to ${emailData.to}`);
-      return null;
+        console.log('SendGrid message data:', emailData);
+
+        try {
+            await sgMail.send(emailData);
+            console.log('Email sent successfully to:', booking.clientDetails?.email);
+
+            await event.data.ref.update({
+                emailSent: true,
+                emailSentTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+        } catch (sgError) {
+            console.error('SendGrid Error:', sgError);
+            if (sgError.response) {
+                console.error('SendGrid Error Body:', sgError.response.body);
+            }
+            throw sgError;
+        }
+
+        return null;
     } catch (error) {
-      console.error("Error sending email:", error);
-
-      await snap.ref.update({
-        status: "error",
-        error: error.message,
-        errorTimestamp: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      throw error; // Re-throw the error to notify Firebase of the failure.
+        console.error('Error processing email:', error);
+        throw error;
     }
-  });
+});
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+

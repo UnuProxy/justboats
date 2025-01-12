@@ -14,7 +14,6 @@ const BookingItem = ({ booking, onBookingSelect }) => {
         return 'bg-gray-100 text-gray-800';
     }
   };
-
   // Format date to DD/MM/YYYY
   const formatDate = (dateString) => {
     const date = new Date(dateString);

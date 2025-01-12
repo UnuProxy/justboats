@@ -4,6 +4,8 @@
   "private": true,
   "dependencies": {
     "@babel/runtime": "^7.26.0",
+    "@googlemaps/js-api-loader": "^1.16.8",
+    "@react-google-maps/api": "^2.20.5",
     "@sendgrid/mail": "^8.1.4",
     "d3-array": "^3.2.4",
     "d3-interpolate": "^3.0.1",
@@ -13,6 +15,8 @@
     "dom-helpers": "^5.2.1",
     "dotenv": "^16.4.7",
     "firebase": "^10.8.0",
+    "firebase-admin": "^13.0.2",
+    "firebase-functions": "^6.2.0",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
     "lucide-react": "^0.469.0",

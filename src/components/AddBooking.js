@@ -4,7 +4,8 @@ import { db } from '../firebase/firebaseConfig.js';
 import { Users, Ship, Euro, MapPin } from "lucide-react";
 import { getAuth } from 'firebase/auth';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { sendBookingEmail } from '../services/emailService';
+
+
 
 function AddBooking() {
   const [activeStep, setActiveStep] = useState(1);
@@ -38,13 +39,13 @@ function AddBooking() {
     transfer: {
       required: false,
       pickup: {
-        location: "",
-        address: "",
+        location: '',
+        locationDetail: ''
       },
       dropoff: {
-        location: "",
-        address: "",
-      },
+        location: '',
+        locationDetail: ''
+      }
     },
     notes: "",
   });
@@ -52,6 +53,7 @@ function AddBooking() {
   const [partners, setPartners] = useState([]);
   const [existingClients, setExistingClients] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [restaurantName, setRestaurantName] = useState('');
 
   // Load partners based on type
   useEffect(() => {
@@ -80,7 +82,7 @@ function AddBooking() {
         setExistingClients([]);
         return;
       }
-
+    
       try {
         const q = query(
           collection(db, "clients"),
@@ -172,24 +174,69 @@ function AddBooking() {
 
   const handleInputChange = (section, field, value) => {
     setFormData((prev) => {
+      if (typeof value === 'string') {
+        value = value.trim();
+      }
+  
+      // Handle transfer section
+      if (section === 'transfer') {
+        // Special handling for transfer.required field
+        if (field === 'required') {
+          return {
+            ...prev,
+            transfer: {
+              ...prev.transfer,
+              required: value // Directly set the boolean value
+            }
+          };
+        }
+        
+        // Handle nested pickup/dropoff objects
+        return {
+          ...prev,
+          transfer: {
+            ...prev.transfer,
+            [field]: {
+              ...prev.transfer[field],
+              ...value,
+            },
+          },
+        };
+      }
+  
+      // Rest of your existing code...
       if (section === 'clientDetails') {
         return {
           ...prev,
           clientDetails: {
             ...prev.clientDetails,
-            [field]: value === "" ? "" : value,
+            [field]: value || "",
           },
         };
       }
+  
+      if (section === 'bookingDetails') {
+        return {
+          ...prev,
+          bookingDetails: {
+            ...prev.bookingDetails,
+            [field]: value || "",
+          },
+        };
+      }
+  
       return {
         ...prev,
         [section]: {
           ...prev[section],
-          [field]: value === "" ? "" : value,
+          [field]: value || "",
         },
       };
     });
   };
+
+  
+  
 
   const renderStep1 = () => (
     <div className="space-y-4">
@@ -292,20 +339,16 @@ function AddBooking() {
       </div>
     </div>
   );
-
   const renderStep2 = () => (
-    // ... (rest of your renderStep2 function - no changes needed)
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
         <Ship className="w-5 h-5 text-gray-600" />
         <h3 className="text-lg font-semibold">Boat Details</h3>
       </div>
-
+  
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Boat Company
-          </label>
+          <label className="block text-sm font-medium text-gray-700">Boat Company</label>
           <input
             type="text"
             className="mt-1 w-full p-2 border rounded"
@@ -315,11 +358,9 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Boat Name
-          </label>
+          <label className="block text-sm font-medium text-gray-700">Boat Name</label>
           <input
             type="text"
             className="mt-1 w-full p-2 border rounded"
@@ -329,11 +370,9 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Number of Passengers
-          </label>
+          <label className="block text-sm font-medium text-gray-700">Number of Passengers</label>
           <input
             type="number"
             className="mt-1 w-full p-2 border rounded"
@@ -343,7 +382,7 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
           <label className="block text-sm font-medium text-gray-700">Date</label>
           <input
@@ -355,11 +394,9 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Start Time
-          </label>
+          <label className="block text-sm font-medium text-gray-700">Start Time</label>
           <input
             type="time"
             className="mt-1 w-full p-2 border rounded"
@@ -369,11 +406,9 @@ function AddBooking() {
             }
           />
         </div>
-
+  
         <div>
-          <label className="block text-sm font-medium text-gray-700">
-            End Time
-          </label>
+          <label className="block text-sm font-medium text-gray-700">End Time</label>
           <input
             type="time"
             className="mt-1 w-full p-2 border rounded"
@@ -386,9 +421,7 @@ function AddBooking() {
       </div>
     </div>
   );
-
   const renderStep3 = () => (
-    // ... (rest of your renderStep3 function - no changes needed)
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
         <Euro className="w-5 h-5 text-gray-600" />
@@ -479,36 +512,35 @@ function AddBooking() {
       </div>
     </div>
   );
-
   const renderStep4 = () => (
-    // ... (rest of your renderStep4 function - no changes needed)
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
         <MapPin className="w-5 h-5 text-gray-600" />
         <h3 className="text-lg font-semibold">Transfer & Additional Details</h3>
       </div>
-
+  
       <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Transfer Required
-          </label>
-          <select
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.transfer.required}
-            onChange={(e) =>
-              handleInputChange("transfer", "required", e.target.value === "true")
-            }
-          >
-            <option value="false">No</option>
-            <option value="true">Yes</option>
-          </select>
-        </div>
-
+      <div>
+  <label className="block text-sm font-medium text-gray-700">
+    Transfer Required
+  </label>
+  <select
+  className="mt-1 w-full p-2 border rounded"
+  value={formData.transfer.required ? "true" : "false"}
+  onChange={(e) =>
+    handleInputChange("transfer", "required", e.target.value === "true")
+  }
+  >
+    <option value="false">No</option>
+    <option value="true">Yes</option>
+  </select>
+  </div>
+  
         {formData.transfer.required && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Pickup Details */}
             <div>
-              <h4 className="font-medium mb-2">Pickup Details</h4>
+              <h4 className="font-medium mb-2">Pickup Location</h4>
               <div className="space-y-2">
                 <select
                   className="w-full p-2 border rounded"
@@ -517,31 +549,51 @@ function AddBooking() {
                     handleInputChange("transfer", "pickup", {
                       ...formData.transfer.pickup,
                       location: e.target.value,
+                      locationDetail: ''
                     })
                   }
                 >
-                  <option value="">Select Pickup Location</option>
+                  <option value="">Select Location Type</option>
                   <option value="Hotel">Hotel</option>
-                  <option value="Airport">Airport</option>
-                  <option value="Other">Other</option>
+                  <option value="Airport">Ibiza Airport</option>
+                  <option value="Other">Other Location</option>
                 </select>
-                <input
-                  type="text"
-                  placeholder="Address details"
-                  className="w-full p-2 border rounded"
-                  value={formData.transfer.pickup.address}
-                  onChange={(e) =>
-                    handleInputChange("transfer", "pickup", {
-                      ...formData.transfer.pickup,
-                      address: e.target.value,
-                    })
-                  }
-                />
+
+                {formData.transfer.pickup.location === 'Hotel' && (
+                  <input
+                    type="text"
+                    placeholder="Hotel Name"
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.pickup.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "pickup", {
+                        ...formData.transfer.pickup,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  />
+                )}
+
+                {formData.transfer.pickup.location === 'Other' && (
+                  <input
+                    type="text"
+                    placeholder="Location Name"
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.pickup.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "pickup", {
+                        ...formData.transfer.pickup,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  />
+                )}
               </div>
             </div>
-
+  
+            {/* Drop-off Details */}
             <div>
-              <h4 className="font-medium mb-2">Drop-off Details</h4>
+              <h4 className="font-medium mb-2">Drop-off Location</h4>
               <div className="space-y-2">
                 <select
                   className="w-full p-2 border rounded"
@@ -550,31 +602,68 @@ function AddBooking() {
                     handleInputChange("transfer", "dropoff", {
                       ...formData.transfer.dropoff,
                       location: e.target.value,
+                      locationDetail: ''
                     })
                   }
                 >
-                  <option value="">Select Drop-off Location</option>
+                  <option value="">Select Location Type</option>
                   <option value="Marina">Marina</option>
                   <option value="Hotel">Hotel</option>
-                  <option value="Other">Other</option>
+                  <option value="Other">Other Location</option>
                 </select>
-                <input
-                  type="text"
-                  placeholder="Address details"
-                  className="w-full p-2 border rounded"
-                  value={formData.transfer.dropoff.address}
-                  onChange={(e) =>
-                    handleInputChange("transfer", "dropoff", {
-                      ...formData.transfer.dropoff,
-                      address: e.target.value,
-                    })
-                  }
-                />
+
+                {formData.transfer.dropoff.location === 'Hotel' && (
+                  <input
+                    type="text"
+                    placeholder="Hotel Name"
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.dropoff.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "dropoff", {
+                        ...formData.transfer.dropoff,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  />
+                )}
+
+                {formData.transfer.dropoff.location === 'Marina' && (
+                  <select
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.dropoff.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "dropoff", {
+                        ...formData.transfer.dropoff,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="">Select Marina</option>
+                    <option value="Marina Botafoch">Marina Botafoch</option>
+                    <option value="Marina Ibiza">Marina Ibiza</option>
+                    <option value="Puerto Deportivo">Puerto Deportivo</option>
+                  </select>
+                )}
+
+                {formData.transfer.dropoff.location === 'Other' && (
+                  <input
+                    type="text"
+                    placeholder="Location Name"
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.dropoff.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "dropoff", {
+                        ...formData.transfer.dropoff,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  />
+                )}
               </div>
             </div>
           </div>
         )}
-
+  
         <div className="mt-6">
           <label className="block text-sm font-medium text-gray-700">
             Additional Notes
@@ -585,6 +674,19 @@ function AddBooking() {
             value={formData.notes}
             onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
             placeholder="Any special requirements or notes..."
+          />
+        </div>
+  
+        <div className="mt-6">
+          <label className="block text-sm font-medium text-gray-700">
+            Restaurant Name (if applicable)
+          </label>
+          <input
+            type="text"
+            className="mt-1 w-full p-2 border rounded"
+            value={restaurantName}
+            onChange={(e) => setRestaurantName(e.target.value)}
+            placeholder="Enter the name of the restaurant"
           />
         </div>
       </div>
@@ -656,139 +758,176 @@ function AddBooking() {
     }
     return true;
   };
-
+  
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (activeStep !== 4 || !validateForm()) return;
 
     const auth = getAuth();
     const user = auth.currentUser;
-    const createdByInfo = user ? {
-      uid: user.uid,
-      displayName: user.displayName,
-      email: user.email,
-    } : null;
+    const createdByInfo = user
+        ? {
+              uid: user.uid,
+              displayName: user.displayName,
+              email: user.email,
+          }
+        : null;
 
     try {
-      setLoading(true);
-      const bookingData = {
-        ...formData,
-        clientSource: formData.clientSource || "",
-        clientType: formData.clientType || "",
-        selectedPartner: formData.selectedPartner || "",
-        clientDetails: {
-          name: formData.clientDetails.name || "",
-          phone: formData.clientDetails.phone || "",
-          email: formData.clientDetails.email || "",
-          passportNumber: formData.clientDetails.passportNumber || "",
-        },
-        bookingDetails: {
-          boatCompany: formData.bookingDetails.boatCompany || "",
-          boatName: formData.bookingDetails.boatName || "",
-          passengers: parseInt(formData.bookingDetails.passengers || 0, 10),
-          date: formData.bookingDetails.date || "",
-          startTime: formData.bookingDetails.startTime || "",
-          endTime: formData.bookingDetails.endTime || "",
-        },
-        pricing: {
-          basePrice: parseFloat(formData.pricing.basePrice || 0),
-          discount: parseFloat(formData.pricing.discount || 0),
-          finalPrice: parseFloat(formData.pricing.finalPrice || 0),
-          deposit: parseFloat(formData.pricing.deposit || 0),
-          remainingPayment: parseFloat(formData.pricing.remainingPayment || 0),
-          paymentStatus: formData.pricing.paymentStatus || "No Payment",
-        },
-        transfer: {
-          required: formData.transfer.required || false,
-          pickup: {
-            location: formData.transfer.pickup.location || "",
-            address: formData.transfer.pickup.address || "",
-          },
-          dropoff: {
-            location: formData.transfer.dropoff.location || "",
-            address: formData.transfer.dropoff.address || "",
-          },
-        },
-        notes: formData.notes || "",
-        createdAt: new Date().toISOString(),
-        lastUpdated: new Date().toISOString(),
-        status: "active",
-        createdBy: createdByInfo,
-      };
+        setLoading(true);
 
-      if (formData.clientType === "Direct" || ["Hotel", "Collaborator"].includes(formData.clientType)) {
-        const clientsRef = collection(db, "clients");
-
-        // Get the hotel/collaborator name from the selected partner
-        let partnerDetails = null;
-        if (["Hotel", "Collaborator"].includes(formData.clientType) && formData.selectedPartner) {
-          // Find the selected partner from our partners array
-          const selectedPartner = partners.find(p => p.id === formData.selectedPartner);
-          if (selectedPartner) {
-            partnerDetails = {
-              id: selectedPartner.id,
-              name: selectedPartner.name, // This will be the actual hotel/collaborator name
-            };
-          }
-        }
-
-        const clientData = {
-          name: formData.clientDetails.name,
-          email: formData.clientDetails.email,
-          phone: formData.clientDetails.phone,
-          passportNumber: formData.clientDetails.passportNumber,
-          source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
-          clientType: formData.clientType,
-          // Store hotel/collaborator specific details
-          hotelName: formData.clientType === "Hotel" ? partnerDetails?.name : null,     // Add hotel name
-          collaboratorName: formData.clientType === "Collaborator" ? partnerDetails?.name : null,  // Add collaborator name
-          partnerName: partnerDetails?.name || null,
-          partnerId: partnerDetails?.id || null,
-          createdAt: new Date().toISOString(),
-          createdBy: createdByInfo,
-          bookings: [],
-          totalBookings: 1,
-          totalSpent: bookingData.pricing.finalPrice
+        const bookingData = {
+            clientType: formData.clientType || "",
+            selectedPartner: formData.selectedPartner || "",
+            clientSource: formData.clientSource || "",
+            clientDetails: {
+                name: formData.clientDetails.name || "",
+                phone: formData.clientDetails.phone || "",
+                email: formData.clientDetails.email || "",
+                passportNumber: formData.clientDetails.passportNumber || "",
+            },
+            bookingDetails: {
+                boatCompany: formData.bookingDetails.boatCompany || "",
+                boatName: formData.bookingDetails.boatName || "",
+                passengers: formData.bookingDetails.passengers || "",
+                date: formData.bookingDetails.date || "",
+                startTime: formData.bookingDetails.startTime || "",
+                endTime: formData.bookingDetails.endTime || "",
+                transferAddress: formData.transfer.required
+                    ? {
+                          pickup: formData.transfer.pickup || {},
+                          dropoff: formData.transfer.dropoff || {},
+                      }
+                    : null,
+            },
+            pricing: {
+                basePrice: parseFloat(formData.pricing.basePrice || 0),
+                discount: parseFloat(formData.pricing.discount || 0),
+                finalPrice: parseFloat(formData.pricing.finalPrice || 0),
+                deposit: parseFloat(formData.pricing.deposit || 0),
+                remainingPayment: parseFloat(formData.pricing.remainingPayment || 0),
+                paymentStatus: formData.pricing.paymentStatus || "No Payment",
+            },
+            transfer: formData.transfer || {},
+            notes: formData.notes || "",
+            createdAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString(),
+            status: "active",
+            createdBy: createdByInfo,
+            restaurantName: restaurantName || "",
         };
 
-        const clientDoc = await addDoc(clientsRef, clientData);
-        bookingData.clientId = clientDoc.id;
-      }
+        let clientId = null;
+        if (
+            formData.clientType === "Direct" ||
+            ["Hotel", "Collaborator"].includes(formData.clientType)
+        ) {
+            const clientsRef = collection(db, "clients");
 
-      const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
+            let existingClientQuery = query(
+                clientsRef,
+                where("email", "==", formData.clientDetails.email)
+            );
+            let existingClientSnapshot = await getDocs(existingClientQuery);
 
-      try {
-        await sendBookingEmail(bookingData);
-        console.log('Confirmation email sent successfully');
-      } catch (emailError) {
-        console.error('Error sending confirmation email:', emailError);
-        // Continue with the booking process even if email fails
-      }
-      if (formData.clientType === "Direct") {
-        await updateDoc(doc(db, "clients", bookingData.clientId), {
-          bookings: arrayUnion(bookingRef.id)
+            if (existingClientSnapshot.empty) {
+                existingClientQuery = query(
+                    clientsRef,
+                    where("phone", "==", formData.clientDetails.phone)
+                );
+                existingClientSnapshot = await getDocs(existingClientQuery);
+            }
+
+            if (!existingClientSnapshot.empty) {
+                clientId = existingClientSnapshot.docs[0].id;
+
+                await updateDoc(doc(db, "clients", clientId), {
+                    name: formData.clientDetails.name,
+                    email: formData.clientDetails.email,
+                    phone: formData.clientDetails.phone,
+                    passportNumber: formData.clientDetails.passportNumber,
+                    lastUpdated: new Date().toISOString(),
+                });
+
+                console.log("Updated existing client with ID:", clientId);
+            } else {
+                const clientData = {
+                    name: formData.clientDetails.name,
+                    email: formData.clientDetails.email,
+                    phone: formData.clientDetails.phone,
+                    passportNumber: formData.clientDetails.passportNumber,
+                    source:
+                        formData.clientType === "Direct"
+                            ? formData.clientSource
+                            : formData.clientType,
+                    createdAt: new Date().toISOString(),
+                    createdBy: createdByInfo,
+                    bookings: [],
+                    totalBookings: 1,
+                    totalSpent: bookingData.pricing.finalPrice,
+                };
+
+                const clientDoc = await addDoc(clientsRef, clientData);
+                clientId = clientDoc.id;
+            }
+            bookingData.clientId = clientId;
+        }
+
+        console.log("Full Booking Data:", JSON.stringify(bookingData, null, 2));
+
+        const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
+        console.log("Booking created with ID:", bookingRef.id);
+
+        if (formData.clientType === "Direct") {
+            await updateDoc(doc(db, "clients", bookingData.clientId), {
+                bookings: arrayUnion(bookingRef.id),
+            });
+        }
+
+        alert("Booking saved successfully");
+        setFormData({
+            clientType: "",
+            selectedPartner: "",
+            clientSource: "",
+            clientDetails: {
+                name: "",
+                phone: "",
+                email: "",
+                passportNumber: "",
+            },
+            bookingDetails: {
+                boatCompany: "",
+                boatName: "",
+                passengers: "",
+                date: "",
+                startTime: "",
+                endTime: "",
+            },
+            pricing: {
+                basePrice: 0,
+                discount: 0,
+                finalPrice: 0,
+                deposit: 0,
+                remainingPayment: 0,
+                paymentStatus: "No Payment",
+            },
+            transfer: {
+                required: false,
+                pickup: { location: "", address: "" },
+                dropoff: { location: "", address: "" },
+            },
+            notes: "",
         });
-      }
-
-      alert("Booking saved successfully and confirmation email queued!");
-      setFormData({
-        clientType: "",
-        selectedPartner: "",
-        clientSource: "",
-        clientDetails: { name: "", phone: "", email: "", passportNumber: "" },
-        bookingDetails: { boatCompany: "", boatName: "", passengers: "", date: "", startTime: "", endTime: "" },
-        pricing: { basePrice: 0, discount: 0, finalPrice: 0, deposit: 0, remainingPayment: 0, paymentStatus: "No Payment" },
-        transfer: { required: false, pickup: { location: "", address: "" }, dropoff: { location: "", address: "" } },
-        notes: "",
-      });
-      setActiveStep(1);
+        setActiveStep(1);
     } catch (error) {
-      console.error("Error saving booking:", error);
-      alert("Error saving booking. Please try again.");
+        console.error("Error saving booking:", error);
+        alert("Error saving booking. Please try again.");
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  };
+};
+
+
 
   return (
     <div className="min-h-screen bg-gray-50 p-2 sm:p-6">

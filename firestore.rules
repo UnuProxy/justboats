@@ -1,0 +1,32 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow access only for authenticated users
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Example: Restrict access to a specific collection (e.g., "users")
+    match /users/{userId} {
+      // Only the user who owns this document can read or write
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Example: Public collection where everyone can read but only authenticated users can write
+    match /public/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Example: Allow admins to read/write to an "admin" collection
+    match /admin/{docId} {
+      allow read, write: if request.auth.token.admin == true;
+    }
+  }
+}
+
+
+
+
+
