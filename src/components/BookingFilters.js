@@ -1,7 +1,6 @@
-// src/components/BookingFilters.js
 
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react'; // Icons for toggle
+import { ChevronDown, ChevronUp } from 'lucide-react'; 
 
 const BookingFilters = ({ filters, onFilterChange, onClear, onApply }) => {
     const [isMobileOpen, setIsMobileOpen] = useState(false);
