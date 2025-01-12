@@ -4,7 +4,7 @@ import { db } from '../firebase/firebaseConfig.js';
 import { Users, Ship, Euro, MapPin } from "lucide-react";
 import { getAuth } from 'firebase/auth';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import GoogleAutocomplete from "./GoogleAutocomplete";
+
 
 
 function AddBooking() {
@@ -39,13 +39,13 @@ function AddBooking() {
     transfer: {
       required: false,
       pickup: {
-        location: "",
-        address: "",
+        location: '',
+        locationDetail: ''
       },
       dropoff: {
-        location: "",
-        address: "",
-      },
+        location: '',
+        locationDetail: ''
+      }
     },
     notes: "",
   });
@@ -174,56 +174,66 @@ function AddBooking() {
 
   const handleInputChange = (section, field, value) => {
     setFormData((prev) => {
-        if (typeof value === 'string') {
-            value = value.trim(); // Trim only if it's a string
-        }
-
-        // Handle client details
-        if (section === 'clientDetails') {
-            return {
-                ...prev,
-                clientDetails: {
-                    ...prev.clientDetails,
-                    [field]: value || "", // Ensure no undefined values
-                },
-            };
-        }
-
-        // Handle booking details
-        if (section === 'bookingDetails') {
-            return {
-                ...prev,
-                bookingDetails: {
-                    ...prev.bookingDetails,
-                    [field]: value || "", // Ensure no undefined values
-                },
-            };
-        }
-
-        // Handle transfer details (nested structure)
-        if (section === 'transfer') {
-            return {
-                ...prev,
-                transfer: {
-                    ...prev.transfer,
-                    [field]: {
-                        ...prev.transfer[field], // Maintain existing sub-fields
-                        ...value, // Update the changed value (expects an object)
-                    },
-                },
-            };
-        }
-
-        // Default case for other sections
-        return {
+      if (typeof value === 'string') {
+        value = value.trim();
+      }
+  
+      // Handle transfer section
+      if (section === 'transfer') {
+        // Special handling for transfer.required field
+        if (field === 'required') {
+          return {
             ...prev,
-            [section]: {
-                ...prev[section],
-                [field]: value || "", // Ensure no undefined values
+            transfer: {
+              ...prev.transfer,
+              required: value // Directly set the boolean value
+            }
+          };
+        }
+        
+        // Handle nested pickup/dropoff objects
+        return {
+          ...prev,
+          transfer: {
+            ...prev.transfer,
+            [field]: {
+              ...prev.transfer[field],
+              ...value,
             },
+          },
         };
+      }
+  
+      // Rest of your existing code...
+      if (section === 'clientDetails') {
+        return {
+          ...prev,
+          clientDetails: {
+            ...prev.clientDetails,
+            [field]: value || "",
+          },
+        };
+      }
+  
+      if (section === 'bookingDetails') {
+        return {
+          ...prev,
+          bookingDetails: {
+            ...prev.bookingDetails,
+            [field]: value || "",
+          },
+        };
+      }
+  
+      return {
+        ...prev,
+        [section]: {
+          ...prev[section],
+          [field]: value || "",
+        },
+      };
     });
-};
+  };
 
   
   
@@ -329,7 +339,6 @@ function AddBooking() {
       </div>
     </div>
   );
-
   const renderStep2 = () => (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
@@ -412,8 +421,6 @@ function AddBooking() {
       </div>
     </div>
   );
-  
-
   const renderStep3 = () => (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
@@ -505,7 +512,6 @@ function AddBooking() {
       </div>
     </div>
   );
-
   const renderStep4 = () => (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
@@ -514,27 +520,27 @@ function AddBooking() {
       </div>
   
       <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Transfer Required
-          </label>
-          <select
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.transfer.required}
-            onChange={(e) =>
-              handleInputChange("transfer", "required", e.target.value === "true")
-            }
-          >
-            <option value="false">No</option>
-            <option value="true">Yes</option>
-          </select>
-        </div>
+      <div>
+  <label className="block text-sm font-medium text-gray-700">
+    Transfer Required
+  </label>
+  <select
+  className="mt-1 w-full p-2 border rounded"
+  value={formData.transfer.required ? "true" : "false"}
+  onChange={(e) =>
+    handleInputChange("transfer", "required", e.target.value === "true")
+  }
+  >
+    <option value="false">No</option>
+    <option value="true">Yes</option>
+  </select>
+  </div>
   
         {formData.transfer.required && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Pickup Details */}
             <div>
-              <h4 className="font-medium mb-2">Pickup Details</h4>
+              <h4 className="font-medium mb-2">Pickup Location</h4>
               <div className="space-y-2">
                 <select
                   className="w-full p-2 border rounded"
@@ -543,32 +549,51 @@ function AddBooking() {
                     handleInputChange("transfer", "pickup", {
                       ...formData.transfer.pickup,
                       location: e.target.value,
+                      locationDetail: ''
                     })
                   }
                 >
-                  <option value="">Select Pickup Location</option>
+                  <option value="">Select Location Type</option>
                   <option value="Hotel">Hotel</option>
-                  <option value="Airport">Airport</option>
-                  <option value="Other">Other</option>
+                  <option value="Airport">Ibiza Airport</option>
+                  <option value="Other">Other Location</option>
                 </select>
-  
-                <GoogleAutocomplete
-                  placeholder="Search Pickup Address"
-                  onPlaceSelected={(place) =>
-                    handleInputChange("transfer", "pickup", {
-                      ...formData.transfer.pickup,
-                      address: place.address,
-                      latitude: place.latitude,
-                      longitude: place.longitude,
-                    })
-                  }
-                />
+
+                {formData.transfer.pickup.location === 'Hotel' && (
+                  <input
+                    type="text"
+                    placeholder="Hotel Name"
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.pickup.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "pickup", {
+                        ...formData.transfer.pickup,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  />
+                )}
+
+                {formData.transfer.pickup.location === 'Other' && (
+                  <input
+                    type="text"
+                    placeholder="Location Name"
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.pickup.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "pickup", {
+                        ...formData.transfer.pickup,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  />
+                )}
               </div>
             </div>
   
             {/* Drop-off Details */}
             <div>
-              <h4 className="font-medium mb-2">Drop-off Details</h4>
+              <h4 className="font-medium mb-2">Drop-off Location</h4>
               <div className="space-y-2">
                 <select
                   className="w-full p-2 border rounded"
@@ -577,26 +602,63 @@ function AddBooking() {
                     handleInputChange("transfer", "dropoff", {
                       ...formData.transfer.dropoff,
                       location: e.target.value,
+                      locationDetail: ''
                     })
                   }
                 >
-                  <option value="">Select Drop-off Location</option>
+                  <option value="">Select Location Type</option>
                   <option value="Marina">Marina</option>
                   <option value="Hotel">Hotel</option>
-                  <option value="Other">Other</option>
+                  <option value="Other">Other Location</option>
                 </select>
-  
-                <GoogleAutocomplete
-                  placeholder="Search Drop-off Address"
-                  onPlaceSelected={(place) =>
-                    handleInputChange("transfer", "dropoff", {
-                      ...formData.transfer.dropoff,
-                      address: place.address,
-                      latitude: place.latitude,
-                      longitude: place.longitude,
-                    })
-                  }
-                />
+
+                {formData.transfer.dropoff.location === 'Hotel' && (
+                  <input
+                    type="text"
+                    placeholder="Hotel Name"
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.dropoff.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "dropoff", {
+                        ...formData.transfer.dropoff,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  />
+                )}
+
+                {formData.transfer.dropoff.location === 'Marina' && (
+                  <select
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.dropoff.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "dropoff", {
+                        ...formData.transfer.dropoff,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="">Select Marina</option>
+                    <option value="Marina Botafoch">Marina Botafoch</option>
+                    <option value="Marina Ibiza">Marina Ibiza</option>
+                    <option value="Puerto Deportivo">Puerto Deportivo</option>
+                  </select>
+                )}
+
+                {formData.transfer.dropoff.location === 'Other' && (
+                  <input
+                    type="text"
+                    placeholder="Location Name"
+                    className="w-full p-2 border rounded"
+                    value={formData.transfer.dropoff.locationDetail || ''}
+                    onChange={(e) =>
+                      handleInputChange("transfer", "dropoff", {
+                        ...formData.transfer.dropoff,
+                        locationDetail: e.target.value,
+                      })
+                    }
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -630,7 +692,6 @@ function AddBooking() {
       </div>
     </div>
   );
-  
   const validateForm = () => {
     switch (activeStep) {
       case 1:

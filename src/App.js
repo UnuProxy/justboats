@@ -18,6 +18,7 @@ import BoatManagement from './components/BoatManagement';
 import AddBoat from './components/AddBoat';
 import Dashboard from './components/Dashboard';
 
+
 const Splash = ({ onFinish }) => {
    useEffect(() => {
        const timer = setTimeout(() => {

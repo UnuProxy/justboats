@@ -108,106 +108,143 @@ const BoatManagement = () => {
           }
         };
     
-                // --------------------
+        // --------------------
         // PAGE 1: OVERVIEW
         // --------------------
-        pdf.setFont('helvetica', 'normal');
+        // Helper function to generate dynamic key features
+const generateKeyFeatures = (boatData) => {
+  const features = [];
 
-        // 1) Fill A4 background in deep blue
-        pdf.setFillColor(...colors.deepBlue);
-        pdf.rect(0, 0, 210, 297, 'F');
+  // Add features based on boat specifications
+  if (boatData.detailedSpecs?.Length && boatData.detailedSpecs?.Guests) {
+      features.push(`Magnificent ${boatData.detailedSpecs.Length} vessel accommodating ${boatData.detailedSpecs.Guests} guests`);
+  }
 
-        // 2) Large, centred boat name in white (uppercase, 22pt)
-        pdf.setTextColor(...colors.white);
-        pdf.setFontSize(22);
-        pdf.text(
-        (boatData.name || "BOAT").toUpperCase(),
-        105, // center horizontally
-        25,  // y offset
-        { align: 'center' }
-        );
+  // Add features based on equipment and amenities
+  const luxuryFeatures = [];
+  if (boatData.equipment?.jacuzziAndPool?.deckJacuzzi) luxuryFeatures.push("deck jacuzzi");
+  if (boatData.amenities?.comfort?.stabilizers) luxuryFeatures.push("stabilizers");
+  if (luxuryFeatures.length > 0) {
+      features.push(`Ultimate luxury with ${luxuryFeatures.join(" and ")}`);
+  }
 
-        // 3) Main image – enlarged
-        const imageWidth = 180;
-        const imageHeight = 110;
-        let imageX = (210 - imageWidth) / 2;  // center horizontally
-        let imageY = 35;
+  // Add water sports features
+  const waterToys = [];
+  if (boatData.waterSports?.seaBobs?.hasSeaBobs) waterToys.push("SeaBobs");
+  if (boatData.waterSports?.jetSkis?.waverunners) waterToys.push("Wave Runners");
+  if (waterToys.length > 0) {
+      features.push(`Complete water sports experience including ${waterToys.join(" and ")}`);
+  }
 
-        if (boatData.images?.[0]) {
-        const mainImageData = await loadImage(boatData.images[0]);
-        if (mainImageData) {
-            pdf.addImage(
-            mainImageData,
-            'JPEG',
-            imageX,
-            imageY,
-            imageWidth,
-            imageHeight,
-            undefined,
-            'FAST'
-            );
-            imageY += imageHeight + 15; // spacing below image
-        }
-        }
+  // Add comfort and entertainment features
+  const entertainmentFeatures = [];
+  if (boatData.amenities?.entertainment?.wifi) entertainmentFeatures.push("WiFi");
+  if (boatData.amenities?.entertainment?.satellite) entertainmentFeatures.push("Satellite TV");
+  if (entertainmentFeatures.length > 0) {
+      features.push(`Full entertainment package with ${entertainmentFeatures.join(" and ")}`);
+  }
 
-        // 4) "OVERVIEW" heading (white, uppercase, 16pt)
-        pdf.setFontSize(16);
-        pdf.setTextColor(...colors.white);
-        pdf.text("OVERVIEW", 20, imageY);
-        imageY += 8;
+  // Default features if we need more
+  const defaultFeatures = [
+      "Experienced crew providing exceptional service",
+      "Prime locations throughout the Balearics",
+      "Customized itineraries for your perfect journey",
+      "Unforgettable Mediterranean experience"
+  ];
 
-        // 5) Description text (white, 12–13pt for improved legibility)
-        pdf.setFontSize(12);
-        if (boatData.description) {
-        const maxWidth = 170; 
-        const wrappedText = pdf.splitTextToSize(boatData.description, maxWidth);
-        pdf.text(wrappedText, 20, imageY);
-        imageY += wrappedText.length * 5 + 10;
-        }
+  // Fill remaining slots with default features
+  while (features.length < 4) {
+      features.push(defaultFeatures[features.length]);
+  }
 
-        // 6) Optional: Key Features / Bullet Points
-        // This fills space and highlights what makes the boat special.
-        // Adjust these bullets to show unique selling points.
-        const keyFeatures = [
-        "High-speed cruising for thrill-seekers",
-        "Luxurious interior with modern amenities",
-        "Professional and experienced crew",
-        "Spacious decks for sunbathing and socialising"
-        ];
+  return features.slice(0, 4);
+};
 
-        // Add a subheading
-        pdf.setFontSize(16);
-        pdf.setTextColor(...colors.white);
-        pdf.text("KEY FEATURES", 20, imageY);
-        imageY += 8;
+// Front page generation
+pdf.setFont('helvetica', 'normal');
 
-        // List the bullet points (white, 12pt)
-        pdf.setFontSize(12);
-        pdf.setTextColor(...colors.white);
+// Background
+pdf.setFillColor(...colors.deepBlue);
+pdf.rect(0, 0, 210, 297, 'F');
 
-        keyFeatures.forEach((feature) => {
-        // A simple bullet can be an asterisk, dash, or a nicer shape if using custom fonts.
-        // We'll do a short bullet '•'.
-        pdf.text(`•  ${feature}`, 25, imageY);
-        imageY += 6;  
-        });
 
-        // 7) Optional: Contact or CTA at the bottom
-        // If you still have space, add a "Contact us" section or a call-to-action.
-        imageY += 10; // some spacing
-        pdf.setFontSize(14);
-        pdf.setTextColor(...colors.white);
-        pdf.text("Ready to set sail?", 20, imageY);
-        imageY += 8;
+// Boat name
+pdf.setTextColor(...colors.white);
+pdf.setFontSize(28);
+pdf.text(
+  (boatData.name || "BOAT").toUpperCase(),
+  105,
+  25,
+  { align: 'center' }
+);
 
-        pdf.setFontSize(12);
-        pdf.text(
-        "Book your unforgettable experience today! Call us at +XX XXXX XXXX or visit example.com",
-        20,
-        imageY
-        );
+// Add decorative lines under the title
+pdf.setLineWidth(0.5);
+pdf.line(50, 30, 160, 30);
+pdf.setLineWidth(0.3);
+pdf.line(70, 32, 140, 32);
 
-    
+// Main image
+const imageWidth = 180;
+const imageHeight = 110;
+let imageX = (210 - imageWidth) / 2;
+let imageY = 40;
+
+if (boatData.images?.[0]) {
+  const mainImageData = await loadImage(boatData.images[0]);
+  if (mainImageData) {
+      // Add subtle shadow effect
+      pdf.setFillColor(0, 0, 0);
+      pdf.setGState(new pdf.GState({ opacity: 0.1 }));
+      pdf.rect(imageX + 2, imageY + 2, imageWidth, imageHeight, 'F');
+      
+      // Reset opacity for image
+      pdf.setGState(new pdf.GState({ opacity: 1 }));
+      pdf.addImage(
+          mainImageData,
+          'JPEG',
+          imageX,
+          imageY,
+          imageWidth,
+          imageHeight,
+          undefined,
+          'FAST'
+      );
+      imageY += imageHeight + 15;
+  }
+}
+
+// Overview section
+pdf.setFontSize(20);
+pdf.setTextColor(...colors.white);
+const overviewTitle = "OVERVIEW";
+pdf.text(overviewTitle, 20, imageY);
+imageY += 10;
+
+// Description
+if (boatData.description) {
+  pdf.setFontSize(12);
+  const maxWidth = 170;
+  const wrappedText = pdf.splitTextToSize(boatData.description, maxWidth);
+  pdf.text(wrappedText, 20, imageY);
+  imageY += wrappedText.length * 5 + 15;
+}
+
+// Key Features section with dynamic content
+const dynamicFeatures = generateKeyFeatures(boatData);
+
+pdf.setFontSize(20);
+pdf.text("KEY FEATURES", 20, imageY);
+imageY += 12;
+
+// Add features with custom styling
+pdf.setFontSize(12);
+dynamicFeatures.forEach((feature) => {
+  // Add custom bullet point
+  pdf.circle(22, imageY - 2, 1, 'F');
+  pdf.text(feature, 26, imageY);
+  imageY += 8;
+});
         // --------------------
         // PAGE 2: GALLERY (since people like seeing images first)
         // --------------------
