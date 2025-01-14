@@ -1,12 +1,104 @@
 import React, { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import { formatDateDDMMYYYY, formatDateTime } from "../utils/date.js";
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { format } from "date-fns";
+import { db } from "../firebase/firebaseConfig";
+
 
 const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [editedBooking, setEditedBooking] = useState(booking || {});
-  const modalRef = useRef(null);
+  const modalRef = useRef(null);  
+  const [linkedExpenses, setLinkedExpenses] = useState([]);
+  const [editedBooking, setEditedBooking] = useState({
+    ...booking,
+    basePrice: booking?.basePrice || 0,
+    discount: booking?.discount || 0,
+    finalPrice: booking?.finalPrice || 0,
+    deposit: booking?.deposit || 0,
+    remainingPayment: booking?.remainingPayment || 0,
+    paymentStatus: booking?.paymentStatus || 'No Payment'
+  });
+  
+  const ExpensesSection = () => {
+    const calculateTotal = () => {
+      return linkedExpenses.reduce((sum, expense) => {
+        const mainAmount = Number(expense.amount) || 0;
+        const subExpensesTotal = expense.subExpenses?.reduce(
+          (subSum, subExp) => subSum + (Number(subExp.amount) || 0),
+          0
+        ) || 0;
+        return sum + mainAmount + subExpensesTotal;
+      }, 0);
+    };
 
+    return (
+      <div className="p-4 border rounded-lg">
+        <div className="flex justify-between items-center mb-4">
+          <h4 className="text-lg font-bold">Linked Expenses</h4>
+          <div className="text-sm text-gray-600">
+            Total Expenses: €{calculateTotal().toFixed(2)}
+          </div>
+        </div>
+
+        {linkedExpenses.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {linkedExpenses.map(expense => (
+                  <React.Fragment key={expense.id}>
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        {format(new Date(expense.date), 'dd/MM/yyyy')}
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">{expense.category}</td>
+                      <td className="px-4 py-2">{expense.description}</td>
+                      <td className="px-4 py-2 whitespace-nowrap">€{Number(expense.amount).toFixed(2)}</td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium
+                          ${expense.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}
+                        >
+                          {expense.paymentStatus || 'Pending'}
+                        </span>
+                      </td>
+                    </tr>
+                    {expense.subExpenses?.map(subExpense => (
+                      <tr key={subExpense.id} className="bg-gray-50">
+                        <td className="px-4 py-2 whitespace-nowrap pl-8">
+                          {format(new Date(subExpense.date), 'dd/MM/yyyy')}
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">{subExpense.category}</td>
+                        <td className="px-4 py-2">{subExpense.description}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">€{Number(subExpense.amount).toFixed(2)}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium
+                            ${subExpense.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}
+                          >
+                            {subExpense.paymentStatus || 'Pending'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-gray-500 text-center py-4">No expenses linked to this booking</p>
+        )}
+      </div>
+    );
+  };
   useEffect(() => {
     if (modalRef.current) {
       modalRef.current.focus();
@@ -14,11 +106,32 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
   }, []);
 
   useEffect(() => {
-    if (booking) {
-      setEditedBooking(booking);
-    }
+    if (!booking) return;
+    
+    // Update edited booking
+    setEditedBooking(booking);
+    
+    // Fetch linked expenses
+    const fetchLinkedExpenses = async () => {
+      try {
+        const expensesRef = collection(db, 'expenses');
+        const q = query(expensesRef, where('bookingId', '==', booking.id));
+        const querySnapshot = await getDocs(q);
+        
+        const expenses = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        setLinkedExpenses(expenses);
+      } catch (error) {
+        console.error('Error fetching linked expenses:', error);
+      }
+    };
+  
+    fetchLinkedExpenses();
   }, [booking]);
-
+  
   if (!booking) return null;
 
   const handleInputChange = (field, value) => {
@@ -31,21 +144,20 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
   const handlePriceChange = (field, value) => {
     setEditedBooking((prev) => {
       const newVal = parseFloat(value) || 0;
-      let basePrice =
-        field === "basePrice" ? newVal : parseFloat(prev.basePrice) || 0;
-      let discount =
-        field === "discount" ? newVal : parseFloat(prev.discount) || 0;
-
-      const finalPrice = basePrice - discount;
-      const deposit = finalPrice * 0.5;
+      let basePrice = field === "basePrice" ? newVal : parseFloat(prev.basePrice) || 0;
+      let discount = field === "discount" ? newVal : parseFloat(prev.discount) || 0;
+  
+      const finalPrice = Math.max(0, basePrice - discount);
+      const deposit = finalPrice * 0.5; // 50% deposit
       const remainingPayment = finalPrice - deposit;
-
+  
       return {
         ...prev,
         [field]: newVal,
         finalPrice,
         deposit,
         remainingPayment,
+        paymentMethod: prev.paymentMethod || '',
       };
     });
   };
@@ -69,7 +181,7 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
       alert("Booking date is required.");
       return;
     }
-
+  
     onSave(booking.id, editedBooking);
     setIsEditing(false);
   };
@@ -384,108 +496,92 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
               </div>
             </div>
 
+       
+
             <div className="col-span-full">
-              <div className="p-4 border rounded-lg">
-                <h4 className="text-lg font-bold mb-3">Payment Details</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Base Price:
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="number"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.basePrice || 0}
-                        onChange={(e) =>
-                          handlePriceChange("basePrice", e.target.value)
-                        }
-                      />
-                    ) : (
-                      <p className="mt-1">
-                        {editedBooking.basePrice >= 0
-                          ? `€${editedBooking.basePrice.toFixed(2)}`
-                          : "N/A"}
-                      </p>
-                    )}
-                  </div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Discount:
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="number"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.discount || 0}
-                        onChange={(e) =>
-                          handlePriceChange("discount", e.target.value)
-                        }
-                      />
-                    ) : (
-                      <p className="mt-1">
-                        {editedBooking.discount >= 0
-                          ? `€${editedBooking.discount.toFixed(2)}`
-                          : "N/A"}
-                      </p>
-                    )}
-                  </div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Final Price:
-                    </label>
-                    <p className="mt-1">
-                      {editedBooking.finalPrice >= 0
-                        ? `€${editedBooking.finalPrice.toFixed(2)}`
-                        : "N/A"}
-                    </p>
-                  </div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Deposit:
-                    </label>
-                    <p className="mt-1">
-                      {editedBooking.deposit >= 0
-                        ? `€${editedBooking.deposit.toFixed(2)}`
-                        : "N/A"}
-                    </p>
-                  </div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Remaining:
-                    </label>
-                    <p className="mt-1">
-                      {editedBooking.remainingPayment >= 0
-                        ? `€${editedBooking.remainingPayment.toFixed(2)}`
-                        : "N/A"}
-                    </p>
-                  </div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Payment Status:
-                    </label>
-                    {isEditing ? (
-                      <select
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.paymentStatus || ""}
-                        onChange={(e) =>
-                          handleInputChange("paymentStatus", e.target.value)
-                        }
-                      >
-                        <option value="">Select Status</option>
-                        <option value="No Payment">No Payment</option>
-                        <option value="Partial">Partial Payment</option>
-                        <option value="Completed">Completed</option>
-                      </select>
-                    ) : (
-                      <p className="mt-1">
-                        {editedBooking.paymentStatus || "N/A"}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+  <div className="p-4 border rounded-lg">
+    <h4 className="text-lg font-bold mb-4">Payment Details</h4>
+    
+    {/* Price Row */}
+    <div className="flex justify-between mb-8">
+      <div>
+        <label className="block text-sm font-medium text-gray-700">Base Price:</label>
+        {isEditing ? (
+          <input
+            type="number"
+            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+            value={editedBooking.basePrice || 0}
+            onChange={(e) => handlePriceChange("basePrice", e.target.value)}
+          />
+        ) : (
+          <p className="text-lg">€{editedBooking.basePrice?.toFixed(2) || '0.00'}</p>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700">Discount:</label>
+        {isEditing ? (
+          <input
+            type="number"
+            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+            value={editedBooking.discount || 0}
+            onChange={(e) => handlePriceChange("discount", e.target.value)}
+          />
+        ) : (
+          <p className="text-lg">€{editedBooking.discount?.toFixed(2) || '0.00'}</p>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700">Final Price:</label>
+        <p className="text-lg text-blue-600">€{editedBooking.finalPrice?.toFixed(2) || '0.00'}</p>
+      </div>
+    </div>
+
+    <div className="col-span-full">
+  <ExpensesSection />
+</div>   
+
+
+    {/* Payment Information */}
+    <div className="bg-gray-50 p-4 rounded-lg">
+      <div className="flex justify-between mb-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Initial Payment:</label>
+          <p className="text-lg">€{editedBooking.deposit?.toFixed(2) || '0.00'}</p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Remaining Payment:</label>
+          <p className="text-lg">€{editedBooking.remainingPayment?.toFixed(2) || '0.00'}</p>
+        </div>
+      </div>
+
+      <div className="border-t border-gray-200 pt-4 mt-4">
+        <label className="block text-sm font-medium text-gray-700">Payment Status:</label>
+        {isEditing ? (
+          <select
+            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+            value={editedBooking.paymentStatus || ""}
+            onChange={(e) => handleInputChange("paymentStatus", e.target.value)}
+          >
+            <option value="No Payment">No Payment</option>
+            <option value="Partial">Partial</option>
+            <option value="Completed">Completed</option>
+          </select>
+        ) : (
+          <p className={`
+            ${editedBooking.paymentStatus === 'Completed' ? 'text-green-600' :
+              editedBooking.paymentStatus === 'Partial' ? 'text-orange-600' :
+              'text-red-600'}
+          `}>
+            {editedBooking.paymentStatus || "N/A"}
+          </p>
+        )}
+      </div>
+    </div>
+  </div>
+</div>
 
             <div className="col-span-full">
               <div className="p-4 border rounded-lg">
