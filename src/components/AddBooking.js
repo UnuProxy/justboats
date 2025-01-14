@@ -6,7 +6,6 @@ import { getAuth } from 'firebase/auth';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 
 
-
 function AddBooking() {
   const [activeStep, setActiveStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -35,6 +34,7 @@ function AddBooking() {
       deposit: "",
       remainingPayment: "",
       paymentStatus: "No Payment",
+      payments: [],
     },
     transfer: {
       required: false,
@@ -180,18 +180,15 @@ function AddBooking() {
   
       // Handle transfer section
       if (section === 'transfer') {
-        // Special handling for transfer.required field
         if (field === 'required') {
           return {
             ...prev,
             transfer: {
               ...prev.transfer,
-              required: value // Directly set the boolean value
+              required: value
             }
           };
         }
-        
-        // Handle nested pickup/dropoff objects
         return {
           ...prev,
           transfer: {
@@ -204,7 +201,54 @@ function AddBooking() {
         };
       }
   
-      // Rest of your existing code...
+      // Handle pricing section
+      if (section === 'pricing') {
+        // Special handling for payments array
+        if (field === 'payments') {
+          return {
+            ...prev,
+            pricing: {
+              ...prev.pricing,
+              payments: value
+            }
+          };
+        }
+  
+        // Handle other pricing fields
+        const newPricing = {
+          ...prev.pricing,
+          [field]: value
+        };
+  
+        // Calculate final price when basePrice or discount changes
+        if (field === 'basePrice' || field === 'discount') {
+          const basePrice = field === 'basePrice' ? Number(value) : Number(prev.pricing.basePrice);
+          const discount = field === 'discount' ? Number(value) : Number(prev.pricing.discount);
+          newPricing.finalPrice = Math.max(0, basePrice - discount);
+          
+          // Calculate deposit (50% of final price)
+          newPricing.deposit = newPricing.finalPrice * 0.5;
+          
+          // Calculate remaining payment
+          newPricing.remainingPayment = newPricing.finalPrice - newPricing.deposit;
+          
+          // Update payment status automatically
+          if (newPricing.finalPrice === 0) {
+            newPricing.paymentStatus = 'No Payment';
+          } else if (newPricing.deposit >= newPricing.finalPrice) {
+            newPricing.paymentStatus = 'Completed';
+          } else if (newPricing.deposit > 0) {
+            newPricing.paymentStatus = 'Partial';
+          }
+        }
+  
+        return {
+          ...prev,
+          pricing: newPricing
+        };
+      }
+  
+      // Handle clientDetails section
       if (section === 'clientDetails') {
         return {
           ...prev,
@@ -215,6 +259,7 @@ function AddBooking() {
         };
       }
   
+      // Handle bookingDetails section
       if (section === 'bookingDetails') {
         return {
           ...prev,
@@ -225,6 +270,7 @@ function AddBooking() {
         };
       }
   
+      // Default case
       return {
         ...prev,
         [section]: {
@@ -234,10 +280,6 @@ function AddBooking() {
       };
     });
   };
-
-  
-  
-
   const renderStep1 = () => (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
@@ -421,97 +463,98 @@ function AddBooking() {
       </div>
     </div>
   );
-  const renderStep3 = () => (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 mb-4">
-        <Euro className="w-5 h-5 text-gray-600" />
-        <h3 className="text-lg font-semibold">Pricing Details</h3>
+  const renderStep3 = () => {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Euro className="w-5 h-5 text-gray-600" />
+          <h3 className="text-lg font-semibold">Pricing Details</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Base Price */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Base Price (€)
+            </label>
+            <input
+              type="number"
+              className="mt-1 w-full p-2 border rounded"
+              value={formData.pricing.basePrice}
+              onChange={(e) => handleInputChange("pricing", "basePrice", e.target.value)}
+            />
+          </div>
+  
+          {/* Discount */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Discount (€)
+            </label>
+            <input
+              type="number"
+              className="mt-1 w-full p-2 border rounded"
+              value={formData.pricing.discount}
+              onChange={(e) => handleInputChange("pricing", "discount", e.target.value)}
+            />
+          </div>
+  
+          {/* Final Price */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Final Price (€)
+            </label>
+            <input
+              type="number"
+              className="mt-1 w-full p-2 border rounded bg-gray-50"
+              value={formData.pricing.finalPrice}
+              readOnly
+            />
+          </div>
+  
+          {/* Initial Payment */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Initial Payment (€)
+            </label>
+            <input
+              type="number"
+              className="mt-1 w-full p-2 border rounded bg-gray-50"
+              value={formData.pricing.deposit}
+              readOnly
+            />
+          </div>
+  
+          {/* Remaining Payment */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Remaining Payment (€)
+            </label>
+            <input
+              type="number"
+              className="mt-1 w-full p-2 border rounded bg-gray-50"
+              value={formData.pricing.remainingPayment}
+              readOnly
+            />
+          </div>
+  
+          {/* Payment Status */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Payment Status
+            </label>
+            <select
+              className="mt-1 w-full p-2 border rounded"
+              value={formData.pricing.paymentStatus}
+              onChange={(e) => handleInputChange("pricing", "paymentStatus", e.target.value)}
+            >
+              <option value="No Payment">No Payment</option>
+              <option value="Partial">Partial Payment</option>
+              <option value="Completed">Completed</option>
+            </select>
+          </div>
+        </div>
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Base Price (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.pricing.basePrice}
-            onChange={(e) =>
-              handleInputChange("pricing", "basePrice", e.target.value)
-            }
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Discount (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.pricing.discount}
-            onChange={(e) =>
-              handleInputChange("pricing", "discount", e.target.value)
-            }
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Final Price (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded bg-gray-50"
-            value={formData.pricing.finalPrice}
-            readOnly
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Deposit (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded bg-gray-50"
-            value={formData.pricing.deposit}
-            readOnly
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Remaining Payment (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded bg-gray-50"
-            value={formData.pricing.remainingPayment}
-            readOnly
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Payment Status
-          </label>
-          <select
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.pricing.paymentStatus}
-            onChange={(e) =>
-              handleInputChange("pricing", "paymentStatus", e.target.value)
-            }
-          >
-            <option value="No Payment">No Payment</option>
-            <option value="Partial">Partial Payment</option>
-            <option value="Completed">Completed</option>
-          </select>
-        </div>
-      </div>
-    </div>
-  );
+    );
+  };
   const renderStep4 = () => (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
@@ -758,7 +801,7 @@ function AddBooking() {
     }
     return true;
   };
-  
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (activeStep !== 4 || !validateForm()) return;
@@ -925,10 +968,7 @@ function AddBooking() {
     } finally {
         setLoading(false);
     }
-};
-
-
-
+  };
   return (
     <div className="min-h-screen bg-gray-50 p-2 sm:p-6">
       <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-lg">

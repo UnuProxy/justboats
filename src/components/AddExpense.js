@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { db, storage, auth } from "../firebase/firebaseConfig";
 import { collection, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { X } from 'lucide-react';
+import { X, FileText } from 'lucide-react';
 
 const AddExpense = () => {
  const [imageSrc, setImageSrc] = useState(null);
@@ -46,20 +46,27 @@ const AddExpense = () => {
    setExpenseData((prev) => ({ ...prev, [name]: value }));
  };
 
- const handleImageChange = (event) => {
-   const file = event.target.files[0];
-   if (file) {
-     setImageFile(file);
-     const reader = new FileReader();
-     reader.onloadend = () => {
-       setImageSrc(reader.result);
-     };
-     reader.readAsDataURL(file);
-   } else {
-     setImageFile(null);
-     setImageSrc(null);
-   }
- };
+ const handleFileChange = (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    setImageFile(file);
+    
+    // If it's a PDF, show a PDF icon or placeholder
+    if (file.type === 'application/pdf') {
+      setImageSrc('/pdf-icon.png'); // Or use a PDF icon component
+    } else {
+      // For images, show preview as before
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImageSrc(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  } else {
+    setImageFile(null);
+    setImageSrc(null);
+  }
+};
 
  const handleSubmit = async (event) => {
    event.preventDefault();
@@ -376,21 +383,29 @@ const AddExpense = () => {
              Upload Receipt/Invoice (Optional):
            </label>
            <input
-             type="file"
-             id="image"
-             name="image"
-             accept="image/*"
-             onChange={handleImageChange}
-             ref={fileInputRef}
-             className="w-full"
-           />
+            type="file"
+            id="image"
+            name="image"
+            accept="application/pdf,image/*"  // Allow both PDFs and images
+            onChange={handleFileChange}
+            ref={fileInputRef}
+            className="w-full"
+          />
          </div>
 
-         {imageSrc && (
-           <div className="mb-4">
-             <img src={imageSrc} alt="Uploaded Receipt" className="w-full rounded-lg" />
-           </div>
-         )}
+         {imageFile && (
+  <div className="mb-4">
+    {imageFile.type === 'application/pdf' ? (
+      <div className="flex items-center gap-2 p-4 border rounded-lg bg-gray-50">
+        <FileText className="h-6 w-6 text-blue-500" />
+        <span className="text-sm text-gray-600">{imageFile.name}</span>
+        <span className="text-xs text-gray-500">PDF Document</span>
+      </div>
+    ) : (
+      <img src={imageSrc} alt="Uploaded Receipt" className="w-full rounded-lg" />
+    )}
+  </div>
+)}
 
          <button
            type="submit"
