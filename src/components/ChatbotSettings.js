@@ -1,62 +1,77 @@
-import React, { useState, useEffect } from "react";
-import { MessageSquare, RefreshCw, CheckCircle, AlertCircle, User } from "lucide-react";
+// ChatbotSettings.jsx
+import React, { useState, useEffect } from 'react';
+import { MessageSquare, CheckCircle, AlertCircle, User } from 'lucide-react';
+import { chatService } from './chatService';
 
 const ChatbotSettings = () => {
     const [conversations, setConversations] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedConversation, setSelectedConversation] = useState(null);
+    const [messages, setMessages] = useState([]);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
-        fetchConversations();
+        const unsubscribe = chatService.subscribeToConversations((updatedConversations) => {
+            console.log('Received conversations:', updatedConversations);
+            setConversations(updatedConversations);
+            setIsLoading(false);
+        });
+
+        return () => unsubscribe();
     }, []);
 
-    const fetchConversations = async () => {
-        setIsLoading(true);
+    useEffect(() => {
+        const loadMessages = async () => {
+            if (selectedConversation) {
+                const msgs = await chatService.getMessages(selectedConversation.id);
+                setMessages(msgs);
+            }
+        };
+
+        loadMessages();
+    }, [selectedConversation]);
+
+    const formatDate = (timestamp) => {
+        if (!timestamp) return '';
+        
         try {
-            // Replace with your actual API call
-            const mockData = [
-                {
-                    id: 1,
-                    customerEmail: "customer@example.com",
-                    startTime: "2024-01-12T14:30:00",
-                    status: "in-progress",
-                    messages: [
-                        { role: "user", content: "I want to book a yacht for next weekend" },
-                        { role: "assistant", content: "I can help you with that. What size yacht are you interested in?" },
-                        { role: "user", content: "A medium-sized yacht would be great!" },
-                    ],
-                },
-                // Add more mock conversations as needed
-            ];
-            setConversations(mockData);
+            // Handle Firestore timestamp
+            if (timestamp?.seconds) {
+                return new Date(timestamp.seconds * 1000).toLocaleString();
+            }
+            
+            // Handle ISO string
+            const date = new Date(timestamp);
+            if (isNaN(date.getTime())) {
+                return new Date(timestamp.replace(' UTC+1', '')).toLocaleString();
+            }
+            return date.toLocaleString();
         } catch (error) {
-            console.error("Error fetching conversations:", error);
-        } finally {
-            setIsLoading(false);
+            console.error('Date parsing error:', error);
+            return timestamp; // Return original string if parsing fails
         }
     };
 
-    const formatDate = (dateString) => {
-        return new Date(dateString).toLocaleString();
-    };
-
-    const takeOverConversation = (conversationId) => {
-        console.log(`Taking over conversation with ID: ${conversationId}`);
-        // Add logic to flag the conversation for manual intervention
+    const takeOverConversation = async (conversationId) => {
+        const agentId = 'current-agent-id'; // Replace with actual agent ID
+        const success = await chatService.takeOverConversation(conversationId, agentId);
+        
+        if (!success) {
+            setError('Failed to take over conversation. Please try again.');
+        }
     };
 
     return (
         <div className="p-6 max-w-6xl mx-auto">
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold">Chatbot Monitor</h1>
-                <button
-                    onClick={fetchConversations}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                    <RefreshCw size={20} />
-                    Refresh
-                </button>
             </div>
+
+            {error && (
+                <div className="mb-4 p-4 bg-red-100 text-red-700 rounded-lg">
+                    {error}
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Conversations List */}
@@ -67,6 +82,8 @@ const ChatbotSettings = () => {
                     <div className="divide-y max-h-[600px] overflow-y-auto">
                         {isLoading ? (
                             <div className="p-4 text-center text-gray-500">Loading conversations...</div>
+                        ) : conversations.length === 0 ? (
+                            <div className="p-4 text-center text-gray-500">No conversations found</div>
                         ) : (
                             conversations.map((conv) => (
                                 <div
@@ -77,16 +94,23 @@ const ChatbotSettings = () => {
                                     }`}
                                 >
                                     <div className="flex items-center justify-between mb-2">
-                                        <span className="font-medium">{conv.customerEmail}</span>
+                                        <span className="font-medium">{conv.customerEmail || 'Anonymous User'}</span>
                                         {conv.status === "completed" ? (
                                             <CheckCircle size={16} className="text-green-500" />
-                                        ) : conv.status === "in-progress" ? (
+                                        ) : conv.status === "agent-handling" ? (
                                             <User size={16} className="text-blue-500" />
                                         ) : (
                                             <AlertCircle size={16} className="text-yellow-500" />
                                         )}
                                     </div>
-                                    <div className="text-sm text-gray-500">{formatDate(conv.startTime)}</div>
+                                    <div className="text-sm text-gray-500">
+                                        {formatDate(conv.lastMessageAt || conv.createdAt)}
+                                    </div>
+                                    {conv.messages?.length > 0 && (
+                                        <div className="mt-2 text-sm text-gray-600 truncate">
+                                            {conv.messages[conv.messages.length - 1].content}
+                                        </div>
+                                    )}
                                 </div>
                             ))
                         )}
@@ -100,7 +124,7 @@ const ChatbotSettings = () => {
                             <div className="p-4 border-b">
                                 <h2 className="text-lg font-semibold">Conversation Details</h2>
                                 <p className="text-sm text-gray-500">
-                                    Customer: {selectedConversation.customerEmail}
+                                    Customer: {selectedConversation.customerEmail || 'Anonymous User'}
                                 </p>
                                 <button
                                     onClick={() => takeOverConversation(selectedConversation.id)}
@@ -110,9 +134,9 @@ const ChatbotSettings = () => {
                                 </button>
                             </div>
                             <div className="flex-1 p-4 space-y-4 max-h-[600px] overflow-y-auto">
-                                {selectedConversation.messages.map((message, index) => (
+                                {messages.map((message, index) => (
                                     <div
-                                        key={index}
+                                        key={message.id || index}
                                         className={`flex ${
                                             message.role === "user" ? "justify-end" : "justify-start"
                                         }`}
@@ -124,10 +148,24 @@ const ChatbotSettings = () => {
                                                     : "bg-gray-100 text-gray-800"
                                             }`}
                                         >
-                                            {message.content}
+                                            <div className="text-sm">
+                                                {message.content}
+                                            </div>
+                                            <div className={`text-xs ${
+                                                message.role === "user" 
+                                                    ? "text-blue-100" 
+                                                    : "text-gray-500"
+                                            } mt-1`}>
+                                                {formatDate(message.timestamp)}
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
+                                {messages.length === 0 && (
+                                    <div className="text-center text-gray-500">
+                                        No messages in this conversation
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ) : (
