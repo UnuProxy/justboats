@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import { formatDateDDMMYYYY, formatDateTime } from "../utils/date.js";
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { format } from "date-fns";
 import { db } from "../firebase/firebaseConfig";
-
 
 const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -20,6 +19,43 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
     paymentStatus: booking?.paymentStatus || 'No Payment'
   });
   
+  const handleExpensePaymentStatusChange = async (expenseId, newStatus) => {
+    console.log("Changing expense:", expenseId, "to", newStatus);
+    try {
+      
+      await updateDoc(doc(db, "expenses", expenseId), { paymentStatus: newStatus });
+      console.log("...Firestore update completed successfully!");
+  
+      setLinkedExpenses((prevExpenses) => {
+        return prevExpenses.map((parentExp) => {
+          let updatedParent = parentExp; 
+      
+          if (parentExp.id === expenseId) {
+            updatedParent = { ...parentExp, paymentStatus: newStatus };
+          }
+      
+          if (Array.isArray(parentExp.subExpenses) && parentExp.subExpenses.length) {
+            const updatedSubExpenses = parentExp.subExpenses.map((sub) => {
+              if (sub.id === expenseId) {
+                
+                return { ...sub, paymentStatus: newStatus };
+              }
+              return sub;
+            });
+            
+            updatedParent = { ...updatedParent, subExpenses: updatedSubExpenses };
+          }
+      
+          return updatedParent;
+        });
+      });
+      
+    } catch (error) {
+      console.error("Error updating payment status:", error);
+      alert("Failed to update payment status. Please try again.");
+    }
+  };
+
   const ExpensesSection = () => {
     const calculateTotal = () => {
       return linkedExpenses.reduce((sum, expense) => {
@@ -56,6 +92,7 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {linkedExpenses.map(expense => (
                   <React.Fragment key={expense.id}>
+                    {/* Parent Expense */}
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-2 whitespace-nowrap">
                         {format(new Date(expense.date), 'dd/MM/yyyy')}
@@ -64,13 +101,28 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
                       <td className="px-4 py-2">{expense.description}</td>
                       <td className="px-4 py-2 whitespace-nowrap">€{Number(expense.amount).toFixed(2)}</td>
                       <td className="px-4 py-2 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium
-                          ${expense.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}
+                        <button
+                          onClick={() =>
+                            handleExpensePaymentStatusChange(
+                              expense.id,
+                              expense.paymentStatus === 'paid' ? 'pending' : 'paid'
+                            )
+                          }
+                          className={`
+                            px-2 py-1 rounded-full text-xs font-medium
+                            ${
+                              expense.paymentStatus === 'paid'
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                            }
+                          `}
                         >
-                          {expense.paymentStatus || 'Pending'}
-                        </span>
+                          {expense.paymentStatus || 'pending'}
+                        </button>
                       </td>
                     </tr>
+
+                    {/* Sub-Expenses */}
                     {expense.subExpenses?.map(subExpense => (
                       <tr key={subExpense.id} className="bg-gray-50">
                         <td className="px-4 py-2 whitespace-nowrap pl-8">
@@ -79,11 +131,25 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
                         <td className="px-4 py-2 whitespace-nowrap">{subExpense.category}</td>
                         <td className="px-4 py-2">{subExpense.description}</td>
                         <td className="px-4 py-2 whitespace-nowrap">€{Number(subExpense.amount).toFixed(2)}</td>
-                        <td className="px-4 py-2 whitespace-nowrap">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium
-                            ${subExpense.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}
+                        <td>
+                          <span
+                            onClick={() =>
+                              handleExpensePaymentStatusChange(
+                                subExpense.id,
+                                subExpense.paymentStatus === 'paid' ? 'pending' : 'paid'
+                              )
+                            }
+                            className={`
+                              cursor-pointer
+                              px-2 py-1 rounded-full text-xs font-medium
+                              ${
+                                subExpense.paymentStatus === 'paid'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-yellow-100 text-yellow-800'
+                              }
+                            `}
                           >
-                            {subExpense.paymentStatus || 'Pending'}
+                            {subExpense.paymentStatus || 'pending'}
                           </span>
                         </td>
                       </tr>
@@ -99,40 +165,54 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
       </div>
     );
   };
-  useEffect(() => {
-    if (modalRef.current) {
-      modalRef.current.focus();
-    }
-  }, []);
 
-  useEffect(() => {
-    if (!booking) return;
-    
-    // Update edited booking
-    setEditedBooking(booking);
-    
-    // Fetch linked expenses
-    const fetchLinkedExpenses = async () => {
-      try {
-        const expensesRef = collection(db, 'expenses');
-        const q = query(expensesRef, where('bookingId', '==', booking.id));
-        const querySnapshot = await getDocs(q);
-        
-        const expenses = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
+    /**
+   * 1) Focus the modal when it opens
+   */
+    useEffect(() => {
+      if (modalRef.current) {
+        modalRef.current.focus();
+      }
+    }, []);
+  
+    /**
+     * 2) Real-time listener for expenses
+     */
+    useEffect(() => {
+      if (!booking) return;
+      
+      // Always update local booking data
+      setEditedBooking(booking);
+  
+      const expensesRef = collection(db, "expenses");
+      const q = query(expensesRef, where("bookingId", "==", booking.id));
+  
+      // Set up the real-time listener
+      const unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const allExpenses = querySnapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data()
         }));
         
-        setLinkedExpenses(expenses);
-      } catch (error) {
-        console.error('Error fetching linked expenses:', error);
-      }
-    };
+        // Separate parent from child
+        const parentExpenses = allExpenses.filter(exp => !exp.parentId);
+        const childExpenses  = allExpenses.filter(exp => exp.parentId);
   
-    fetchLinkedExpenses();
-  }, [booking]);
+        // Attach children to each parent
+        const combinedExpenses = parentExpenses.map(parent => ({
+          ...parent,
+          subExpenses: childExpenses.filter(child => child.parentId === parent.id)
+        }));
+  
+        setLinkedExpenses(combinedExpenses);
+      });
+  
+      // Clean up listener on unmount
+      return () => unsubscribe();
+    }, [booking]);
   
   if (!booking) return null;
+
 
   const handleInputChange = (field, value) => {
     setEditedBooking((prev) => ({
@@ -140,6 +220,7 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
       [field]: value,
     }));
   };
+  
 
   const handlePriceChange = (field, value) => {
     setEditedBooking((prev) => {
@@ -435,7 +516,7 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
               )}
             </div>
 
-            <div className="col-span-full">
+    <div className="col-span-full">
               <div className="p-4 border rounded-lg">
                 <h4 className="text-lg font-bold mb-3">Booking Time</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -494,12 +575,12 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
                   </div>
                 </div>
               </div>
-            </div>
+    </div>
 
        
 
-            <div className="col-span-full">
-  <div className="p-4 border rounded-lg">
+    <div className="col-span-full">
+    <div className="p-4 border rounded-lg">
     <h4 className="text-lg font-bold mb-4">Payment Details</h4>
     
     {/* Price Row */}
@@ -539,8 +620,8 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
     </div>
 
     <div className="col-span-full">
-  <ExpensesSection />
-</div>   
+    <ExpensesSection />
+    </div>   
 
 
     {/* Payment Information */}
@@ -580,10 +661,10 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
         )}
       </div>
     </div>
-  </div>
-</div>
+    </div>
+    </div>
 
-            <div className="col-span-full">
+    <div className="col-span-full">
               <div className="p-4 border rounded-lg">
                 <h4 className="text-lg font-bold mb-3">
                   Additional Information
@@ -640,9 +721,9 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
+    </div>
+    </div>
+    </div>
 
         <div className="bg-gray-100 p-4 flex justify-end space-x-2 rounded-b-lg">
           {isEditing ? (

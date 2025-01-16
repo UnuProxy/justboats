@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc, deleteDoc, addDoc } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { format } from 'date-fns';
 import Papa from 'papaparse';
@@ -21,16 +21,55 @@ const ExpenseOverview = () => {
   const [selectedClientParentId, setSelectedClientParentId] = useState(null);
   const [itemsPerPage] = useState(10); 
   const [currentPage, setCurrentPage] = useState(1);
-
+  
   useEffect(() => {
     fetchExpenses();
   }, []);
 
-  const ClientExpenseRow = ({ expense, onDelete, onAddSubExpense, isSubExpense = false, onUpdateStatus }) => {
+  useEffect(() => {
+    
+    const expensesRef = collection(db, 'expenses');
+    const q = query(expensesRef, orderBy('timestamp', 'desc'));
+  
+    const unsubscribe = onSnapshot(q, async (querySnapshot) => {
+      // Map docs to data
+      const allExpenses = [];
+      for (const docSnap of querySnapshot.docs) {
+        const docData = docSnap.data();
+        
+        allExpenses.push({ 
+          id: docSnap.id, 
+          ...docData 
+        });
+      }
+  
+      // Now do the parent/child grouping
+      const parentExpenses = allExpenses.filter(exp => !exp.parentId);
+      const childExpenses = allExpenses.filter(exp => exp.parentId);
+  
+      const groupedExpenses = parentExpenses.map(parent => ({
+        ...parent,
+        subExpenses: childExpenses.filter(child => child.parentId === parent.id),
+      }));
+  
+      setExpenses(groupedExpenses);
+      setLoading(false);
+    });
+  
+    // Turn off the listener when unmounting
+    return () => unsubscribe();
+  }, []);
+
+  const ClientExpenseRow = ({
+    expense,
+    onDelete,
+    onAddSubExpense,
+    isSubExpense = false,
+    onUpdateStatus
+  }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const hasSubExpenses = expense.subExpenses?.length > 0;
-    
-    // Calculate total including all sub-expenses
+  
     const calculateTotalAmount = (exp) => {
       const subExpensesTotal = exp.subExpenses?.reduce((sum, subExp) => sum + Number(subExp.amount), 0) || 0;
       return Number(exp.amount) + subExpensesTotal;
@@ -38,8 +77,21 @@ const ExpenseOverview = () => {
   
     return (
       <>
-        <tr className={`hover:bg-gray-50 ${isSubExpense ? 'bg-gray-50' : ''}`}>
-          <td className={`px-6 py-4 whitespace-nowrap ${isSubExpense ? 'pl-12' : ''}`}>
+        <tr
+          className={`
+            hover:bg-gray-50
+            ${isSubExpense
+              ? 'bg-green-50 border-l-8 border-green-300'
+              : ''
+            }
+          `}
+        >
+          <td
+            className={`
+              px-6 py-4 whitespace-nowrap
+              ${isSubExpense ? 'pl-12' : ''}
+            `}
+          >
             {format(new Date(expense.date), 'dd/MM/yyyy')}
           </td>
           <td className="px-6 py-4 whitespace-nowrap">{expense.category}</td>
@@ -58,7 +110,10 @@ const ExpenseOverview = () => {
             <button
               onClick={() => onUpdateStatus(expense.id, expense.paymentStatus || 'pending')}
               className={`px-3 py-1 rounded-full text-xs font-medium
-                ${expense.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}
+                ${expense.paymentStatus === 'paid'
+                  ? 'bg-green-100 text-green-800'
+                  : 'bg-yellow-100 text-yellow-800'}
+              `}
             >
               {expense.paymentStatus || 'Pending'}
             </button>
@@ -100,10 +155,17 @@ const ExpenseOverview = () => {
                   onClick={() => setIsExpanded(!isExpanded)}
                   className="text-gray-500 hover:text-gray-700 flex items-center gap-1"
                 >
-                  {isExpanded ? 
-                    <><ChevronUp className="h-4 w-4" /> <span className="text-sm">Hide</span></> : 
-                    <><ChevronDown className="h-4 w-4" /> <span className="text-sm">Show ({expense.subExpenses.length})</span></>
-                  }
+                  {isExpanded ? (
+                    <>
+                      <ChevronUp className="h-4 w-4" />
+                      <span className="text-sm">Hide</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-4 w-4" />
+                      <span className="text-sm">Show ({expense.subExpenses.length})</span>
+                    </>
+                  )}
                 </button>
               )}
               <button
@@ -115,6 +177,7 @@ const ExpenseOverview = () => {
             </div>
           </td>
         </tr>
+  
         {isExpanded && hasSubExpenses && expense.subExpenses.map(subExpense => (
           <ClientExpenseRow
             key={subExpense.id}
@@ -122,14 +185,15 @@ const ExpenseOverview = () => {
             onDelete={onDelete}
             onAddSubExpense={onAddSubExpense}
             onUpdateStatus={onUpdateStatus}
-            isSubExpense={true}
+            isSubExpense={true} // recursively pass down
           />
         ))}
       </>
     );
   };
-  // Pagination component
-  const Pagination = ({ totalItems, itemsPerPage, currentPage, onPageChange }) => {
+  
+
+const Pagination = ({ totalItems, itemsPerPage, currentPage, onPageChange }) => {
     const totalPages = Math.ceil(totalItems / itemsPerPage);
     
     if (totalPages <= 1) return null;
@@ -157,9 +221,8 @@ const ExpenseOverview = () => {
         </button>
       </div>
     );
-  };
+};
 
-// Pagination logic
 const paginateData = (items, currentPage, itemsPerPage) => {
   const startIndex = (currentPage - 1) * itemsPerPage;
   return items.slice(startIndex, startIndex + itemsPerPage);
@@ -432,24 +495,46 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
   };
 
   const handleUpdatePaymentStatus = async (expenseId, currentStatus) => {
+    // Save our currently expanded rows
+    const oldExpanded = new Set(expandedRows);
+  
     setUpdatingStatus(expenseId);
     const newStatus = currentStatus === 'pending' ? 'paid' : 'pending';
-
+  
     try {
+      
       const expenseRef = doc(db, 'expenses', expenseId);
       await updateDoc(expenseRef, { paymentStatus: newStatus });
-      setExpenses(prevExpenses =>
-        prevExpenses.map(expense =>
-          expense.id === expenseId ? { ...expense, paymentStatus: newStatus } : expense
-        )
+  
+      setExpenses((prevExpenses) =>
+        prevExpenses.map((expense) => {
+          if (expense.id === expenseId) {
+            return { ...expense, paymentStatus: newStatus };
+          }
+          if (expense.subExpenses) {
+            const updatedSubs = expense.subExpenses.map((sub) =>
+              sub.id === expenseId ? { ...sub, paymentStatus: newStatus } : sub
+            );
+            return { ...expense, subExpenses: updatedSubs };
+          }
+          return expense;
+        })
       );
+  
+      
+      await fetchExpenses();
+  
+      
+      setExpandedRows(oldExpanded);
+  
     } catch (error) {
       console.error('Error updating payment status:', error);
+      alert('Failed to update payment status. Please try again.');
     } finally {
       setUpdatingStatus(null);
     }
   };
-
+  
   const handleDeleteExpense = async (expenseId) => {
     if (window.confirm('Are you sure you want to delete this expense? This action cannot be undone.')) {
       setDeletingExpenseId(expenseId);
@@ -532,56 +617,109 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
   const handleAddExpenseToBill = async (expenseData, parentId = null) => {
     try {
       const expenseRef = collection(db, 'expenses');
-      const newExpense = {
-        ...expenseData,
-        type: 'client',
-        timestamp: new Date(),
-        paymentStatus: 'pending',
-        parentId: parentId,
-        amount: Number(expenseData.amount)
-      };
-  
-      // Add the new expense to Firestore
-      const docRef = await addDoc(expenseRef, newExpense);
-      const newExpenseWithId = { ...newExpense, id: docRef.id };
-  
-      let updatedExpenses;
+      
+      let bookingId = expenseData.bookingId;
       if (parentId) {
-        // Update parent expense with new sub-expense
-        updatedExpenses = expenses.map(expense => {
-          if (expense.id === parentId) {
-            const existingSubExpenses = expense.subExpenses || [];
-            return {
-              ...expense,
-              subExpenses: [...existingSubExpenses, newExpenseWithId]
-            };
-          }
-          return expense;
-        });
-      } else {
-        // Add new parent expense
-        updatedExpenses = [...expenses, newExpenseWithId];
-      }
-  
-      // Update state with new expenses and recalculate total
-      setExpenses(updatedExpenses);
-      calculateTotal(updatedExpenses);
-  
-      // If this is a sub-expense, update the parent's total in Firestore
-      if (parentId) {
-        const parentExpense = updatedExpenses.find(e => e.id === parentId);
-        if (parentExpense) {
-          const totalAmount = parentExpense.subExpenses.reduce(
-            (sum, sub) => sum + Number(sub.amount),
-            Number(parentExpense.amount)
-          );
-          await updateDoc(doc(db, 'expenses', parentId), { totalAmount });
+        const parentExpenseRef = doc(db, 'expenses', parentId);
+        const parentExpenseSnap = await getDoc(parentExpenseRef);
+        if (parentExpenseSnap.exists()) {
+          
+          bookingId = parentExpenseSnap.data().bookingId || bookingId;
         }
       }
   
+      
+      const newExpense = {
+        ...expenseData,
+        
+        type: expenseData.type || 'client',
+        timestamp: new Date(),
+        paymentStatus: 'pending',
+        parentId: parentId || null,  
+        amount: Number(expenseData.amount) || 0,
+        bookingId: bookingId || '',
+      };
+  
+      
+      const docRef = await addDoc(expenseRef, newExpense);
+  
+      
+      let bookingData = {};
+      if (bookingId) {
+        const bookingRef = doc(db, 'bookings', bookingId);
+        const bookingSnap = await getDoc(bookingRef);
+        if (bookingSnap.exists()) {
+          bookingData = bookingSnap.data();
+        }
+      }
+  
+      const newExpenseWithData = {
+        ...newExpense,
+        id: docRef.id,
+        bookingData,
+      };
+  
+      // Update local state
+      setExpenses((prevExpenses) => {
+        if (!parentId) {
+          // If no parentId => main expense
+          return [...prevExpenses, newExpenseWithData];
+        } else {
+          // Else, sub-expense => attach to the correct parent
+          return prevExpenses.map((expense) => {
+            if (expense.id === parentId) {
+              const existingSubExpenses = expense.subExpenses || [];
+              const updatedExpense = {
+                ...expense,
+                
+                bookingId: bookingId || '',
+                subExpenses: [...existingSubExpenses, newExpenseWithData],
+              };
+              
+             
+              updatedExpense.totalAmount = updatedExpense.subExpenses.reduce(
+                (sum, sub) => sum + Number(sub.amount),
+                Number(expense.amount)
+              );
+              
+              return updatedExpense;
+            }
+            return expense;
+          });
+        }
+      });
+  
+      // Also update the parent doc in Firestore if we added a sub-expense
+      if (parentId) {
+        const parentExpense = expenses.find((e) => e.id === parentId);
+        if (parentExpense) {
+          const updatedSubExpenses = [
+            ...(parentExpense.subExpenses || []),
+            {
+              id: docRef.id,
+              amount: Number(newExpense.amount),
+              bookingId: bookingId || '',
+            },
+          ];
+          const totalAmount = updatedSubExpenses.reduce(
+            (sum, sub) => sum + Number(sub.amount),
+            Number(parentExpense.amount)
+          );
+          await updateDoc(doc(db, 'expenses', parentId), {
+            totalAmount,
+            subExpenses: updatedSubExpenses,
+            // Keep the parent's bookingId in sync
+            bookingId: bookingId || '',
+          });
+        }
+      }
+  
+      // Close modal, show success, recalc totals
       setIsClientModalOpen(false);
       setSelectedClientParentId(null);
       alert('New expense added successfully!');
+      calculateTotal(expenses);
+  
     } catch (error) {
       console.error('Error adding expense:', error);
       alert('Failed to add expense. Please try again.');
@@ -608,7 +746,6 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
     }
   };
   
-
   const downloadCSV = () => {
     const { company, client, invoice } = getFilteredExpenses();
     const allExpenses = [...company, ...client, ...invoice];
@@ -651,13 +788,23 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
   };
 
   const ExpenseCard = ({ expense, isSubExpense = false }) => {
-    const isExpanded = expandedRows.has(expense.id);
+    const [isDeleting, setIsDeleting] = useState(false);
     const hasSubExpenses = expense.subExpenses?.length > 0;
-    
+    const isExpanded = expandedRows.has(expense.id);
+  
     // Calculate total including all sub-expenses
     const calculateTotalAmount = (exp) => {
       const subExpensesTotal = exp.subExpenses?.reduce((sum, subExp) => sum + Number(subExp.amount), 0) || 0;
       return Number(exp.amount) + subExpensesTotal;
+    };
+  
+    const handleDelete = async () => {
+      setIsDeleting(true);
+      try {
+        await handleDeleteExpense(expense.id);
+      } finally {
+        setIsDeleting(false);
+      }
     };
   
     return (
@@ -700,50 +847,36 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
             </button>
           )}
   
-          {/* Toggle Details Button */}
-          {(expense.type === 'invoice' || hasSubExpenses) && (
+          {/* Expansion Toggle Button */}
+          {hasSubExpenses && (
             <button
               onClick={() => toggleRowExpansion(expense.id)}
               className="mt-2 text-blue-600 text-sm flex items-center"
             >
               {isExpanded ? (
-                <>Less details <ChevronUp className="h-4 w-4 ml-1" /></>
+                <>
+                  <ChevronUp className="h-4 w-4 mr-1" />
+                  Hide Expenses
+                </>
               ) : (
                 <>
-                  {hasSubExpenses ? 
-                    `Show Expenses (${expense.subExpenses.length})` : 
-                    'More details'
-                  } <ChevronDown className="h-4 w-4 ml-1" />
+                  <ChevronDown className="h-4 w-4 mr-1" />
+                  Show Expenses ({expense.subExpenses.length})
                 </>
               )}
             </button>
           )}
   
-          {/* Expanded Details */}
-          {isExpanded && (
-            <div className="mt-3 space-y-2 text-sm break-words">
-              {/* Invoice Details */}
-              {expense.type === 'invoice' && (
-                <>
-                  <div><span className="font-medium">Boat:</span> {expense.bookingData?.bookingDetails?.boatName || '-'}</div>
-                  <div><span className="font-medium">Booking Date:</span> {expense.bookingData?.bookingDetails?.date || '-'}</div>
-                  <div><span className="font-medium">Company:</span> {expense.bookingData?.bookingDetails?.boatCompany || '-'}</div>
-                  <div><span className="font-medium">Client:</span> {expense.bookingData?.clientDetails?.name || '-'}</div>
-                </>
-              )}
-              
-              {/* Sub-expenses */}
-              {hasSubExpenses && (
-                <div className="mt-4 space-y-4">
-                  {expense.subExpenses.map(subExpense => (
-                    <ExpenseCard
-                      key={subExpense.id}
-                      expense={subExpense}
-                      isSubExpense={true}
-                    />
-                  ))}
-                </div>
-              )}
+          {/* Expanded Content */}
+          {isExpanded && hasSubExpenses && (
+            <div className="mt-4 space-y-4 pl-4 border-l-2 border-blue-100">
+              {expense.subExpenses.map(subExpense => (
+                <ExpenseCard
+                  key={subExpense.id}
+                  expense={subExpense}
+                  isSubExpense={true}
+                />
+              ))}
             </div>
           )}
   
@@ -752,7 +885,6 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
             {/* Payment Status Button */}
             <button
               onClick={() => handleUpdatePaymentStatus(expense.id, expense.paymentStatus)}
-              disabled={updatingStatus === expense.id}
               className={`px-3 py-1 rounded-full text-sm font-medium
                 ${expense.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}
             >
@@ -781,11 +913,21 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
   
               {/* Delete Button */}
               <button
-                onClick={() => handleDeleteExpense(expense.id)}
-                disabled={deletingExpenseId === expense.id}
-                className="text-red-500 hover:text-red-700"
+                onClick={handleDelete}
+                disabled={isDeleting || deletingExpenseId === expense.id}
+                className="text-red-500 hover:text-red-700 flex items-center gap-1"
               >
-                {deletingExpenseId === expense.id ? 'Deleting...' : <Trash2 className="h-4 w-4" />}
+                {isDeleting || deletingExpenseId === expense.id ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500"></div>
+                    <span className="ml-1">Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    <span className="ml-1">Delete</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
