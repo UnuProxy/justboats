@@ -1,22 +1,47 @@
 import React, { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import { formatDateDDMMYYYY, formatDateTime } from "../utils/date.js";
-import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { format } from "date-fns";
 import { db } from "../firebase/firebaseConfig";
+import PaymentDetails from "./PaymentDetails.js";
 
-const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
+const BookingDetails = ({ booking, onClose, onDelete }) => {
   const [isEditing, setIsEditing] = useState(false);
   const modalRef = useRef(null);  
   const [linkedExpenses, setLinkedExpenses] = useState([]);
-  const [editedBooking, setEditedBooking] = useState({
-    ...booking,
-    basePrice: booking?.basePrice || 0,
-    discount: booking?.discount || 0,
-    finalPrice: booking?.finalPrice || 0,
-    deposit: booking?.deposit || 0,
-    remainingPayment: booking?.remainingPayment || 0,
-    paymentStatus: booking?.paymentStatus || 'No Payment'
+  const [editedBooking, setEditedBooking] = useState(() => {
+    console.log("Raw booking data:", booking);
+  
+    const payments = booking?.payments || [];
+  
+    const firstPayment = payments.find(p => p.type === 'first') || {
+      amount: 0,
+      method: 'cash',
+      received: false,
+      date: '',
+      type: 'first',
+    };
+  
+    const secondPayment = payments.find(p => p.type === 'second') || {
+      amount: 0,
+      method: 'pos',
+      received: false,
+      date: '',
+      type: 'second',
+    };
+  
+    console.log("First payment:", firstPayment);
+    console.log("Second payment:", secondPayment);
+  
+    return {
+      ...booking,
+      payments,
+      firstPayment,
+      secondPayment,
+      finalPrice: booking?.pricing?.agreedPrice || 0,
+      paymentStatus: booking?.pricing?.paymentStatus || 'No Payment',
+    };
   });
   
   const handleExpensePaymentStatusChange = async (expenseId, newStatus) => {
@@ -56,6 +81,48 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
     }
   };
 
+  const handlePaymentChange = (paymentIndex, updates) => {
+    setEditedBooking((prev) => {
+      const updatedPayments = [...(prev.pricing?.payments || [])];
+      
+      if (!updatedPayments[paymentIndex]) {
+        updatedPayments[paymentIndex] = {
+          type: paymentIndex === 0 ? 'first' : 'second',
+          amount: 0,
+          method: paymentIndex === 0 ? 'cash' : 'pos',
+          received: false,
+          date: '',
+          excludeVAT: false,
+          percentage: paymentIndex === 0 ? 30 : 0,
+          recordedAt: new Date().toISOString()
+        };
+      }
+  
+      updatedPayments[paymentIndex] = {
+        ...updatedPayments[paymentIndex],
+        ...updates
+      };
+  
+      const totalPaid = updatedPayments.reduce((sum, payment) => 
+        sum + (payment.received ? (Number(payment.amount) || 0) : 0), 0
+      );
+  
+      let paymentStatus = 'No Payment';
+      if (totalPaid > 0) {
+        paymentStatus = totalPaid >= prev.pricing?.agreedPrice ? 'Completed' : 'Partial';
+      }
+  
+      return {
+        ...prev,
+        pricing: {
+          ...prev.pricing,
+          payments: updatedPayments,
+          totalPaid,
+          paymentStatus
+        }
+      };
+    });
+  };
   const ExpensesSection = () => {
     const calculateTotal = () => {
       return linkedExpenses.reduce((sum, expense) => {
@@ -169,80 +236,119 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
     /**
    * 1) Focus the modal when it opens
    */
-    useEffect(() => {
-      if (modalRef.current) {
+  useEffect(() => {
+  if (modalRef.current) {
         modalRef.current.focus();
       }
-    }, []);
+  }, []);
   
     /**
      * 2) Real-time listener for expenses
      */
     useEffect(() => {
       if (!booking) return;
-      
-      // Always update local booking data
-      setEditedBooking(booking);
-  
+    
+      console.log("Raw booking data:", booking);
+    
+      // Extract payments array
+      const payments = booking?.payments || [];
+    
+      // Get first and second payments
+      const firstPayment = payments.find((p) => p.type === "first") || {
+        amount: 0,
+        method: "cash",
+        received: false,
+        date: "",
+        type: "first",
+      };
+    
+      const secondPayment = payments.find((p) => p.type === "second") || {
+        amount: 0,
+        method: "pos",
+        received: false,
+        date: "",
+        type: "second",
+      };
+    
+      // Debug payments
+      console.log("First payment:", firstPayment);
+      console.log("Second payment:", secondPayment);
+    
+      // Set edited booking state
+      setEditedBooking({
+        ...booking,
+        firstPayment,
+        secondPayment,
+        finalPrice: booking?.pricing?.agreedPrice || 0,
+        paymentStatus: booking?.pricing?.paymentStatus || "No Payment",
+      });
+    
+      // Firestore collection and query setup for expenses
       const expensesRef = collection(db, "expenses");
       const q = query(expensesRef, where("bookingId", "==", booking.id));
-  
-      // Set up the real-time listener
+    
+      // Real-time listener for expenses
       const unsubscribe = onSnapshot(q, (querySnapshot) => {
         const allExpenses = querySnapshot.docs.map((docSnap) => ({
           id: docSnap.id,
-          ...docSnap.data()
+          ...docSnap.data(),
         }));
-        
-        // Separate parent from child
-        const parentExpenses = allExpenses.filter(exp => !exp.parentId);
-        const childExpenses  = allExpenses.filter(exp => exp.parentId);
-  
-        // Attach children to each parent
-        const combinedExpenses = parentExpenses.map(parent => ({
+    
+        console.log("Fetched Expenses:", allExpenses);
+    
+        // Process and set linked expenses
+        const parentExpenses = allExpenses.filter((exp) => !exp.parentId);
+        const childExpenses = allExpenses.filter((exp) => exp.parentId);
+    
+        const combinedExpenses = parentExpenses.map((parent) => ({
           ...parent,
-          subExpenses: childExpenses.filter(child => child.parentId === parent.id)
+          subExpenses: childExpenses.filter((child) => child.parentId === parent.id),
         }));
-  
+    
         setLinkedExpenses(combinedExpenses);
       });
-  
-      // Clean up listener on unmount
-      return () => unsubscribe();
+    
+      return () => unsubscribe(); // Clean up listener on unmount
     }, [booking]);
-  
+    
+    
   if (!booking) return null;
 
 
   const handleInputChange = (field, value) => {
-    setEditedBooking((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
-  
-
-  const handlePriceChange = (field, value) => {
     setEditedBooking((prev) => {
-      const newVal = parseFloat(value) || 0;
-      let basePrice = field === "basePrice" ? newVal : parseFloat(prev.basePrice) || 0;
-      let discount = field === "discount" ? newVal : parseFloat(prev.discount) || 0;
+      if (field === 'firstPayment' || field === 'secondPayment') {
+        const updatedPayment = { ...prev[field], ...value };
   
-      const finalPrice = Math.max(0, basePrice - discount);
-      const deposit = finalPrice * 0.5; // 50% deposit
-      const remainingPayment = finalPrice - deposit;
+        if (value.received !== undefined) {
+          updatedPayment.date = value.received
+            ? new Date().toISOString().split('T')[0]
+            : '';
+        }
   
-      return {
-        ...prev,
-        [field]: newVal,
-        finalPrice,
-        deposit,
-        remainingPayment,
-        paymentMethod: prev.paymentMethod || '',
-      };
+        const updatedState = {
+          ...prev,
+          [field]: updatedPayment,
+        };
+  
+        // Update overall payment status
+        const firstReceived = updatedState.firstPayment?.received || false;
+        const secondReceived = updatedState.secondPayment?.received || false;
+  
+        updatedState.paymentStatus = firstReceived && secondReceived
+          ? 'Completed'
+          : firstReceived || secondReceived
+          ? 'Partial'
+          : 'No Payment';
+  
+        return updatedState;
+      }
+  
+      // Handle other fields
+      return { ...prev, [field]: value };
     });
   };
-
+  
   const handleDeleteBooking = () => {
     if (
       window.confirm(
@@ -253,20 +359,38 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
     }
   };
 
-  const handleSaveBooking = () => {
-    if (!editedBooking.clientName || !editedBooking.clientName.trim()) {
+  const handleSaveBooking = async () => {
+    if (!editedBooking.clientName?.trim()) {
       alert("Client name is required.");
       return;
     }
-    if (!editedBooking.bookingDate || !editedBooking.bookingDate.trim()) {
+    if (!editedBooking.bookingDate?.trim()) {
       alert("Booking date is required.");
       return;
     }
   
-    onSave(booking.id, editedBooking);
-    setIsEditing(false);
+    const bookingToSave = {
+      ...editedBooking,
+      pricing: {
+        ...editedBooking.pricing,
+        agreedPrice: editedBooking.finalPrice,
+        lastUpdated: new Date().toISOString()
+      }
+    };
+  
+    try {
+      await updateDoc(doc(db, "bookings", booking.id), bookingToSave);
+      const updatedDoc = await getDoc(doc(db, "bookings", booking.id));
+      if (updatedDoc.exists()) {
+        setEditedBooking(updatedDoc.data());
+      }
+      setIsEditing(false);
+    } catch (error) {
+      console.error("Error saving booking:", error);
+      alert("Failed to save booking. Please try again.");
+    }
   };
-
+  
   const handleModalClick = (e) => {
     e.stopPropagation();
   };
@@ -577,93 +701,26 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
               </div>
     </div>
 
-       
-
     <div className="col-span-full">
-    <div className="p-4 border rounded-lg">
-    <h4 className="text-lg font-bold mb-4">Payment Details</h4>
-    
-    {/* Price Row */}
-    <div className="flex justify-between mb-8">
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Base Price:</label>
-        {isEditing ? (
-          <input
-            type="number"
-            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-            value={editedBooking.basePrice || 0}
-            onChange={(e) => handlePriceChange("basePrice", e.target.value)}
-          />
-        ) : (
-          <p className="text-lg">€{editedBooking.basePrice?.toFixed(2) || '0.00'}</p>
-        )}
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Discount:</label>
-        {isEditing ? (
-          <input
-            type="number"
-            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-            value={editedBooking.discount || 0}
-            onChange={(e) => handlePriceChange("discount", e.target.value)}
-          />
-        ) : (
-          <p className="text-lg">€{editedBooking.discount?.toFixed(2) || '0.00'}</p>
-        )}
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Final Price:</label>
-        <p className="text-lg text-blue-600">€{editedBooking.finalPrice?.toFixed(2) || '0.00'}</p>
-      </div>
+   
+    <div className="col-span-full">
+    <PaymentDetails 
+      payments={editedBooking?.pricing?.payments || []}
+      pricingType={editedBooking?.pricing?.pricingType}
+      agreedPrice={editedBooking?.pricing?.agreedPrice}
+      totalPaid={editedBooking?.pricing?.totalPaid}
+      paymentStatus={editedBooking?.pricing?.paymentStatus}
+      isEditing={isEditing}
+      onPaymentChange={handlePaymentChange}
+    />
     </div>
-
+    </div>
+   
+    { /*Expenses Link*/}
     <div className="col-span-full">
     <ExpensesSection />
-    </div>   
-
-
-    {/* Payment Information */}
-    <div className="bg-gray-50 p-4 rounded-lg">
-      <div className="flex justify-between mb-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Initial Payment:</label>
-          <p className="text-lg">€{editedBooking.deposit?.toFixed(2) || '0.00'}</p>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Remaining Payment:</label>
-          <p className="text-lg">€{editedBooking.remainingPayment?.toFixed(2) || '0.00'}</p>
-        </div>
-      </div>
-
-      <div className="border-t border-gray-200 pt-4 mt-4">
-        <label className="block text-sm font-medium text-gray-700">Payment Status:</label>
-        {isEditing ? (
-          <select
-            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-            value={editedBooking.paymentStatus || ""}
-            onChange={(e) => handleInputChange("paymentStatus", e.target.value)}
-          >
-            <option value="No Payment">No Payment</option>
-            <option value="Partial">Partial</option>
-            <option value="Completed">Completed</option>
-          </select>
-        ) : (
-          <p className={`
-            ${editedBooking.paymentStatus === 'Completed' ? 'text-green-600' :
-              editedBooking.paymentStatus === 'Partial' ? 'text-orange-600' :
-              'text-red-600'}
-          `}>
-            {editedBooking.paymentStatus || "N/A"}
-          </p>
-        )}
-      </div>
     </div>
-    </div>
-    </div>
-
+    {/*Additional Information*/}    
     <div className="col-span-full">
               <div className="p-4 border rounded-lg">
                 <h4 className="text-lg font-bold mb-3">
@@ -725,7 +782,7 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
     </div>
     </div>
 
-        <div className="bg-gray-100 p-4 flex justify-end space-x-2 rounded-b-lg">
+    <div className="bg-gray-100 p-4 flex justify-end space-x-2 rounded-b-lg">
           {isEditing ? (
             <>
               <button
@@ -762,8 +819,8 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
               Delete
             </button>
           )}
-        </div>
-      </div>
+    </div>
+    </div>
     </div>
   );
 };
@@ -771,7 +828,6 @@ const BookingDetails = ({ booking, onClose, onSave, onDelete }) => {
 BookingDetails.propTypes = {
   booking: PropTypes.object.isRequired,
   onClose: PropTypes.func.isRequired,
-  onSave: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
 };
 
