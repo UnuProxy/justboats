@@ -179,20 +179,19 @@ const ExpenseOverview = () => {
         </tr>
   
         {isExpanded && hasSubExpenses && expense.subExpenses.map(subExpense => (
-          <ClientExpenseRow
-            key={subExpense.id}
-            expense={subExpense}
-            onDelete={onDelete}
-            onAddSubExpense={onAddSubExpense}
-            onUpdateStatus={onUpdateStatus}
-            isSubExpense={true} // recursively pass down
-          />
+        <ExpenseCard
+          key={`${expense.id}-${subExpense.id}`}
+          expense={subExpense}
+          onDelete={onDelete}
+          onAddSubExpense={onAddSubExpense}
+          onUpdateStatus={onUpdateStatus}
+          isSubExpense={true}
+        />
         ))}
       </>
     );
   };
   
-
 const Pagination = ({ totalItems, itemsPerPage, currentPage, onPageChange }) => {
     const totalPages = Math.ceil(totalItems / itemsPerPage);
     
@@ -291,20 +290,26 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
             <label className="block text-sm font-medium text-gray-700">Link to Booking (Optional)</label>
             <select
               value={newExpense.bookingId}
-              onChange={(e) => setNewExpense({...newExpense, bookingId: e.target.value})}
+              onChange={(e) => {
+                
+                setNewExpense({...newExpense, bookingId: e.target.value})
+              }}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
               disabled={isLoadingBookings}
             >
               <option value="">Select a booking</option>
-              {bookings.map(booking => (
-                <option key={booking.id} value={booking.id}>
-                  {booking.bookingDetails.boatName} - {booking.clientDetails.name} - {
-                    booking.bookingDetails.date ? 
-                    format(new Date(booking.bookingDetails.date), 'dd/MM/yyyy') : 
-                    'No date'
-                  }
-                </option>
-              ))}
+              {bookings.map(booking => {
+                
+                return (
+                  <option key={booking.id} value={booking.id}>
+                    {booking.bookingDetails.boatName} - {booking.clientDetails.name} - {
+                      booking.bookingDetails.date ? 
+                      format(new Date(booking.bookingDetails.date), 'dd/MM/yyyy') : 
+                      'No date'
+                    }
+                  </option>
+                );
+              })}
             </select>
             {isLoadingBookings && (
               <div className="mt-1 text-sm text-gray-500">Loading bookings...</div>
@@ -378,7 +383,7 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
   );
 };
   
-  const fetchBookingData = async (expense) => {
+const fetchBookingData = async (expense) => {
     try {
       if (!expense.bookingId) {
         return {};
@@ -395,9 +400,9 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
       console.error('Error fetching booking data', error);
       return {};
     }
-  };
+};
 
-  const fetchExpenses = async () => {
+const fetchExpenses = async () => {
     try {
       const expensesRef = collection(db, 'expenses');
       const q = query(expensesRef, orderBy('timestamp', 'desc'));
@@ -441,9 +446,9 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
       console.error('Error fetching expenses:', error);
       setLoading(false);
     }
-  };
+};
 
-  const calculateTotal = (expensesList) => {
+const calculateTotal = (expensesList) => {
     const { company, client, invoice } = getFilteredExpenses(expensesList);
     
     
@@ -463,9 +468,9 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
     const invoiceTotal = calculateGroupTotal(invoice);
     
     setTotalAmount(companyTotal + clientTotal + invoiceTotal);
-  };
+};
 
-  const getFilteredExpenses = (expensesList = expenses) => {
+const getFilteredExpenses = (expensesList = expenses) => {
     let filtered = expensesList;
 
     if (filterQuery) {
@@ -492,9 +497,9 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
       client: filtered.filter(expense => expense.type === 'client'),
       invoice: filtered.filter(expense => expense.type === 'invoice'),
     };
-  };
+};
 
-  const handleUpdatePaymentStatus = async (expenseId, currentStatus) => {
+const handleUpdatePaymentStatus = async (expenseId, currentStatus) => {
     // Save our currently expanded rows
     const oldExpanded = new Set(expandedRows);
   
@@ -533,9 +538,9 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
     } finally {
       setUpdatingStatus(null);
     }
-  };
+};
   
-  const handleDeleteExpense = async (expenseId) => {
+const handleDeleteExpense = async (expenseId) => {
     if (window.confirm('Are you sure you want to delete this expense? This action cannot be undone.')) {
       setDeletingExpenseId(expenseId);
       try {
@@ -592,7 +597,7 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
         setDeletingExpenseId(null);
       }
     }
-  };
+};
   const downloadDocument = async (url, fileName = 'document') => {
     if (!url) {
       alert('No document available to download');
@@ -617,32 +622,26 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
   const handleAddExpenseToBill = async (expenseData, parentId = null) => {
     try {
       const expenseRef = collection(db, 'expenses');
-      
       let bookingId = expenseData.bookingId;
+      
+      console.log("Initial bookingId:", bookingId);
+  
       if (parentId) {
-        const parentExpenseRef = doc(db, 'expenses', parentId);
-        const parentExpenseSnap = await getDoc(parentExpenseRef);
-        if (parentExpenseSnap.exists()) {
-          
-          bookingId = parentExpenseSnap.data().bookingId || bookingId;
-        }
+        console.log("Adding as sub-expense to parent:", parentId);
       }
   
-      
       const newExpense = {
         ...expenseData,
-        
         type: expenseData.type || 'client',
         timestamp: new Date(),
         paymentStatus: 'pending',
-        parentId: parentId || null,  
+        parentId: parentId || null,
         amount: Number(expenseData.amount) || 0,
-        bookingId: bookingId || '',
+        bookingId: bookingId, 
       };
   
-      
-      const docRef = await addDoc(expenseRef, newExpense);
   
+      const docRef = await addDoc(expenseRef, newExpense);
       
       let bookingData = {};
       if (bookingId) {
@@ -650,6 +649,7 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
         const bookingSnap = await getDoc(bookingRef);
         if (bookingSnap.exists()) {
           bookingData = bookingSnap.data();
+          
         }
       }
   
@@ -662,21 +662,19 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
       // Update local state
       setExpenses((prevExpenses) => {
         if (!parentId) {
-          // If no parentId => main expense
+          console.log("Adding main expense to state");
           return [...prevExpenses, newExpenseWithData];
         } else {
-          // Else, sub-expense => attach to the correct parent
+          
           return prevExpenses.map((expense) => {
             if (expense.id === parentId) {
               const existingSubExpenses = expense.subExpenses || [];
               const updatedExpense = {
                 ...expense,
-                
-                bookingId: bookingId || '',
+                bookingId: bookingId, // Keep the selected bookingId
                 subExpenses: [...existingSubExpenses, newExpenseWithData],
               };
               
-             
               updatedExpense.totalAmount = updatedExpense.subExpenses.reduce(
                 (sum, sub) => sum + Number(sub.amount),
                 Number(expense.amount)
@@ -689,7 +687,7 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
         }
       });
   
-      // Also update the parent doc in Firestore if we added a sub-expense
+      // Update parent doc in Firestore if this is a sub-expense
       if (parentId) {
         const parentExpense = expenses.find((e) => e.id === parentId);
         if (parentExpense) {
@@ -698,23 +696,23 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
             {
               id: docRef.id,
               amount: Number(newExpense.amount),
-              bookingId: bookingId || '',
+              bookingId: bookingId, // Keep the selected bookingId
             },
           ];
+          
           const totalAmount = updatedSubExpenses.reduce(
             (sum, sub) => sum + Number(sub.amount),
             Number(parentExpense.amount)
           );
+  
           await updateDoc(doc(db, 'expenses', parentId), {
             totalAmount,
             subExpenses: updatedSubExpenses,
-            // Keep the parent's bookingId in sync
-            bookingId: bookingId || '',
+            bookingId: bookingId, // Update parent with the selected bookingId
           });
         }
       }
   
-      // Close modal, show success, recalc totals
       setIsClientModalOpen(false);
       setSelectedClientParentId(null);
       alert('New expense added successfully!');
@@ -725,7 +723,6 @@ const AddExpenseModal = ({ isOpen, onClose, onSubmit, parentExpenseId }) => {
       alert('Failed to add expense. Please try again.');
     }
   };
-  
   const handleClearFilters = () => {
     setFilterQuery('');
     setFilterDateFrom('');
