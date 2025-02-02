@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3,
     User, Wallet, CreditCard, Euro, Ship, MessageSquare,
-    Settings, Building, ChevronDown, ChevronUp
+    Settings, Building, ChevronDown, ChevronUp,Utensils, Package, Box, ShoppingCart 
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -64,6 +64,37 @@ const Sidebar = () => {
                     name: 'Upcoming Bookings',
                     icon: Calendar,
                     path: '/bookings',
+                    allowed: true
+                }
+            ]
+        },
+        {
+            id: 'catering',
+            title: "Catering Management",
+            icon: Utensils, // You'll need to import this from lucide-react
+            items: [
+                {
+                    name: 'Add Product',
+                    icon: PlusCircle,
+                    path: '/add-product',
+                    allowed: isAdmin()
+                },
+                {
+                    name: 'Products List',
+                    icon: Package, // Import from lucide-react
+                    path: '/products',
+                    allowed: isAdmin()
+                },
+                {
+                    name: 'Packages',
+                    icon: Box, // Import from lucide-react
+                    path: '/packages',
+                    allowed: isAdmin()
+                },
+                {
+                    name: 'Orders',
+                    icon: ShoppingCart, // Import from lucide-react
+                    path: '/catering-orders',
                     allowed: true
                 }
             ]
