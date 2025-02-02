@@ -4,9 +4,47 @@ import { storage } from '../firebase/firebaseConfig';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db } from '../firebase/firebaseConfig';
 import { format } from 'date-fns';
-import { Upload, Edit, X, FileText, Save, Search, Filter, Calendar, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { 
+    Upload, 
+    Edit, 
+    X, 
+    FileText, 
+    Save, 
+    Search, 
+    Filter, 
+    Calendar, 
+    ChevronLeft, 
+    ChevronRight, 
+} from 'lucide-react';
 import SignatureModal from './SignatureModal';
 import * as XLSX from 'xlsx';
+
+// Custom Components
+const CustomTooltip = ({ children, content }) => (
+    <div className="relative group">
+        {children}
+        <div className="invisible group-hover:visible absolute z-50 px-2 py-1 text-sm text-white bg-gray-900 rounded-lg 
+            bottom-full left-1/2 transform -translate-x-1/2 mb-2 whitespace-nowrap">
+            {content}
+        </div>
+    </div>
+);
+
+const CustomAlert = ({ children, type = 'success' }) => (
+    <div className={`p-4 rounded-lg mb-4 ${
+        type === 'error' 
+            ? 'bg-red-50 border border-red-200 text-red-700' 
+            : 'bg-green-50 border border-green-200 text-green-700'
+    }`}>
+        <div className="flex">
+            <div className="ml-3">
+                <p className={`text-sm ${type === 'error' ? 'text-red-800' : 'text-green-800'}`}>
+                    {children}
+                </p>
+            </div>
+        </div>
+    </div>
+);
 
 const PaymentTracking = () => {
     const [bookings, setBookings] = useState([]);
@@ -27,6 +65,13 @@ const PaymentTracking = () => {
         transferOnly: false,
         completionStatus: 'all'
     });
+
+    // State variables
+    const [notification, setNotification] = useState(null);
+    const [savedFilters, setSavedFilters] = useState([]);
+    const [showHelp] = useState(false);
+    const [isMobile, setIsMobile] = useState(false);
+    const [showFilters] = useState(false);
 
     useEffect(() => {
         const bookingsRef = collection(db, "bookings");
@@ -181,14 +226,99 @@ const PaymentTracking = () => {
                 [`ownerPayments.${paymentType}Payment.invoice`]: downloadURL
             };
             await updateDoc(bookingRef, updateData);
+            showNotification('Invoice uploaded successfully!');
         } catch (error) {
             console.error('Error uploading file:', error);
-            alert('Failed to upload invoice. Please try again.');
+            showNotification('Failed to upload invoice. Please try again.', 'error');
         }
+    };
+    const showNotification = (message, type = 'success') => {
+        setNotification({ message, type });
+        setTimeout(() => setNotification(null), 3000);
+    };
+    const handleSaveFilter = () => {
+        const filterName = prompt('Enter a name for this filter combination:');
+        if (filterName) {
+            setSavedFilters([...savedFilters, { name: filterName, filters: { ...filters } }]);
+            showNotification('Filter combination saved!');
+        }
+    }
+
+    useEffect(() => {
+        const handleResize = () => {
+            setIsMobile(window.innerWidth < 768);
+        };
+        
+        handleResize();
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    useEffect(() => {
+        const handleKeyPress = (e) => {
+            if (e.metaKey || e.ctrlKey) {
+                switch (e.key.toLowerCase()) {
+                    case 'f':
+                        e.preventDefault();
+                        document.querySelector('input[type="text"]')?.focus();
+                        break;
+                    case 'e':
+                        e.preventDefault();
+                        handleExport(true);
+                        break;
+                    case 's':
+                        e.preventDefault();
+                        handleSaveFilter();
+                        break;
+                    default:
+                        break;
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyPress);
+        return () => window.removeEventListener('keydown', handleKeyPress);
+    }, []);
+
+    const handleDatePresetChange = (preset) => {
+        const today = new Date();
+        let dateFrom = new Date();
+        let dateTo = new Date();
+
+        switch (preset) {
+            case 'today':
+                break;
+            case 'yesterday':
+                dateFrom.setDate(dateFrom.getDate() - 1);
+                dateTo = new Date(dateFrom);
+                break;
+            case 'last7days':
+                dateFrom.setDate(dateFrom.getDate() - 7);
+                break;
+            case 'last30days':
+                dateFrom.setDate(dateFrom.getDate() - 30);
+                break;
+            case 'thisMonth':
+                dateFrom = new Date(today.getFullYear(), today.getMonth(), 1);
+                dateTo = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                break;
+            case 'lastMonth':
+                dateFrom = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                dateTo = new Date(today.getFullYear(), today.getMonth(), 0);
+                break;
+            default:
+                return;
+        }
+
+        setFilters(prev => ({
+            ...prev,
+            dateFrom: dateFrom.toISOString().split('T')[0],
+            dateTo: dateTo.toISOString().split('T')[0]
+        }));
     };
 
     const isBookingComplete = (booking) => {
-        // Check client payments
+        
         const clientPaymentsComplete = 
             booking.firstPayment?.received && 
             booking.secondPayment?.received;
@@ -517,311 +647,364 @@ const PaymentTracking = () => {
 
     return (
         <div className="bg-white rounded-lg shadow-md p-6">
+            {/* Notification System */}
+            {notification && (
+                <CustomAlert type={notification.type}>
+                    {notification.message}
+                </CustomAlert>
+            )}
+
+            {/* Header Section */}
             <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-semibold">Payment Tracking</h2>
-            <div className="relative">
-    <div className="flex flex-col sm:flex-row gap-2">
-        <button
-            onClick={() => handleExport(true)}
-            className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-        >
-            <Download className="w-4 h-4" />
-            <span>Export Current Page</span>
-        </button>
-        <button
-            onClick={() => handleExport(false)}
-            className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
-        >
-            <Download className="w-4 h-4" />
-            <span>Export All ({filteredBookings.length} items)</span>
-        </button>
-    </div>
-</div>
-    </div>
-
-    {/* Filters Container */}
-    <div className="mb-4 sm:mb-6 space-y-3">
-        {/* Search */}
-        <div className="relative">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-            <input
-                type="text"
-                placeholder="Search boats, companies..."
-                className="pl-10 pr-4 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500"
-                value={filters.search}
-                onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
-            />
-        </div>
-
-        {/* Date Filters */}
-        <div className="grid grid-cols-2 gap-2">
-            <div className="relative">
-                <Calendar className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                <input
-                    type="date"
-                    className="pl-10 pr-2 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
-                    value={filters.dateFrom}
-                    onChange={(e) => setFilters(prev => ({ ...prev, dateFrom: e.target.value }))}
-                />
+                <div className="flex items-center space-x-4">
+                    <h2 className="text-xl font-semibold">Payment Tracking</h2>
+                </div>
             </div>
-            <div className="relative">
-                <Calendar className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                <input
-                    type="date"
-                    className="pl-10 pr-2 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
-                    value={filters.dateTo}
-                    onChange={(e) => setFilters(prev => ({ ...prev, dateTo: e.target.value }))}
-                />
-            </div>
-        </div>
-
-        {/* Dropdown Filters */}
-<div className="grid grid-cols-3 gap-2">
-    <div className="relative">
-        <Filter className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-        <select
-            className="pl-10 pr-4 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500"
-            value={filters.paymentStatus}
-            onChange={(e) => setFilters(prev => ({ ...prev, paymentStatus: e.target.value }))}
-        >
-            <option value="all">All Payments</option>
-            <option value="pending">Pending Payments</option>
-            <option value="completed">Completed Payments</option>
-        </select>
-    </div>
-    <div className="relative">
-        <Filter className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-        <select
-            className="pl-10 pr-4 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500"
-            value={filters.boatCompany}
-            onChange={(e) => setFilters(prev => ({ ...prev, boatCompany: e.target.value }))}
-        >
-            <option value="all">All Companies</option>
-            {boatCompanies.map(company => (
-                <option key={company} value={company}>{company}</option>
-            ))}
-        </select>
-    </div>
-    <div className="relative">
-        <Filter className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-        <select
-            className="pl-10 pr-4 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500"
-            value={filters.completionStatus}
-            onChange={(e) => setFilters(prev => ({ ...prev, completionStatus: e.target.value }))}
-        >
-            <option value="all">All Bookings</option>
-            <option value="complete">Completed Payments</option>
-            <option value="incomplete">Incomplete Payments</option>
-        </select>
-    </div>
-</div>
-
-        {/* Checkbox Filter */}
-        <div className="flex items-center">
-            <label className="flex items-center space-x-2">
-                <input
-                    type="checkbox"
-                    className="form-checkbox h-4 w-4 text-blue-500"
-                    checked={filters.transferOnly}
-                    onChange={(e) => setFilters(prev => ({ ...prev, transferOnly: e.target.checked }))}
-                />
-                <span className="text-sm text-gray-700">Show only bookings with transfers</span>
-            </label>
-        </div>
-
-        {/* Results Count */}
-        <div className="text-sm text-gray-600">
-            Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, filteredBookings.length)} of {filteredBookings.length} entries
-        </div>
-    </div>
-
-            <div className="overflow-x-auto border rounded-lg -mx-6 md:mx-0">
-            <table className="min-w-full divide-y divide-gray-200">
-    <thead>
-        <tr className="bg-gray-100">
-            <th colSpan="3" className="px-4 py-2 text-left bg-blue-50 border-b-2 border-blue-200">
-                <div className="flex items-center">
-                    <span>Boat Information</span>
-                </div>
-            </th>
-            <th colSpan="6" className="px-4 py-2 text-left bg-green-50 border-b-2 border-green-200">
-                <div className="flex items-center">
-                    <span>Client Payments</span>
-                </div>
-            </th>
-            <th colSpan="6" className="px-4 py-2 text-left bg-yellow-50 border-b-2 border-yellow-200">
-                <div className="flex items-center">
-                    <span>Owner Payments</span>
-                </div>
-            </th>
-            <th colSpan="3" className="px-4 py-2 text-left bg-purple-50 border-b-2 border-purple-200">
-                <div className="flex items-center">
-                    <span>Transfer Payments</span>
-                </div>
-            </th>
-        </tr>
-        <tr className="bg-gray-50">
-            {/* Boat Information */}
-            <th className="px-4 py-2 text-left border-r font-medium">Boat Name</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Company</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Trip Date</th>
             
-            {/* Client Payments */}
-            <th className="px-4 py-2 text-left border-r font-medium">First Payment</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Status/Date</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Method</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Second Payment</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Status/Date</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Method</th>
-            
-            {/* Owner Payments */}
-            <th className="px-4 py-2 text-left border-r font-medium">First Payment</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Invoice</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Signature</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Second Payment</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Invoice</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Signature</th>
-
-            {/* Transfer Payments */}
-            <th className="px-4 py-2 text-left border-r font-medium">Amount</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Invoice</th>
-            <th className="px-4 py-2 text-left border-r font-medium">Signature</th>
-        </tr>
-    </thead>
-    <tbody className="divide-y divide-gray-200">
-        {currentItems.map(booking => (
-            <tr key={booking.id} 
-                className={`${booking.firstPayment?.method === 'Sabadell_link' ? 'bg-red-50' : ''} 
-                            ${isBookingComplete(booking) ? 'bg-green-50' : ''}`}>
-                <td className="px-4 py-2 border-r">
-                    <div className="flex items-center space-x-2">
-                        {isBookingComplete(booking) && (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap">
-                                Complete
-                            </span>
-                        )}
-                        <span>{booking.boatName || ''}</span>
+            {/* Summary Dashboard */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-blue-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-600">Total Bookings</div>
+                    <div className="text-2xl font-bold">{bookings.length}</div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-600">Completed Payments</div>
+                    <div className="text-2xl font-bold">
+                        {bookings.filter(booking => isBookingComplete(booking)).length}
                     </div>
-                </td>
-                <td className="px-4 py-2 border-r">{booking.boatCompany || ''}</td>
-                <td className="px-4 py-2 border-r">
-                    {booking.embarkedDate && format(new Date(booking.embarkedDate), 'dd/MM/yyyy')}
-                </td>
-
-                <td className="px-4 py-2 border-r">{formatCurrency(booking.firstPayment?.amount || 0)}</td>
-                <td className="px-4 py-2 border-r">
-                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium
-                        ${booking.firstPayment?.received ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                        {booking.firstPayment?.received && booking.firstPayment?.date ? 
-                            format(new Date(booking.firstPayment.date), 'dd/MM/yyyy') : 
-                            'Pending'}
-                    </span>
-                </td>
-                <td className="px-4 py-2 border-r">{booking.firstPayment?.method || ''}</td>
-                <td className="px-4 py-2 border-r">{formatCurrency(booking.secondPayment?.amount || 0)}</td>
-                <td className="px-4 py-2 border-r">
-                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium
-                        ${booking.secondPayment?.received ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                        {booking.secondPayment?.received && booking.secondPayment?.date ? 
-                            format(new Date(booking.secondPayment.date), 'dd/MM/yyyy') : 
-                            'Pending'}
-                    </span>
-                </td>
-                <td className="px-4 py-2 border-r">{booking.secondPayment?.method || ''}</td>
-
-                <PaymentAmountCell
-                    booking={booking}
-                    paymentType="first"
-                    isReceived={booking.firstPayment?.received}
-                />
-                <InvoiceCell
-                    booking={booking}
-                    paymentType="first"
-                    isReceived={booking.firstPayment?.received}
-                />
-                <SignatureCell
-                    booking={booking}
-                    paymentType="first"
-                    isReceived={booking.firstPayment?.received}
-                />
-                
-                <PaymentAmountCell
-                    booking={booking}
-                    paymentType="second"
-                    isReceived={booking.secondPayment?.received}
-                />
-                <InvoiceCell
-                    booking={booking}
-                    paymentType="second"
-                    isReceived={booking.secondPayment?.received}
-                />
-                <SignatureCell
-                    booking={booking}
-                    paymentType="second"
-                    isReceived={booking.secondPayment?.received}
-                />
-
-                <PaymentAmountCell
-                    booking={booking}
-                    paymentType="transfer"
-                    isReceived={true}
-                />
-                <InvoiceCell
-                    booking={booking}
-                    paymentType="transfer"
-                    isReceived={true}
-                />
-                <SignatureCell
-                    booking={booking}
-                    paymentType="transfer"
-                    isReceived={true}
-                />
-            </tr>
-        ))}
-    </tbody>
-</table>
+                </div>
+                <div className="bg-yellow-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-600">Pending Payments</div>
+                    <div className="text-2xl font-bold">
+                        {bookings.filter(booking => !isBookingComplete(booking)).length}
+                    </div>
+                </div>
+                <div className="bg-purple-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-600">Total Revenue</div>
+                    <div className="text-2xl font-bold">
+                        {formatCurrency(
+                            bookings.reduce((sum, booking) => sum + (booking.totalAmount || 0), 0)
+                        )}
+                    </div>
+                </div>
             </div>
 
+            {/* Help Documentation Panel */}
+            {showHelp && (
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <h3 className="font-semibold mb-2">Quick Help Guide</h3>
+                    <ul className="space-y-2 text-sm">
+                        <li>• Use the search bar to find specific boats or companies</li>
+                        <li>• Filter by date range or use quick date presets</li>
+                        <li>• Save frequently used filter combinations</li>
+                        <li>• Click column headers to sort the table</li>
+                        <li>• Use the checkboxes to show/hide specific payment types</li>
+                        <li>• Export data to Excel for further analysis</li>
+                        <li>• Use keyboard shortcuts for quick actions</li>
+                    </ul>
+                </div>
+            )}
+
+            {/* Filters Section */}
+            <div className={`mb-4 sm:mb-6 space-y-3 ${isMobile && !showFilters ? 'hidden' : ''}`}>
+                {/* Search */}
+                <div className="relative">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                    <input
+                        type="text"
+                        placeholder="Search boats, companies..."
+                        className="pl-10 pr-4 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500"
+                        value={filters.search}
+                        onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                    />
+                </div>
+
+                {/* Date Filters */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="col-span-1 md:col-span-2 grid grid-cols-2 gap-2">
+                        <div className="relative">
+                            <Calendar className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                            <input
+                                type="date"
+                                className="pl-10 pr-2 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                                value={filters.dateFrom}
+                                onChange={(e) => setFilters(prev => ({ ...prev, dateFrom: e.target.value }))}
+                            />
+                        </div>
+                        <div className="relative">
+                            <Calendar className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                            <input
+                                type="date"
+                                className="pl-10 pr-2 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                                value={filters.dateTo}
+                                onChange={(e) => setFilters(prev => ({ ...prev, dateTo: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+                    <select
+                        className="border rounded-lg px-3 py-2"
+                        onChange={(e) => handleDatePresetChange(e.target.value)}
+                    >
+                        <option value="">Select Date Range</option>
+                        <option value="today">Today</option>
+                        <option value="yesterday">Yesterday</option>
+                        <option value="last7days">Last 7 Days</option>
+                        <option value="last30days">Last 30 Days</option>
+                        <option value="thisMonth">This Month</option>
+                        <option value="lastMonth">Last Month</option>
+                        <option value="custom">Custom Range</option>
+                    </select>
+                </div>
+
+                {/* Dropdown Filters */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="relative">
+                        <Filter className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                        <select
+                            className="pl-10 pr-4 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500"
+                            value={filters.paymentStatus}
+                            onChange={(e) => setFilters(prev => ({ ...prev, paymentStatus: e.target.value }))}
+                        >
+                            <option value="all">All Payments</option>
+                            <option value="pending">Pending Payments</option>
+                            <option value="completed">Completed Payments</option>
+                            </select>
+                    </div>
+                    <div className="relative">
+                        <Filter className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                        <select
+                            className="pl-10 pr-4 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500"
+                            value={filters.boatCompany}
+                            onChange={(e) => setFilters(prev => ({ ...prev, boatCompany: e.target.value }))}
+                        >
+                            <option value="all">All Companies</option>
+                            {boatCompanies.map(company => (
+                                <option key={company} value={company}>{company}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="relative">
+                        <Filter className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                        <select
+                            className="pl-10 pr-4 py-2 w-full border rounded-lg focus:ring-2 focus:ring-blue-500"
+                            value={filters.completionStatus}
+                            onChange={(e) => setFilters(prev => ({ ...prev, completionStatus: e.target.value }))}
+                        >
+                            <option value="all">All Bookings</option>
+                            <option value="complete">Completed Payments</option>
+                            <option value="incomplete">Incomplete Payments</option>
+                        </select>
+                    </div>
+                </div>
+
+                {/* Additional Filters */}
+                <div className="flex flex-wrap items-center gap-4">
+                    <label className="flex items-center space-x-2">
+                        <input
+                            type="checkbox"
+                            className="form-checkbox h-4 w-4 text-blue-500"
+                            checked={filters.transferOnly}
+                            onChange={(e) => setFilters(prev => ({ ...prev, transferOnly: e.target.checked }))}
+                        />
+                        <span className="text-sm text-gray-700">Show only bookings with transfers</span>
+                    </label>
+                    <div className="text-sm text-gray-600">
+                        Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, filteredBookings.length)} of {filteredBookings.length} entries
+                    </div>
+                </div>
+            </div>
+
+            {/* Table Container */}
+            <div className="overflow-x-auto border rounded-lg -mx-6 md:mx-0">
+                <table className="min-w-full divide-y divide-gray-200">
+                    <thead>
+                        <tr className="bg-gray-100">
+                            <th colSpan="3" className="px-4 py-2 text-left bg-blue-50 border-b-2 border-blue-200">
+                                <div className="flex items-center">
+                                    <span>Boat Information</span>
+                                </div>
+                            </th>
+                            <th colSpan="6" className="px-4 py-2 text-left bg-green-50 border-b-2 border-green-200">
+                                <div className="flex items-center">
+                                    <span>Client Payments</span>
+                                </div>
+                            </th>
+                            <th colSpan="6" className="px-4 py-2 text-left bg-yellow-50 border-b-2 border-yellow-200">
+                                <div className="flex items-center">
+                                    <span>Owner Payments</span>
+                                </div>
+                            </th>
+                            <th colSpan="3" className="px-4 py-2 text-left bg-purple-50 border-b-2 border-purple-200">
+                                <div className="flex items-center">
+                                    <span>Transfer Payments</span>
+                                </div>
+                            </th>
+                        </tr>
+                        <tr className="bg-gray-50">
+                            {/* Boat Information */}
+                            <th className="px-4 py-2 text-left border-r font-medium">Boat Name</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Company</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Trip Date</th>
+                            
+                            {/* Client Payments */}
+                            <th className="px-4 py-2 text-left border-r font-medium">First Payment</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Status/Date</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Method</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Second Payment</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Status/Date</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Method</th>
+                            
+                            {/* Owner Payments */}
+                            <th className="px-4 py-2 text-left border-r font-medium">First Payment</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Invoice</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Signature</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Second Payment</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Invoice</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Signature</th>
+
+                            {/* Transfer Payments */}
+                            <th className="px-4 py-2 text-left border-r font-medium">Amount</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Invoice</th>
+                            <th className="px-4 py-2 text-left border-r font-medium">Signature</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                        {currentItems.map(booking => (
+                            <tr key={booking.id} 
+                                className={`${booking.firstPayment?.method === 'Sabadell_link' ? 'bg-red-50' : ''} 
+                                        ${isBookingComplete(booking) ? 'bg-green-50' : ''}`}>
+                                <td className="px-4 py-2 border-r">
+                                    <div className="flex items-center space-x-2">
+                                        {isBookingComplete(booking) && (
+                                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap">
+                                                Complete
+                                            </span>
+                                        )}
+                                        <span>{booking.boatName || ''}</span>
+                                    </div>
+                                </td>
+                                <td className="px-4 py-2 border-r">{booking.boatCompany || ''}</td>
+                                <td className="px-4 py-2 border-r">
+                                    {booking.embarkedDate && format(new Date(booking.embarkedDate), 'dd/MM/yyyy')}
+                                </td>
+
+                                <td className="px-4 py-2 border-r">{formatCurrency(booking.firstPayment?.amount || 0)}</td>
+                                <td className="px-4 py-2 border-r">
+                                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium
+                                        ${booking.firstPayment?.received ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                        {booking.firstPayment?.received && booking.firstPayment?.date ? 
+                                            format(new Date(booking.firstPayment.date), 'dd/MM/yyyy') : 
+                                            'Pending'}
+                                    </span>
+                                </td>
+                                <td className="px-4 py-2 border-r">{booking.firstPayment?.method || ''}</td>
+
+                                <td className="px-4 py-2 border-r">{formatCurrency(booking.secondPayment?.amount || 0)}</td>
+                                <td className="px-4 py-2 border-r">
+                                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium
+                                        ${booking.secondPayment?.received ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                        {booking.secondPayment?.received && booking.secondPayment?.date ? 
+                                            format(new Date(booking.secondPayment.date), 'dd/MM/yyyy') : 
+                                            'Pending'}
+                                    </span>
+                                </td>
+                                <td className="px-4 py-2 border-r">{booking.secondPayment?.method || ''}</td>
+
+                                <PaymentAmountCell
+                                    booking={booking}
+                                    paymentType="first"
+                                    isReceived={booking.firstPayment?.received}
+                                />
+                                <InvoiceCell
+                                    booking={booking}
+                                    paymentType="first"
+                                    isReceived={booking.firstPayment?.received}
+                                />
+                                <SignatureCell
+                                    booking={booking}
+                                    paymentType="first"
+                                    isReceived={booking.firstPayment?.received}
+                                />
+                                
+                                <PaymentAmountCell
+                                    booking={booking}
+                                    paymentType="second"
+                                    isReceived={booking.secondPayment?.received}
+                                />
+                                <InvoiceCell
+                                    booking={booking}
+                                    paymentType="second"
+                                    isReceived={booking.secondPayment?.received}
+                                />
+                                <SignatureCell
+                                    booking={booking}
+                                    paymentType="second"
+                                    isReceived={booking.secondPayment?.received}
+                                />
+
+                                <PaymentAmountCell
+                                    booking={booking}
+                                    paymentType="transfer"
+                                    isReceived={true}
+                                />
+                                <InvoiceCell
+                                    booking={booking}
+                                    paymentType="transfer"
+                                    isReceived={true}
+                                />
+                                <SignatureCell
+                                    booking={booking}
+                                    paymentType="transfer"
+                                    isReceived={true}
+                                />
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* Pagination */}
             <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-    <div className="w-full sm:w-auto flex items-center justify-center space-x-2">
-        <select
-            className="border rounded-lg px-3 py-2"
-            value={itemsPerPage}
-            onChange={(e) => {
-                setItemsPerPage(Number(e.target.value));
-                setCurrentPage(1);
-            }}
-        >
-            <option value={10}>10 per page</option>
-            <option value={25}>25 per page</option>
-            <option value={50}>50 per page</option>
-        </select>
-        <span className="text-sm text-gray-600">per page</span>
-    </div>
+                <div className="w-full sm:w-auto flex items-center justify-center space-x-2">
+                    <select
+                        className="border rounded-lg px-3 py-2"
+                        value={itemsPerPage}
+                        onChange={(e) => {
+                            setItemsPerPage(Number(e.target.value));
+                            setCurrentPage(1);
+                        }}
+                    >
+                        <option value={10}>10 per page</option>
+                        <option value={25}>25 per page</option>
+                        <option value={50}>50 per page</option>
+                    </select>
+                    <span className="text-sm text-gray-600">per page</span>
+                </div>
 
-    <div className="flex items-center justify-center space-x-2">
-        <button
-            className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-50"
-            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-        >
-            <ChevronLeft className="h-5 w-5" />
-        </button>
-        
-        <span className="text-sm whitespace-nowrap">
-            Page {currentPage} of {totalPages}
-        </span>
+                <div className="flex items-center justify-center space-x-2">
+                    <button
+                        className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                    >
+                        <ChevronLeft className="h-5 w-5" />
+                    </button>
+                    
+                    <span className="text-sm whitespace-nowrap">
+                        Page {currentPage} of {totalPages}
+                    </span>
 
-        <button
-            className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-50"
-            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-            disabled={currentPage === totalPages}
-        >
-            <ChevronRight className="h-5 w-5" />
-        </button>
-    </div>
-</div>
+                    <button
+                        className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                    >
+                        <ChevronRight className="h-5 w-5" />
+                    </button>
+                </div>
+            </div>
 
+            {/* Modals and Floating UI */}
             {/* Signature Details Modal */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -836,7 +1019,7 @@ const PaymentTracking = () => {
                             </button>
                         </div>
                         <div className="mb-4">
-                            <img src={isModalOpen.signature} alt="Signature" className="h-24 w-full" />
+                            <img src={isModalOpen.signature} alt="Signature" className="h-24 w-full object-contain" />
                         </div>
                         <div className="text-sm">
                             <p><strong>Name:</strong> {isModalOpen.name || 'N/A'}</p>
@@ -862,6 +1045,25 @@ const PaymentTracking = () => {
                     onSave={handleSignatureSave}
                     paymentInfo={selectedPayment}
                 />
+            )}
+
+            {/* Mobile Menu */}
+            {isMobile && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t z-40">
+                    <div className="flex justify-around p-2">
+                    <CustomTooltip content="Content">
+    <button>...</button>
+</CustomTooltip>
+
+<CustomTooltip content="Content">
+    <button>...</button>
+</CustomTooltip>
+
+<CustomTooltip content="Content">
+    <button>...</button>
+</CustomTooltip>
+                    </div>
+                </div>
             )}
         </div>
     );

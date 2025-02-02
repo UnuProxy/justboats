@@ -19,6 +19,9 @@ import AddBoat from './components/AddBoat';
 import Dashboard from './components/Dashboard';
 import ChatbotSettings from './components/ChatbotSettings';
 import SystemSettings from './components/SystemSettings';
+import ProductManagement from './components/ProductManagement';
+import AddEditProduct from './components/AddEditProduct';
+import CateringOrders from './components/CateringOrders';
 
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -162,6 +165,7 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
+                            {/* Catering Routes */}
                             <Route
                                 path="/add-expense"
                                 element={
@@ -178,6 +182,46 @@ function App() {
                                     <ProtectedRoute>
                                         <ProtectedLayout>
                                             <ExpenseOverview />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/products"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <ProductManagement />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/add-product"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <AddEditProduct />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/edit-product/:id"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <AddEditProduct />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/catering-orders"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <CateringOrders />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }
