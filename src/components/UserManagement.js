@@ -1,14 +1,16 @@
-// src/components/UserManagement.js
+// UserManagement.js
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase/firebaseConfig';
 import { collection, query, onSnapshot } from 'firebase/firestore';
-import { addApprovedUser, removeApprovedUser } from '../utils/userManagement'; // Removed 'removeUser' import
+import { addApprovedUser, removeApprovedUser } from '../utils/userManagement';
 import { Trash2, UserPlus, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
+
 const UserManagement = () => {
-  const { isAdmin, loading } = useAuth(); // Ensure only admins can access
+  const { isAdmin, loading } = useAuth();
   const [approvedUsers, setApprovedUsers] = useState([]);
+  const [activeUsers, setActiveUsers] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newUser, setNewUser] = useState({
     email: '',
@@ -22,45 +24,54 @@ const UserManagement = () => {
   useEffect(() => {
     if (loading) {
       console.log('Auth loading...');
-      return; // Wait until auth is loaded
+      return;
     }
-
-    console.log('Admin Status:', admin);
 
     if (!admin) {
       console.log('User is not admin. Skipping Firestore listener.');
-      return; // Prevent unauthorized access
+      return;
     }
 
-    console.log('Setting up Firestore listener for approvedUsers.');
+    console.log('Setting up Firestore listeners.');
 
-    const q = query(collection(db, 'approvedUsers'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    // Listen for approved users
+    const approvedUsersQuery = query(collection(db, 'approvedUsers'));
+    const unsubscribeApproved = onSnapshot(approvedUsersQuery, (snapshot) => {
       const usersData = snapshot.docs.map(doc => ({
-        id: doc.id, // Email serves as the document ID
+        id: doc.id,
         ...doc.data()
       }));
       setApprovedUsers(usersData);
       console.log('Fetched Approved Users:', usersData);
     });
 
+    // Listen for active users
+    const activeUsersQuery = query(collection(db, 'users'));
+    const unsubscribeActive = onSnapshot(activeUsersQuery, (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setActiveUsers(usersData);
+      console.log('Fetched Active Users:', usersData);
+    });
+
     return () => {
-      console.log('Unsubscribing Firestore listener.');
-      unsubscribe();
+      console.log('Unsubscribing Firestore listeners.');
+      unsubscribeApproved();
+      unsubscribeActive();
     };
-  }, [admin, loading]); // Depend on admin and loading
+  }, [admin, loading]);
 
   const handleAddUser = async (e) => {
     e.preventDefault();
-    setError('');  // Clear any existing errors
+    setError('');
     
-    // Validate email
     if (!newUser.email || !newUser.email.endsWith('@gmail.com')) {
       setError('Only Gmail addresses are allowed');
       return;
     }
 
-    // Validate name
     if (!newUser.name || newUser.name.trim() === '') {
       setError('Name is required');
       return;
@@ -71,7 +82,7 @@ const UserManagement = () => {
         email: newUser.email.trim(),
         name: newUser.name.trim(),
         role: newUser.role,
-        createdAt: new Date() // Optionally add client-side timestamp
+        createdAt: new Date()
       };
       
       const result = await addApprovedUser(userData);
@@ -79,7 +90,6 @@ const UserManagement = () => {
       if (result.success) {
         setShowAddForm(false);
         setNewUser({ email: '', name: '', role: 'staff' });
-        // Optionally, show a success message or notification
         alert(result.message || 'User added successfully.');
       } else {
         setError(result.error || 'Failed to add user');
@@ -104,7 +114,7 @@ const UserManagement = () => {
   };
 
   if (loading) {
-    return <div>Loading...</div>; // Or a spinner component
+    return <div>Loading...</div>;
   }
 
   if (!admin) {
@@ -133,6 +143,89 @@ const UserManagement = () => {
           </div>
         </div>
       )}
+
+      {/* Active Users Table */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <h3 className="px-6 py-3 text-lg font-semibold">Active Users</h3>
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Active</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {activeUsers.map((user) => (
+              <tr key={user.id}>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm font-medium text-gray-900">{user.displayName}</div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-gray-500">{user.email}</div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                    user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
+                  }`}>
+                    {user.role || 'user'}
+                  </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                {user.lastLogin ? new Date(user.lastLogin.toDate()).toLocaleString() : 'N/A'}
+              </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Approved Users Table */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <h3 className="px-6 py-3 text-lg font-semibold">Approved Users</h3>
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {approvedUsers.map((user) => (
+              <tr key={user.id}>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-gray-500">{user.email}</div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                    user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
+                  }`}>
+                    {user.role}
+                  </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {user.createdAt ? user.createdAt.toDate().toLocaleDateString() : 'N/A'}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                  <button
+                    onClick={() => handleRemoveApprovedUser(user.email)}
+                    className="text-red-600 hover:text-red-900"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {/* Add User Form Modal */}
       {showAddForm && (
@@ -199,51 +292,6 @@ const UserManagement = () => {
           </div>
         </div>
       )}
-
-      {/* Approved Users Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {approvedUsers.map((user) => (
-              <tr key={user.id}>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-gray-900">{user.name}</div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-500">{user.email}</div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                    user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
-                  }`}>
-                    {user.role}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {user.createdAt ? user.createdAt.toDate().toLocaleDateString() : 'N/A'}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button
-                    onClick={() => handleRemoveApprovedUser(user.email)}
-                    className="text-red-600 hover:text-red-900"
-                  >
-                    <Trash2 size={20} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 };

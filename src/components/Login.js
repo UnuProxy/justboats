@@ -1,13 +1,15 @@
+// Login.js
 import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { db } from '../firebase/firebaseConfig';
+import { doc, getDoc, setDoc, serverTimestamp  } from 'firebase/firestore';
 
 const Login = () => {
-  const { loginWithGoogle, authError, user, userRole, loading } = useAuth();
+  const { loginWithGoogle, authError, user, userRole, loading, setAuthError } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Redirect based on user role once authenticated
     if (!loading && user && userRole) {
       if (userRole === 'admin') {
         navigate('/user-management');
@@ -18,11 +20,37 @@ const Login = () => {
   }, [user, userRole, loading, navigate]);
 
   const handleGoogleLogin = async () => {
-    await loginWithGoogle();
-    // Redirection is handled by useEffect
+    try {
+      const result = await loginWithGoogle();
+      if (result.user) {
+        // Check if user exists in approvedUsers collection
+        const approvedUserDoc = await getDoc(doc(db, 'approvedUsers', result.user.email));
+        
+        if (approvedUserDoc.exists()) {
+          const approvedData = approvedUserDoc.data();
+          
+          // Update the users collection with the correct role from approvedUsers
+          await setDoc(doc(db, 'users', result.user.uid), {
+            email: result.user.email,
+            displayName: result.user.displayName,
+            photoURL: result.user.photoURL,
+            role: approvedData.role,
+            lastLogin: serverTimestamp(), // Use serverTimestamp here
+            createdAt: new Date(),         // You might also update createdAt on first sign-in only
+          }, { merge: true });
+          
+        } else {
+          // If user is not approved, delete their auth account and show error
+          await result.user.delete();
+          throw new Error('Your account is not approved. Please contact an administrator.');
+        }
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setAuthError(error.message);
+    }
   };
 
-  // Handle loading state for the login button
   const isLoginLoading = loading && !user;
 
   return (
@@ -36,7 +64,7 @@ const Login = () => {
             Please sign in to continue
           </p>
         </div>
-        
+
         {authError && (
           <div className="bg-red-50 border-l-4 border-red-400 p-4 my-4">
             <div className="flex">
