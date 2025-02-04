@@ -1,92 +1,141 @@
-// chatService.js
 import { db } from '../firebase/firebaseConfig.js';
-import { collection, onSnapshot, addDoc, getDocs, doc } from 'firebase/firestore';
+import {
+    collection,
+    onSnapshot,
+    addDoc,
+    getDocs,
+    doc,
+    setDoc,
+    query,
+    orderBy,
+    serverTimestamp,
+    where
+} from 'firebase/firestore';
 
 export const chatService = {
-  // Subscribe to conversations
-  subscribeToConversations(callback) {
-    console.log('Starting subscription to conversations...');
-    
-    const conversationId = 'conv_1736951972092_40159';
-    const convRef = doc(db, 'chatConversations', conversationId);
-    const messagesRef = collection(convRef, 'messages');
-    
-    // Listen to messages subcollection directly
-    return onSnapshot(messagesRef, {
-      next: async (messagesSnapshot) => {
-        try {
-          const messages = [];
-          messagesSnapshot.forEach((messageDoc) => {
-            messages.push({
-              id: messageDoc.id,
-              ...messageDoc.data()
-            });
-          });
+    // Subscribe to all conversations
+    subscribeToConversations(callback) {
+        const conversationsRef = collection(db, 'chatConversations');
+        // Only get active or agent-handling conversations
+        const q = query(
+            conversationsRef,
+            where('status', 'in', ['active', 'agent-handling']),
+            orderBy('lastUpdated', 'desc')
+        );
 
-          // Create conversation object with messages
-          const conversation = {
-            id: conversationId,
-            messages: messages.sort((a, b) => 
-              new Date(a.timestamp) - new Date(b.timestamp)
-            )
-          };
+        return onSnapshot(q, (snapshot) => {
+            const conversations = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    ...data,
+                    // Convert timestamps to dates if they exist
+                    lastMessageAt: data.lastMessageAt?.toDate?.() || data.lastMessageAt,
+                    lastUpdated: data.lastUpdated?.toDate?.() || data.lastUpdated,
+                    takenOverAt: data.takenOverAt?.toDate?.() || data.takenOverAt,
+                    createdAt: data.createdAt?.toDate?.() || data.createdAt
+                };
+            }).filter(conv => conv.lastUpdated); // Only include conversations with timestamps
 
-          console.log('Processed conversation:', conversation);
-          callback([conversation]);
-        } catch (error) {
-          console.error('Error processing messages:', error);
-          callback([]);
-        }
-      },
-      error: (error) => {
-        console.error('Subscription error:', error);
-        callback([]);
-      }
-    });
-  },
-
-  // Get messages for a specific conversation
-  async getMessages(conversationId) {
-    console.log('Getting messages for conversation:', conversationId);
-    try {
-      const convRef = doc(db, 'chatConversations', conversationId);
-      const messagesRef = collection(convRef, 'messages');
-      const messagesSnap = await getDocs(messagesRef);
-      
-      const messages = [];
-      messagesSnap.forEach(doc => {
-        messages.push({
-          id: doc.id,
-          ...doc.data()
+            callback(conversations);
+        }, error => {
+            console.error("Error fetching conversations:", error);
+            callback([]);
         });
-      });
+    },
 
-      console.log('Retrieved messages:', messages);
-      return messages.sort((a, b) => 
-        new Date(a.timestamp) - new Date(b.timestamp)
-      );
-    } catch (error) {
-      console.error('Error getting messages:', error);
-      return [];
-    }
-  },
+    // Subscribe to messages for a conversation
+    subscribeToMessages(conversationId, callback) {
+        const messagesRef = collection(db, 'chatConversations', conversationId, 'messages');
+        const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
-  // Send a new message
-  async sendMessage(conversationId, content, role) {
-    try {
-      const convRef = doc(db, 'chatConversations', conversationId);
-      const messagesRef = collection(convRef, 'messages');
-      const messageData = {
-        content,
-        role,
-        timestamp: new Date().toISOString()
-      };
-      
-      await addDoc(messagesRef, messageData);
-      return true;
-    } catch (error) {
-      console.error('Error sending message:', error);
-      return false;
+        return onSnapshot(q, (snapshot) => {
+            const messages = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    ...data,
+                    timestamp: data.timestamp?.toDate?.() || data.timestamp
+                };
+            });
+
+            // Sort messages by timestamp, handling both Date objects and Firestore timestamps
+            const sortedMessages = messages.sort((a, b) => {
+                const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : 0;
+                const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : 0;
+                return timeA - timeB;
+            });
+
+            callback(sortedMessages);
+        }, error => {
+            console.error("Error fetching messages:", error);
+            callback([]);
+        });
+    },
+
+    // Send a message
+    async sendMessage(conversationId, content, role) {
+        try {
+            const convRef = doc(db, 'chatConversations', conversationId);
+            const timestamp = serverTimestamp();
+
+            // First update conversation metadata
+            await setDoc(convRef, {
+                lastMessage: content,
+                lastMessageAt: timestamp,
+                lastUpdated: timestamp,
+                lastMessageRole: role,
+                status: role === 'agent' ? 'agent-handling' : 'active'
+            }, { merge: true });
+
+            // Then add the message
+            await addDoc(collection(convRef, 'messages'), {
+                content,
+                role,
+                timestamp
+            });
+
+            return true;
+        } catch (error) {
+            console.error('Error sending message:', error);
+            return false;
+        }
+    },
+
+    // Take over conversation
+    async takeOverConversation(conversationId, agentId) {
+        try {
+            const convRef = doc(db, 'chatConversations', conversationId);
+            const timestamp = serverTimestamp();
+
+            // Update conversation status first
+            await setDoc(convRef, {
+                status: 'agent-handling',
+                agentId,
+                takenOverAt: timestamp,
+                lastUpdated: timestamp,
+                botEnabled: false
+            }, { merge: true });
+
+            // Then add the system message
+            const systemMessage = `Conversation taken over by agent ${agentId}`;
+            await addDoc(collection(convRef, 'messages'), {
+                content: systemMessage,
+                role: 'system',
+                timestamp
+            });
+
+            // Update conversation metadata for the system message
+            await setDoc(convRef, {
+                lastMessage: systemMessage,
+                lastMessageAt: timestamp,
+                lastMessageRole: 'system'
+            }, { merge: true });
+
+            return true;
+        } catch (error) {
+            console.error('Error taking over conversation:', error);
+            return false;
+        }
     }
-  }
 };
