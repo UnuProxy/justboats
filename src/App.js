@@ -22,7 +22,7 @@ import SystemSettings from './components/SystemSettings';
 import ProductManagement from './components/ProductManagement';
 import AddEditProduct from './components/AddEditProduct';
 import CateringOrders from './components/CateringOrders';
-
+import BoatFinder from './components/BoatFinder';
 const Splash = ({ onFinish }) => {
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -248,6 +248,16 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
+                            <Route
+  path="/available-boats"
+  element={
+    <ProtectedRoute>
+      <ProtectedLayout>
+        <BoatFinder />
+      </ProtectedLayout>
+    </ProtectedRoute>
+  }
+/>
                             <Route
                                 path="/edit-boat/:id"
                                 element={
