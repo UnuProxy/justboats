@@ -18,6 +18,7 @@ function AddBooking() {
       phone: "",
       email: "",
       passportNumber: "",
+      address: "",
     },
     bookingDetails: {
       boatCompany: "",
@@ -172,10 +173,11 @@ function AddBooking() {
     setFormData((prev) => {
       
       let processedValue = value;
-      if (typeof value === 'string' && 
-          !(section === 'bookingDetails' && (field === 'boatName' || field === 'boatCompany'))) {
-        processedValue = value.trim();
-      }
+if (typeof value === 'string' && 
+    !(section === 'bookingDetails' && (field === 'boatName' || field === 'boatCompany')) &&
+    !(section === 'clientDetails' && field === 'name')) {
+  processedValue = value.trim();
+}
       if (section === 'bookingDetails' && field === 'startTime') {
         const startHour = parseInt(value.split(':')[0]);
         const startMinutes = value.split(':')[1];
@@ -436,24 +438,36 @@ function AddBooking() {
         </div>
       )}
 
-      <div className="mt-6 space-y-4">
-        <h4 className="font-medium">Client Details</h4>
-        {["name", "phone", "email", "passportNumber"].map((field) => (
-          <div key={field}>
-            <label className="block text-sm font-medium text-gray-700">
-              {field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, " $1")}
-            </label>
-            <input
-              type={field === "email" ? "email" : "text"}
-              className="mt-1 w-full p-2 border rounded"
-              value={formData.clientDetails[field]}
-              onChange={(e) =>
-                handleInputChange("clientDetails", field, e.target.value)
-              }
-            />
-          </div>
-        ))}
-      </div>
+<div className="mt-6 space-y-4">
+  <h4 className="font-medium">Client Details</h4>
+  {["name", "phone", "email", "passportNumber", "address"].map((field) => (
+    <div key={field}>
+      <label className="block text-sm font-medium text-gray-700">
+        {field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, " $1")}
+      </label>
+      {field === "address" ? (
+        <textarea
+          className="mt-1 w-full p-2 border rounded"
+          rows="2"
+          value={formData.clientDetails[field]}
+          onChange={(e) =>
+            handleInputChange("clientDetails", field, e.target.value)
+          }
+          placeholder="Enter client's address"
+        />
+      ) : (
+        <input
+          type={field === "email" ? "email" : "text"}
+          className="mt-1 w-full p-2 border rounded"
+          value={formData.clientDetails[field]}
+          onChange={(e) =>
+            handleInputChange("clientDetails", field, e.target.value)
+          }
+        />
+      )}
+    </div>
+  ))}
+</div>
     </div>
   );
   const renderStep2 = () => (
@@ -854,6 +868,7 @@ function AddBooking() {
               phone: formData.clientDetails.phone || "",
               email: formData.clientDetails.email || "",
               passportNumber: formData.clientDetails.passportNumber || "",
+              address: formData.clientDetails.address || "",
           },
           clientName: formData.clientDetails.name || "",
           bookingDate: formData.bookingDetails.date || "",
