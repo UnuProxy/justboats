@@ -371,12 +371,17 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
   
     const bookingToSave = {
       ...editedBooking,
+      clientDetails: {
+        ...editedBooking.clientDetails,
+        address: editedBooking.clientDetails?.address || ''
+      },
       pricing: {
         ...editedBooking.pricing,
         agreedPrice: editedBooking.finalPrice,
         lastUpdated: new Date().toISOString()
       }
     };
+    
   
     try {
       await updateDoc(doc(db, "bookings", booking.id), bookingToSave);
@@ -518,6 +523,26 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                     </p>
                   )}
                 </div>
+                <div className="mb-4">
+  <label className="block text-sm font-medium text-gray-700">
+    Address:
+  </label>
+  {isEditing ? (
+    <textarea
+      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      value={editedBooking.clientDetails?.address || editedBooking.address || ""}
+      onChange={(e) =>
+        handleInputChange("address", e.target.value)
+      }
+      rows="3"
+      placeholder="Enter client's address"
+    />
+  ) : (
+    <p className="mt-1 whitespace-pre-line">
+      {editedBooking.clientDetails?.address || editedBooking.address || "N/A"}
+    </p>
+  )}
+</div>
               </div>
             </div>
 
