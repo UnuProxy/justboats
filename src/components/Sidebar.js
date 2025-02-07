@@ -134,7 +134,13 @@ const Sidebar = () => {
                     icon: Ship,
                     path: '/boats',
                     allowed: true
-                }
+                },
+                {
+                    name: 'Available Boats',
+                    icon: Ship,
+                    path: '/available-boats',
+                    allowed: true
+                },
             ]
         },
         {

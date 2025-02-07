@@ -26,6 +26,7 @@ const CheckboxGroup = ({ title, items, values, onChange }) => (
     </div>
 );
 
+
 const AddBoat = () => {
     const navigate = useNavigate();
     const { id } = useParams();
@@ -38,6 +39,7 @@ const AddBoat = () => {
 
     const initialBoatState = {
         // Basic Information
+        icalUrl: '',
         name: '',
         images: [],
         specs: '',
@@ -338,45 +340,42 @@ const handleInputChange = (e, section = null) => {
         return Promise.all(uploadPromises);
     };
 
-     const handleSubmit = async (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
-
+    
         try {
-           const newImageUrls = await uploadImages(imageFiles.filter(file => typeof file !== 'string'));
-
+            const newImageUrls = await uploadImages(imageFiles.filter(file => typeof file !== 'string'));
+    
             let finalImageUrls = [];
-
-             if (isEditing && boatData.images) {
-              // Preserve existing images and add new ones
-              const existingImageUrls = Array.isArray(boatData.images)
-                  ? boatData.images.filter(url => imagePreviews.includes(url))
-                : [];
-              finalImageUrls = [...existingImageUrls, ...newImageUrls];
-
-             } else {
-               finalImageUrls = newImageUrls;
-           }
-
-
+            if (isEditing && boatData.images) {
+                const existingImageUrls = Array.isArray(boatData.images)
+                    ? boatData.images.filter(url => imagePreviews.includes(url))
+                    : [];
+                finalImageUrls = [...existingImageUrls, ...newImageUrls];
+            } else {
+                finalImageUrls = newImageUrls;
+            }
+    
+            const boatDataToSave = {
+                ...boatData,
+                images: finalImageUrls,
+                availabilityType: boatData.icalUrl ? 'ical' : 'manual', // Add this line
+                updatedAt: new Date()
+            };
+    
             if (isEditing) {
                 const boatRef = doc(db, 'boats', id);
-                await updateDoc(boatRef, {
-                    ...boatData,
-                    images: finalImageUrls,
-                    updatedAt: new Date()
-                });
-                navigate('/boats');
+                await updateDoc(boatRef, boatDataToSave);
             } else {
                 const boatsRef = collection(db, 'boats');
                 await addDoc(boatsRef, {
-                    ...boatData,
-                    images: finalImageUrls,
+                    ...boatDataToSave,
                     createdAt: new Date()
                 });
-                navigate('/boats');
             }
+            navigate('/boats');
         } catch (err) {
             setError(err.message);
         } finally {
@@ -759,6 +758,26 @@ const handleInputChange = (e, section = null) => {
                 }
             }, 'additional.safety')}
     />
+</div>
+
+
+{/* iCal Calendar Integration */}
+<div className="space-y-4 border-b pb-6">
+    <h3 className="text-lg font-medium">Calendar Integration</h3>
+    <div>
+        <label className="block text-sm font-medium text-gray-700">iCal Calendar URL (Optional)</label>
+        <input
+            type="url"
+            name="icalUrl"
+            value={boatData.icalUrl || ''}
+            onChange={handleInputChange}
+            placeholder="https://example.com/calendar.ics"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+        />
+        <p className="mt-1 text-sm text-gray-500">
+            Add a calendar URL to sync boat availability
+        </p>
+    </div>
 </div>
 
                 <div className="flex justify-end space-x-4">
