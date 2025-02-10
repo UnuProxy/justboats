@@ -23,6 +23,8 @@ import ProductManagement from './components/ProductManagement';
 import AddEditProduct from './components/AddEditProduct';
 import CateringOrders from './components/CateringOrders';
 import BoatFinder from './components/BoatFinder';
+import LeadManagement from './components/LeadManagement';
+
 const Splash = ({ onFinish }) => {
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -249,15 +251,15 @@ function App() {
                                 }
                             />
                             <Route
-  path="/available-boats"
-  element={
-    <ProtectedRoute>
-      <ProtectedLayout>
-        <BoatFinder />
-      </ProtectedLayout>
-    </ProtectedRoute>
-  }
-/>
+                            path="/available-boats"
+                            element={
+                                <ProtectedRoute>
+                                <ProtectedLayout>
+                                    <BoatFinder />
+                                </ProtectedLayout>
+                                </ProtectedRoute>
+                            }
+                            />
                             <Route
                                 path="/edit-boat/:id"
                                 element={
@@ -308,6 +310,16 @@ function App() {
                                     <ProtectedRoute>
                                         <ProtectedLayout>
                                             <UserManagement />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/inquiries"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <LeadManagement />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }
