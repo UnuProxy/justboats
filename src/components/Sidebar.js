@@ -163,6 +163,19 @@ const Sidebar = () => {
             ]
         },
         {
+            id: 'leads',
+            title: "Lead Management",
+            icon: MessageSquare,
+            items: [
+                {
+                    name: 'Inquiries',
+                    icon: MessageSquare,
+                    path: '/inquiries',
+                    allowed: true
+                }
+            ]
+        },
+        {
             id: 'tools',
             title: "Tools",
             icon: Settings,
