@@ -24,6 +24,7 @@ import AddEditProduct from './components/AddEditProduct';
 import CateringOrders from './components/CateringOrders';
 import BoatFinder from './components/BoatFinder';
 import LeadManagement from './components/LeadManagement';
+import NotificationsCenter from './components/notifications/NotificationsCenter';
 
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -98,9 +99,12 @@ function ProtectedLayout({ children }) {
             <div className="md:ml-64 flex flex-col">
                 <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center">
                     <div></div>
-                    <h1 className="text-xl font-semibold">
-                        Just Enjoy Bookings
-                    </h1>
+                    <div className="flex items-center gap-4">
+                        <NotificationsCenter />  {/* Add this line */}
+                        <h1 className="text-xl font-semibold">
+                            Just Enjoy Bookings
+                        </h1>
+                    </div>
                 </header>
                 <main className="flex-1 overflow-y-auto p-6">
                     {children}
@@ -134,17 +138,22 @@ function App() {
                                 }
                             />
 
-                            {/* Booking Routes */}
-                            <Route
-                                path="/bookings"
-                                element={
-                                    <ProtectedRoute>
-                                        <ProtectedLayout>
-                                            <UpcomingBookings />
-                                        </ProtectedLayout>
-                                    </ProtectedRoute>
-                                }
-                            />
+<Route path="/bookings" element={
+  <ProtectedRoute>
+    <ProtectedLayout>
+      <UpcomingBookings />
+    </ProtectedLayout>
+  </ProtectedRoute>
+}>
+  {/* Add a nested route for viewing specific bookings */}
+  <Route path=":id" element={
+    <ProtectedRoute>
+      <ProtectedLayout>
+        <UpcomingBookings />
+      </ProtectedLayout>
+    </ProtectedRoute>
+  } />
+</Route>
                             <Route
                                 path="/add-booking"
                                 element={
