@@ -5,6 +5,12 @@ import { Users, Ship, Euro, MapPin } from "lucide-react";
 import { getAuth } from 'firebase/auth';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import ClientPaymentForm from './ClientPaymentForm';
+import { 
+  createBookingNotification, 
+  createPaymentNotification,
+  createClientUpdateNotification,
+  createTransferNotification 
+} from '../utils/notification-utils';
 
 function AddBooking() {
   const [activeStep, setActiveStep] = useState(1);
@@ -945,7 +951,10 @@ if (typeof value === 'string' &&
 
             if (!existingClientSnapshot.empty) {
                 clientId = existingClientSnapshot.docs[0].id;
-
+                await createClientUpdateNotification(
+                  formData.clientDetails.name,
+                  'updated'
+                );
                 await updateDoc(doc(db, "clients", clientId), {
                     name: formData.clientDetails.name,
                     email: formData.clientDetails.email,
@@ -973,14 +982,52 @@ if (typeof value === 'string' &&
                 };
 
                 const clientDoc = await addDoc(clientsRef, clientData);
+                await createClientUpdateNotification(
+                  formData.clientDetails.name,
+                  'created'
+                );
                 clientId = clientDoc.id;
+                
             }
             bookingData.clientId = clientId;
         }
 
         // Create booking document
         const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
-        
+        // Add booking notification
+await createBookingNotification(
+  formData.clientDetails.name,
+  formData.bookingDetails.boatName,
+  new Date(formData.bookingDetails.date).toLocaleDateString(),
+  bookingRef.id
+);
+
+// Add transfer notification if transfer is required
+if (formData.transfer.required) {
+  const pickupTime = new Date(`${formData.bookingDetails.date} ${formData.bookingDetails.startTime}`);
+  await createTransferNotification(
+    bookingRef.id,
+    formData.clientDetails.name,
+    pickupTime.toLocaleTimeString()
+  );
+}
+
+// Add payment notifications if payments are received
+if (formData.pricing.firstPayment.received) {
+  await createPaymentNotification(
+    formData.pricing.firstPayment.amount,
+    formData.clientDetails.name,
+    bookingRef.id
+  );
+}
+
+if (formData.pricing.secondPayment.received) {
+  await createPaymentNotification(
+    formData.pricing.secondPayment.amount,
+    formData.clientDetails.name,
+    bookingRef.id
+  );
+}
         // Add the ID to the booking document
         await updateDoc(doc(db, "bookings", bookingRef.id), {
             id: bookingRef.id

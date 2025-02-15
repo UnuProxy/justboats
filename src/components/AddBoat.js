@@ -58,7 +58,8 @@ const AddBoat = () => {
             'Max Speed': '',
             Class: '',
             Engine: '',
-            HP: ''
+            HP: '',
+            Cabins: ''
         },
 
         // Seasonal Prices
@@ -395,7 +396,8 @@ const handleInputChange = (e, section = null) => {
             'Max Speed': "e.g., 36 knots",
             Class: "e.g., Motoryacht",
             Engine: "e.g., 2 x MTU 12V 4000 M90",
-            HP: "e.g., 5,470"
+            HP: "e.g., 5,470",
+            Cabins: "e.g., 4 (2 Master, 2 Twin)"
         },
         seasonalPrices: {
             'May / October': "e.g., €11,000 per day",
@@ -499,19 +501,19 @@ const handleInputChange = (e, section = null) => {
                 <div className="space-y-4">
                     <h2 className="text-xl font-semibold">Detailed Specifications</h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {Object.keys(boatData.detailedSpecs).map(spec => (
-                            <div key={spec}>
-                                <label className="block text-sm font-medium text-gray-700">{spec}</label>
-                                <input
-                                    type="text"
-                                    name={spec}
-                                    value={boatData.detailedSpecs[spec]}
-                                    onChange={(e) => handleInputChange(e, 'detailedSpecs')}
-                                    placeholder={placeholders.specs[spec]}
-                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                />
-                            </div>
-                        ))}
+                    {Object.keys(boatData.detailedSpecs).map(spec => (
+                        <div key={spec}>
+                            <label className="block text-sm font-medium text-gray-700">{spec}</label>
+                            <input
+                                type="text"
+                                name={spec}
+                                value={boatData.detailedSpecs[spec]}
+                                onChange={(e) => handleInputChange(e, 'detailedSpecs')}
+                                placeholder={placeholders.specs[spec]}
+                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                            />
+                        </div>
+                    ))}
                     </div>
                 </div>
 

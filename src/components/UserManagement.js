@@ -6,6 +6,48 @@ import { addApprovedUser, removeApprovedUser } from '../utils/userManagement';
 import { Trash2, UserPlus, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
+const formatLastLogin = (timestamp) => {
+  if (!timestamp) return 'Never';
+  
+  try {
+    const date = timestamp.toDate();
+    const now = new Date();
+    const diff = now - date;
+    
+    // Less than 24 hours
+    if (diff < 24 * 60 * 60 * 1000) {
+      const hours = Math.floor(diff / (60 * 60 * 1000));
+      if (hours < 1) {
+        const minutes = Math.floor(diff / (60 * 1000));
+        return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+      }
+      return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+    }
+    
+    // Less than 7 days
+    if (diff < 7 * 24 * 60 * 60 * 1000) {
+      return date.toLocaleString('en-US', {
+        weekday: 'short',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: true
+      });
+    }
+    
+    // Default full date
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: true
+    });
+  } catch (error) {
+    console.error('Error formatting timestamp:', error);
+    return 'Invalid date';
+  }
+};
 
 const UserManagement = () => {
   const { isAdmin, loading } = useAuth();
@@ -41,8 +83,8 @@ const UserManagement = () => {
         id: doc.id,
         ...doc.data()
       }));
-      setApprovedUsers(usersData);
       console.log('Fetched Approved Users:', usersData);
+      setApprovedUsers(usersData);
     });
 
     // Listen for active users
@@ -52,8 +94,8 @@ const UserManagement = () => {
         id: doc.id,
         ...doc.data()
       }));
-      setActiveUsers(usersData);
       console.log('Fetched Active Users:', usersData);
+      setActiveUsers(usersData);
     });
 
     return () => {
@@ -81,9 +123,12 @@ const UserManagement = () => {
       const userData = {
         email: newUser.email.trim(),
         name: newUser.name.trim(),
+        displayName: newUser.name.trim(),
         role: newUser.role,
         createdAt: new Date()
       };
+      
+      console.log('Adding new user with data:', userData);
       
       const result = await addApprovedUser(userData);
 
@@ -108,6 +153,7 @@ const UserManagement = () => {
           setError(result.error || 'Failed to remove approved user');
         }
       } catch (err) {
+        console.error('Error removing user:', err);
         setError('Failed to remove approved user');
       }
     }
@@ -160,7 +206,9 @@ const UserManagement = () => {
             {activeUsers.map((user) => (
               <tr key={user.id}>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-gray-900">{user.displayName}</div>
+                  <div className="text-sm font-medium text-gray-900">
+                    {user.displayName || user.name || 'N/A'}
+                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm text-gray-500">{user.email}</div>
@@ -172,9 +220,16 @@ const UserManagement = () => {
                     {user.role || 'user'}
                   </span>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                {user.lastLogin ? new Date(user.lastLogin.toDate()).toLocaleString() : 'N/A'}
-              </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-gray-500">
+                    {formatLastLogin(user.lastLogin)}
+                  </div>
+                  {user.lastLogin && (
+                    <div className="text-xs text-gray-400 mt-1">
+                      Full login: {new Date(user.lastLogin.toDate()).toLocaleString()}
+                    </div>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -198,7 +253,9 @@ const UserManagement = () => {
             {approvedUsers.map((user) => (
               <tr key={user.id}>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                  <div className="text-sm font-medium text-gray-900">
+                    {user.displayName || user.name || 'N/A'}
+                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm text-gray-500">{user.email}</div>
@@ -211,7 +268,7 @@ const UserManagement = () => {
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {user.createdAt ? user.createdAt.toDate().toLocaleDateString() : 'N/A'}
+                  {user.createdAt ? new Date(user.createdAt.toDate()).toLocaleDateString() : 'N/A'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <button
