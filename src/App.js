@@ -138,22 +138,22 @@ function App() {
                                 }
                             />
 
-<Route path="/bookings" element={
-  <ProtectedRoute>
-    <ProtectedLayout>
-      <UpcomingBookings />
-    </ProtectedLayout>
-  </ProtectedRoute>
-}>
-  {/* Add a nested route for viewing specific bookings */}
-  <Route path=":id" element={
-    <ProtectedRoute>
-      <ProtectedLayout>
-        <UpcomingBookings />
-      </ProtectedLayout>
-    </ProtectedRoute>
-  } />
-</Route>
+                            <Route path="/bookings" element={
+                            <ProtectedRoute>
+                                <ProtectedLayout>
+                                <UpcomingBookings />
+                                </ProtectedLayout>
+                            </ProtectedRoute>
+                            }>
+                            {/* Add a nested route for viewing specific bookings */}
+                            <Route path=":id" element={
+                                <ProtectedRoute>
+                                <ProtectedLayout>
+                                    <UpcomingBookings />
+                                </ProtectedLayout>
+                                </ProtectedRoute>
+                            } />
+                            </Route>
                             <Route
                                 path="/add-booking"
                                 element={

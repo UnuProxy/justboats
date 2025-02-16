@@ -1,16 +1,51 @@
+// AddBooking.js (React Component)
+
 import React, { useState, useEffect, useCallback } from "react";
 import { collection, query, where, addDoc, getDocs } from "firebase/firestore";
-import { db } from '../firebase/firebaseConfig.js';
+import { db } from '../firebase/firebaseConfig';
 import { Users, Ship, Euro, MapPin } from "lucide-react";
 import { getAuth } from 'firebase/auth';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import ClientPaymentForm from './ClientPaymentForm';
-import { 
-  createBookingNotification, 
-  createPaymentNotification,
-  createClientUpdateNotification,
-  createTransferNotification 
-} from '../utils/notification-utils';
+import { createBookingNotification, createPaymentNotification, createClientUpdateNotification, createTransferNotification } from '../utils/notification-utils';
+import { increment } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../firebase/firebaseConfig';
+
+const sendBookingConfirmationEmail = async (bookingData) => {
+  try {
+    const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
+    
+    // Ensure all required fields are present with proper values
+    const emailPayload = {
+      clientName: bookingData.clientDetails?.name || '',
+      clientEmail: bookingData.clientDetails?.email || '',
+      bookingDetails: {
+        boatName: bookingData.bookingDetails?.boatName || '',
+        date: bookingData.bookingDetails?.date || '',
+        startTime: bookingData.bookingDetails?.startTime || '',
+        endTime: bookingData.bookingDetails?.endTime || '',
+        passengers: bookingData.bookingDetails?.passengers?.toString() || '',
+        price: bookingData.pricing?.agreedPrice?.toString() || '0'
+      }
+    };
+
+    // Validate required fields before sending
+    if (!emailPayload.clientName || !emailPayload.clientEmail) {
+      console.error('Missing required fields:', { 
+        name: emailPayload.clientName, 
+        email: emailPayload.clientEmail 
+      });
+      return;
+    }
+
+    console.log('Final email payload:', JSON.stringify(emailPayload, null, 2));
+    const result = await sendEmail(emailPayload);
+    console.log('Email send result:', result);
+  } catch (error) {
+    console.error('Error sending booking confirmation email:', error);
+  }
+};
 
 function AddBooking() {
   const [activeStep, setActiveStep] = useState(1);
@@ -929,10 +964,7 @@ if (typeof value === 'string' &&
         };
 
         let clientId = null;
-        if (
-            formData.clientType === "Direct" ||
-            ["Hotel", "Collaborator"].includes(formData.clientType)
-        ) {
+        if (formData.clientType) {
             const clientsRef = collection(db, "clients");
 
             let existingClientQuery = query(
@@ -950,90 +982,95 @@ if (typeof value === 'string' &&
             }
 
             if (!existingClientSnapshot.empty) {
+                // Update existing client
                 clientId = existingClientSnapshot.docs[0].id;
                 await createClientUpdateNotification(
-                  formData.clientDetails.name,
-                  'updated'
+                    formData.clientDetails.name,
+                    'updated'
                 );
                 await updateDoc(doc(db, "clients", clientId), {
                     name: formData.clientDetails.name,
                     email: formData.clientDetails.email,
                     phone: formData.clientDetails.phone,
                     passportNumber: formData.clientDetails.passportNumber,
+                   address: formData.clientDetails.address || '',
+                    clientType: formData.clientType,
+                    source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
                     lastUpdated: new Date().toISOString(),
+                    totalBookings: increment(1),
+                    totalSpent: increment(parseFloat(formData.pricing.agreedPrice) || 0)
                 });
-
-                console.log("Updated existing client with ID:", clientId);
             } else {
+                // Create new client
                 const clientData = {
-                    name: formData.clientDetails.name,
-                    email: formData.clientDetails.email,
-                    phone: formData.clientDetails.phone,
-                    passportNumber: formData.clientDetails.passportNumber,
-                    source:
-                        formData.clientType === "Direct"
-                            ? formData.clientSource
-                            : formData.clientType,
-                    createdAt: new Date().toISOString(),
-                    createdBy: createdByInfo,
-                    bookings: [],
-                    totalBookings: 1,
-                    totalSpent: bookingData.pricing.agreedPrice,
+                  name: formData.clientDetails.name || "",
+                  email: formData.clientDetails.email || "",
+                  phone: formData.clientDetails.phone || "",
+                  passportNumber: formData.clientDetails.passportNumber || "",
+                  address: formData.clientDetails.address || "",  // Added fallback
+                  clientType: formData.clientType,
+                  source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
+                  createdAt: new Date().toISOString(),
+                  lastUpdated: new Date().toISOString(),
+                  createdBy: createdByInfo,
+                  bookings: [],
+                  totalBookings: 1,
+                  totalSpent: parseFloat(formData.pricing.agreedPrice) || 0,
+                  notes: formData.notes || "",
+                  dob: ""
                 };
 
                 const clientDoc = await addDoc(clientsRef, clientData);
                 await createClientUpdateNotification(
-                  formData.clientDetails.name,
-                  'created'
+                    formData.clientDetails.name,
+                    'created'
                 );
                 clientId = clientDoc.id;
-                
             }
             bookingData.clientId = clientId;
         }
 
         // Create booking document
         const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
+console.log('About to send email with data:', bookingData);  // Add this line
+await sendBookingConfirmationEmail(bookingData);
         // Add booking notification
-await createBookingNotification(
-  formData.clientDetails.name,
-  formData.bookingDetails.boatName,
-  new Date(formData.bookingDetails.date).toLocaleDateString(),
-  bookingRef.id
-);
+        await createBookingNotification(
+            formData.clientDetails.name,
+            formData.bookingDetails.boatName,
+            new Date(formData.bookingDetails.date).toLocaleDateString(),
+            bookingRef.id
+        );
 
-// Add transfer notification if transfer is required
-if (formData.transfer.required) {
-  const pickupTime = new Date(`${formData.bookingDetails.date} ${formData.bookingDetails.startTime}`);
-  await createTransferNotification(
-    bookingRef.id,
-    formData.clientDetails.name,
-    pickupTime.toLocaleTimeString()
-  );
-}
+        if (formData.transfer.required) {
+            const pickupTime = new Date(`${formData.bookingDetails.date} ${formData.bookingDetails.startTime}`);
+            await createTransferNotification(
+                bookingRef.id,
+                formData.clientDetails.name,
+                pickupTime.toLocaleTimeString()
+            );
+        }
 
-// Add payment notifications if payments are received
-if (formData.pricing.firstPayment.received) {
-  await createPaymentNotification(
-    formData.pricing.firstPayment.amount,
-    formData.clientDetails.name,
-    bookingRef.id
-  );
-}
+        if (formData.pricing.firstPayment.received) {
+            await createPaymentNotification(
+                formData.pricing.firstPayment.amount,
+                formData.clientDetails.name,
+                bookingRef.id
+            );
+        }
 
-if (formData.pricing.secondPayment.received) {
-  await createPaymentNotification(
-    formData.pricing.secondPayment.amount,
-    formData.clientDetails.name,
-    bookingRef.id
-  );
-}
-        // Add the ID to the booking document
+        if (formData.pricing.secondPayment.received) {
+            await createPaymentNotification(
+                formData.pricing.secondPayment.amount,
+                formData.clientDetails.name,
+                bookingRef.id
+            );
+        }
+
         await updateDoc(doc(db, "bookings", bookingRef.id), {
             id: bookingRef.id
         });
 
-        // Create separate payment records
         const payments = bookingData.pricing.payments.filter(payment => payment.amount > 0);
         if (payments.length > 0) {
             const paymentRecords = payments.map(payment => ({
@@ -1050,8 +1087,8 @@ if (formData.pricing.secondPayment.received) {
         }
 
         // Update client's bookings array
-        if (formData.clientType === "Direct") {
-            await updateDoc(doc(db, "clients", bookingData.clientId), {
+        if (clientId) {
+            await updateDoc(doc(db, "clients", clientId), {
                 bookings: arrayUnion(bookingRef.id),
             });
         }
@@ -1066,6 +1103,7 @@ if (formData.pricing.secondPayment.received) {
                 phone: "",
                 email: "",
                 passportNumber: "",
+                address: "",
             },
             bookingDetails: {
                 boatCompany: "",
@@ -1076,26 +1114,26 @@ if (formData.pricing.secondPayment.received) {
                 endTime: "",
             },
             pricing: {
-              agreedPrice: "",
-              pricingType: "standard",
-              firstPayment: {
-                useCustomAmount: false,
-                percentage: "30",
-                amount: "",
-                method: "cash",
-                received: false,
-                date: "",
-                excludeVAT: false
-              },
-              secondPayment: {
-                amount: "",
-                method: "pos",
-                received: false,
-                date: "",
-                excludeVAT: false
-              },
-              paymentStatus: "No Payment",
-              totalPaid: 0
+                agreedPrice: "",
+                pricingType: "standard",
+                firstPayment: {
+                    useCustomAmount: false,
+                    percentage: "30",
+                    amount: "",
+                    method: "cash",
+                    received: false,
+                    date: "",
+                    excludeVAT: false
+                },
+                secondPayment: {
+                    amount: "",
+                    method: "pos",
+                    received: false,
+                    date: "",
+                    excludeVAT: false
+                },
+                paymentStatus: "No Payment",
+                totalPaid: 0
             },
             transfer: {
                 required: false,
@@ -1105,13 +1143,14 @@ if (formData.pricing.secondPayment.received) {
             notes: "",
         });
         setActiveStep(1);
+        setRestaurantName("");
     } catch (error) {
         console.error("Error saving booking:", error);
         alert("Error saving booking. Please try again.");
     } finally {
         setLoading(false);
     }
-  };
+};
   return (
     <div className="min-h-screen bg-gray-50 p-2 sm:p-6">
       <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-lg">
