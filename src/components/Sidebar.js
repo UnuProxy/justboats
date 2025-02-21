@@ -51,7 +51,7 @@ const Sidebar = () => {
     const navigationGroups = [
         {
             id: 'bookings',
-            title: "Bookings",
+            title: "Bookings & Calendar",
             icon: Calendar,
             items: [
                 {
@@ -69,9 +69,66 @@ const Sidebar = () => {
             ]
         },
         {
+            id: 'fleet',
+            title: "Boats",
+            icon: Ship,
+            items: [
+                {
+                    name: 'Boat Fleet',
+                    icon: Ship,
+                    path: '/boats',
+                    allowed: true
+                },
+                {
+                    name: 'Available Boats',
+                    icon: Ship,
+                    path: '/available-boats',
+                    allowed: true
+                },
+            ]
+        },
+        {
+            id: 'customers',
+            title: "Customer Relations",
+            icon: Users,
+            items: [
+                {
+                    name: 'Client Directory',
+                    icon: Users,
+                    path: '/clients',
+                    allowed: true
+                },
+                {
+                    name: 'Manage Partners',
+                    icon: Building,
+                    path: '/manage-partners',
+                    allowed: isAdmin()
+                }
+            ]
+        },
+        {
+            id: 'support',
+            title: "Customer Support",
+            icon: MessageSquare,
+            items: [
+                {
+                    name: 'Inquiries & Leads',
+                    icon: MessageSquare,
+                    path: '/inquiries',
+                    allowed: true
+                },
+                {
+                    name: 'Chatbot Settings',
+                    icon: MessageSquare,
+                    path: '/chatbot-settings',
+                    allowed: isAdmin()
+                }
+            ]
+        },
+        {
             id: 'catering',
-            title: "Catering Management",
-            icon: Utensils, // You'll need to import this from lucide-react
+            title: "Food & Beverages",
+            icon: Utensils,
             items: [
                 {
                     name: 'Add Product',
@@ -81,19 +138,19 @@ const Sidebar = () => {
                 },
                 {
                     name: 'Products List',
-                    icon: Package, // Import from lucide-react
+                    icon: Package,
                     path: '/products',
                     allowed: isAdmin()
                 },
                 {
                     name: 'Packages',
-                    icon: Box, // Import from lucide-react
+                    icon: Box,
                     path: '/packages',
                     allowed: isAdmin()
                 },
                 {
                     name: 'Orders',
-                    icon: ShoppingCart, // Import from lucide-react
+                    icon: ShoppingCart,
                     path: '/catering-orders',
                     allowed: true
                 }
@@ -101,7 +158,7 @@ const Sidebar = () => {
         },
         {
             id: 'financial',
-            title: "Financial Management",
+            title: "Finance & Payments",
             icon: Euro,
             items: [
                 {
@@ -125,59 +182,8 @@ const Sidebar = () => {
             ]
         },
         {
-            id: 'fleet',
-            title: "Fleet Operations",
-            icon: Ship,
-            items: [
-                {
-                    name: 'Boat Fleet',
-                    icon: Ship,
-                    path: '/boats',
-                    allowed: true
-                },
-                {
-                    name: 'Available Boats',
-                    icon: Ship,
-                    path: '/available-boats',
-                    allowed: true
-                },
-            ]
-        },
-        {
-            id: 'relations',
-            title: "Relations",
-            icon: Users,
-            items: [
-                {
-                    name: 'Client Directory',
-                    icon: Users,
-                    path: '/clients',
-                    allowed: true
-                },
-                {
-                    name: 'Manage Partners',
-                    icon: Building,
-                    path: '/manage-partners',
-                    allowed: isAdmin()
-                }
-            ]
-        },
-        {
-            id: 'leads',
-            title: "Lead Management",
-            icon: MessageSquare,
-            items: [
-                {
-                    name: 'Inquiries',
-                    icon: MessageSquare,
-                    path: '/inquiries',
-                    allowed: true
-                }
-            ]
-        },
-        {
-            id: 'tools',
-            title: "Tools",
+            id: 'admin',
+            title: "Administration",
             icon: Settings,
             items: [
                 {
@@ -190,12 +196,6 @@ const Sidebar = () => {
                     name: 'User Management',
                     icon: User,
                     path: '/user-management',
-                    allowed: isAdmin()
-                },
-                {
-                    name: 'Chatbot Settings',
-                    icon: MessageSquare,
-                    path: '/chatbot-settings',
                     allowed: isAdmin()
                 },
                 {
