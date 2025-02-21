@@ -23,12 +23,17 @@ const LeadManagement = () => {
     noAnswer: { label: 'No Answer', color: 'red' }
   };
 
-  // Fetch leads
-  useEffect(() => {
-    const db = getFirestore();
-    const q = query(collection(db, 'inquiries'), orderBy('timestamp', 'desc'));
+  // Initialise Firestore
+  const db = getFirestore();
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+  // Fetch inquiries (leads) in real-time
+  useEffect(() => {
+    const inquiriesQuery = query(
+      collection(db, 'inquiries'),
+      orderBy('timestamp', 'desc')
+    );
+
+    const unsubscribeLeads = onSnapshot(inquiriesQuery, (snapshot) => {
       const leadData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
@@ -36,14 +41,16 @@ const LeadManagement = () => {
       }));
       setLeads(leadData);
       setLoading(false);
+    }, (error) => {
+      console.error("Error fetching inquiries:", error);
+      setLoading(false);
     });
 
-    return () => unsubscribe();
-  }, []);
+    return () => unsubscribeLeads();
+  }, [db]);
 
-  // Fetch users from the "users" collection
+  // Fetch users from the "users" collection in real-time
   useEffect(() => {
-    const db = getFirestore();
     const usersCollection = collection(db, 'users');
 
     const unsubscribeUsers = onSnapshot(usersCollection, (snapshot) => {
@@ -52,13 +59,15 @@ const LeadManagement = () => {
         ...doc.data()
       }));
       setUsers(userData);
+    }, (error) => {
+      console.error("Error fetching users:", error);
     });
 
     return () => unsubscribeUsers();
-  }, []);
+  }, [db]);
 
+  // Update the status of an inquiry
   const updateLeadStatus = async (leadId, newStatus) => {
-    const db = getFirestore();
     try {
       await updateDoc(doc(db, 'inquiries', leadId), {
         status: newStatus,
@@ -69,11 +78,11 @@ const LeadManagement = () => {
     }
   };
 
+  // Update the assignment of a lead to a user
   const updateLeadAssignment = async (leadId, userId) => {
-    const db = getFirestore();
     try {
       await updateDoc(doc(db, 'inquiries', leadId), {
-        assignedTo: userId || null, // Set to null if unassigned
+        assignedTo: userId || null, // set to null if unassigned
         lastUpdated: new Date()
       });
     } catch (error) {
@@ -81,17 +90,18 @@ const LeadManagement = () => {
     }
   };
 
+  // Format dates in British English (dd/mm/yyyy)
   const formatDate = (dateObj) => {
-    // Using British English date formatting.
+    if (!dateObj) return '';
     return new Date(dateObj).toLocaleDateString('en-GB');
   };
 
-  // Memoise filtered leads to avoid unnecessary computations.
+  // Memoised filtered leads based on search term and status filter
   const filteredLeads = useMemo(() => {
     return leads.filter(lead => {
       const matchesSearch =
-        lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (lead.name && lead.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (lead.email && lead.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (lead.yachtName && lead.yachtName.toLowerCase().includes(searchTerm.toLowerCase()));
       const matchesStatus = filterStatus ? lead.status === filterStatus : true;
       return matchesSearch && matchesStatus;
@@ -143,7 +153,7 @@ const LeadManagement = () => {
                       </p>
                     </div>
                     <span className="text-sm font-medium px-2 py-1 rounded bg-blue-50 text-blue-700">
-                      {formatDate(lead.timestamp?.toDate())}
+                      {lead.timestamp ? formatDate(lead.timestamp.toDate()) : ''}
                     </span>
                   </div>
                 </div>
@@ -170,7 +180,7 @@ const LeadManagement = () => {
                         d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
                       />
                     </svg>
-                    Requested: {formatDate(lead.date)}
+                    Requested: {lead.date ? lead.date : 'N/A'}
                   </div>
 
                   {lead.message && <p className="text-gray-700 mt-2">{lead.message}</p>}
@@ -229,4 +239,5 @@ const LeadManagement = () => {
 };
 
 export default LeadManagement;
+
 
