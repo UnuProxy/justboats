@@ -25,6 +25,7 @@ import CateringOrders from './components/CateringOrders';
 import BoatFinder from './components/BoatFinder';
 import LeadManagement from './components/LeadManagement';
 import NotificationsCenter from './components/notifications/NotificationsCenter';
+import InvoiceGenerator from './components/InvoiceGenerator';
 
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -172,6 +173,16 @@ function App() {
                                     <ProtectedRoute>
                                         <ProtectedLayout>
                                             <PaymentTracking />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/invoice-generator"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <InvoiceGenerator />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }
