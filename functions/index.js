@@ -99,7 +99,12 @@ exports.processBookingEmail2025 = onDocumentCreated('bookings/{bookingId}', asyn
 // -------------------------------------------------
 // Callable Function: Send Booking Confirmation Email
 // -------------------------------------------------
-exports.sendBookingConfirmation = onCall({ cors: true }, async (request) => {
+exports.sendBookingConfirmation = onCall({ 
+  cors: [
+    "https://justboats.vercel.app",
+    "http://localhost:3000"  // Add this for local development
+  ]
+}, async (request) => {
   const data = request.data;
   console.log('Received data in Cloud Function:', data);
   
