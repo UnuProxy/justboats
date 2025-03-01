@@ -1,4 +1,4 @@
-// functions/index.js
+
 
 // Import the v2 APIs for Firestore and HTTPS triggers
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
