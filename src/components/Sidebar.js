@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import {
+import { 
     Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3,
     User, Wallet, CreditCard, Euro, Ship, MessageSquare,
-    Settings, Building, ChevronDown, ChevronUp,Utensils, Package, Box, ShoppingCart 
+    Settings, Building, ChevronDown, ChevronUp, Utensils, Package, Box, ShoppingCart, FileText
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -118,7 +118,7 @@ const Sidebar = () => {
                     allowed: true
                 },
                 {
-                    name: 'Chatbot Settings',
+                    name: 'Chatbot Conversations',
                     icon: MessageSquare,
                     path: '/chatbot-settings',
                     allowed: isAdmin()
@@ -165,6 +165,12 @@ const Sidebar = () => {
                     name: 'Payment Tracking',
                     icon: CreditCard,
                     path: '/payment-tracking',
+                    allowed: true
+                },
+                {
+                    name: 'Invoice',
+                    icon: FileText, 
+                    path: '/invoice-generator',
                     allowed: true
                 },
                 {
