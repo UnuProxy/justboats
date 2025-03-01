@@ -1,19 +1,18 @@
+// functions/index.js
+
 // Import the v2 APIs for Firestore and HTTPS triggers
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onCall, onRequest } = require('firebase-functions/v2/https');
 
-// Import and initialize the admin SDK
+// Import and initialise the admin SDK
 const admin = require('firebase-admin');
 admin.initializeApp();
 
 // Import firebase-functions (for errors and logging)
 const functions = require('firebase-functions');
 
-// Import and configure SendGrid using functions config with a fallback to environment variable
+// Import and configure SendGrid using functions config with fallback to env variable
 const sgMail = require('@sendgrid/mail');
-const fetch = require('node-fetch');
-
-// Try to get the SendGrid key from functions config
 const sendGridConfig = functions.config().sendgrid || {};
 const sendGridApiKey = sendGridConfig.key || sendGridConfig.api_key || process.env.SENDGRID_API_KEY;
 
@@ -30,74 +29,7 @@ const SENDGRID_TEMPLATE_ID = 'd-a0536d03f0c74ef2b52e722e8b26ef4e';
 // HTTP Endpoint for Health Check
 // ------------------------------
 exports.healthCheck = onRequest((req, res) => {
-  // This endpoint ensures the container is listening on PORT 8080 for Cloud Run health checks.
   res.status(200).send('OK');
-});
-
-// ------------------------------
-// Calendar Data Endpoint
-// ------------------------------
-
-// Helper function to parse iCal data into events
-function parseICalData(icalData) {
-  const events = [];
-  const lines = icalData.split('\n');
-  let currentEvent = null;
-
-  for (let line of lines) {
-    line = line.trim();
-    if (line.startsWith('BEGIN:VEVENT')) {
-      currentEvent = {};
-    } else if (line.startsWith('END:VEVENT')) {
-      if (currentEvent && currentEvent.start && currentEvent.end && !currentEvent.isTransparent) {
-        events.push(currentEvent);
-      }
-      currentEvent = null;
-    } else if (currentEvent) {
-      if (line.startsWith('DTSTART')) {
-        currentEvent.start = new Date(line.split(':')[1]);
-      } else if (line.startsWith('DTEND')) {
-        currentEvent.end = new Date(line.split(':')[1]);
-      } else if (line.startsWith('TRANSP')) {
-        currentEvent.isTransparent = line.includes('TRANSPARENT');
-      }
-    }
-  }
-  
-  return events.filter(event =>
-    event.start instanceof Date &&
-    !isNaN(event.start) &&
-    event.end instanceof Date &&
-    !isNaN(event.end)
-  );
-}
-
-exports.fetchCalendarData = onRequest(async (req, res) => {
-  // Allow CORS for client calls
-  res.set('Access-Control-Allow-Origin', '*');
-  if (req.method === 'OPTIONS') {
-    res.set('Access-Control-Allow-Methods', 'GET, POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    return res.status(204).send('');
-  }
-
-  const calendarUrl = req.query.url;
-  if (!calendarUrl) {
-    return res.status(400).json({ error: 'Missing calendar url parameter.' });
-  }
-
-  try {
-    const response = await fetch(calendarUrl);
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `Error fetching calendar: ${response.statusText}` });
-    }
-    const icalData = await response.text();
-    const events = parseICalData(icalData);
-    return res.status(200).json({ events });
-  } catch (error) {
-    console.error('Error fetching calendar data:', error);
-    return res.status(500).json({ error: error.message });
-  }
 });
 
 // -------------------------------------------------
@@ -122,8 +54,6 @@ exports.processNewBookingEmail = onDocumentCreated('bookings/{bookingId}', async
       depositRequired: booking.pricing?.deposit || 0,
     };
 
-    console.log('Email template data:', templateData);
-
     const emailData = {
       to: booking.clientDetails?.email,
       from: 'info@justenjoyibiza.com',
@@ -131,24 +61,16 @@ exports.processNewBookingEmail = onDocumentCreated('bookings/{bookingId}', async
       dynamic_template_data: templateData,
     };
 
-    console.log('SendGrid message data:', emailData);
+    console.log('Attempting to send email with:', emailData);
+    await sgMail.send(emailData);
+    console.log('Email sent successfully to:', booking.clientDetails?.email);
 
-    try {
-      await sgMail.send(emailData);
-      console.log('Email sent successfully to:', booking.clientDetails?.email);
+    // Mark the booking as emailed
+    await event.data.ref.update({
+      emailSent: true,
+      emailSentTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
-      // Mark the booking as having been emailed
-      await event.data.ref.update({
-        emailSent: true,
-        emailSentTimestamp: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    } catch (sgError) {
-      console.error('SendGrid Error:', sgError);
-      if (sgError.response) {
-        console.error('SendGrid Error Body:', sgError.response.body);
-      }
-      throw sgError;
-    }
     return null;
   } catch (error) {
     console.error('Error processing email:', error);
@@ -163,13 +85,9 @@ exports.sendBookingConfirmation = onCall({ cors: true }, async (request) => {
   const data = request.data;
   console.log('Received data in Cloud Function:', data);
 
-  // Validate required fields
   if (!data?.clientName || !data?.clientEmail) {
     console.error('Missing fields:', { name: data?.clientName, email: data?.clientEmail });
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'Missing required client details'
-    );
+    throw new functions.https.HttpsError('invalid-argument', 'Missing required client details');
   }
 
   const emailData = {
@@ -183,7 +101,7 @@ exports.sendBookingConfirmation = onCall({ cors: true }, async (request) => {
       endTime: data.bookingDetails?.endTime || 'N/A',
       boatName: data.bookingDetails?.boatName || 'N/A',
       passengers: data.bookingDetails?.passengers || 'N/A',
-      totalAmount: data.bookingDetails?.price || 0
+      totalAmount: data.bookingDetails?.price || 0,
     },
   };
 
@@ -197,10 +115,7 @@ exports.sendBookingConfirmation = onCall({ cors: true }, async (request) => {
     if (error.response) {
       console.error('SendGrid Error Body:', error.response.body);
     }
-    throw new functions.https.HttpsError(
-      'internal',
-      'Failed to send email: ' + error.message
-    );
+    throw new functions.https.HttpsError('internal', 'Failed to send email: ' + error.message);
   }
 });
 
@@ -218,7 +133,7 @@ exports.newOrderNotification = onDocumentCreated('orders/{orderId}', async (even
     notification: {
       title: 'New Order Received',
       body: `Delivery Date: ${order.deliveryDate || 'Not specified'}. Check order details.`,
-      click_action: 'https://your-admin-dashboard-url.com', // Update as needed
+      click_action: 'https://your-admin-dashboard-url.com',
     },
     data: {
       orderId: event.params.orderId,
