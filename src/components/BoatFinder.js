@@ -3,28 +3,19 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from "../firebase/firebaseConfig";
 import { Search, Calendar, Loader } from 'lucide-react';
 
-// CORS proxies for calendar fetching
-const CORS_PROXIES = [
-  'https://api.allorigins.win/raw?url=',
-  'https://thingproxy.freeboard.io/fetch/',
-  'https://api.codetabs.com/v1/proxy?quest=',
-  'https://corsproxy.io/?',
-  'https://cors-anywhere.herokuapp.com/'
-];
+// Enable this for debugging - set to false in production
+const DEBUG = true;
 
-// Set this to false to make boats "busy" by default when calendar can't be fetched
-// This is safer - better to show a boat as busy than to show it as available when it's not
-const DEFAULT_TO_AVAILABLE = false;
+// Set this to true to make boats "available" by default when calendar can't be fetched
+const DEFAULT_TO_AVAILABLE = true;
 
-// Cache for calendar data
-const calendarCache = new Map();
-
-// iCal parser with better date handling
+// iCal parser function
 const parseICalData = (icalData) => {
+  if (DEBUG) console.log("Parsing iCal data, length:", icalData?.length || 0);
+  
   // Function to safely parse dates from iCal format
   const safeParseDate = (dateStr) => {
     try {
-      // Handle different iCal date formats
       if (!dateStr) return null;
       if (dateStr instanceof Date) return dateStr;
       
@@ -41,7 +32,7 @@ const parseICalData = (icalData) => {
         
         parsedDate = new Date(Date.UTC(
           parseInt(year, 10),
-          parseInt(month, 10) - 1, // Months are 0-indexed
+          parseInt(month, 10) - 1,
           parseInt(day, 10),
           parseInt(hour, 10),
           parseInt(minute, 10),
@@ -67,17 +58,19 @@ const parseICalData = (icalData) => {
       
       // Validate if parsedDate is valid
       if (isNaN(parsedDate.getTime())) {
+        if (DEBUG) console.warn(`Failed to parse date: ${dateStr}`);
         return null;
       }
       
       return parsedDate;
     } catch (error) {
+      if (DEBUG) console.warn(`Error parsing date '${dateStr}':`, error.message);
       return null;
     }
   };
   
-  // If no data, return empty array
   if (!icalData || icalData.length === 0) {
+    if (DEBUG) console.log("No iCal data provided");
     return [];
   }
   
@@ -95,7 +88,6 @@ const parseICalData = (icalData) => {
         } else if (line === 'END:VFREEBUSY') {
           insideVFreeBusy = false;
         } else if (insideVFreeBusy && line.startsWith('FREEBUSY:')) {
-          // Example: FREEBUSY:20250301T080000Z/20250301T100000Z,20250302T120000Z/20250302T140000Z
           const rangePart = line.substring(line.indexOf(':') + 1);
           const ranges = rangePart.split(',');
           
@@ -106,11 +98,13 @@ const parseICalData = (icalData) => {
             
             if (start && end) {
               busyPeriods.push({ start, end });
+              if (DEBUG) console.log(`Found busy period: ${start.toISOString()} to ${end.toISOString()}`);
             }
           });
         }
       }
       
+      if (DEBUG) console.log(`Parsed ${busyPeriods.length} busy periods from VFREEBUSY`);
       return busyPeriods;
     }
     
@@ -119,11 +113,11 @@ const parseICalData = (icalData) => {
     const lines = icalData.split('\n');
     let currentEvent = null;
     
-    // Process each line, handling wrapped lines (continued with space or tab)
+    // Process each line
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i].trim();
       
-      // Check if next line is a continuation (starts with space or tab)
+      // Check if next line is a continuation
       while (i + 1 < lines.length && 
              (lines[i + 1].startsWith(' ') || lines[i + 1].startsWith('\t'))) {
         i++;
@@ -131,12 +125,12 @@ const parseICalData = (icalData) => {
       }
       
       if (line.startsWith('BEGIN:VEVENT')) {
-        currentEvent = { transparent: false }; // Default to opaque (busy) events
+        currentEvent = { transparent: false };
       } else if (line.startsWith('END:VEVENT')) {
         if (currentEvent && currentEvent.start && currentEvent.end) {
-          // Only include non-transparent events (real busy periods)
           if (!currentEvent.transparent) {
             events.push(currentEvent);
+            if (DEBUG) console.log(`Found busy event: ${currentEvent.start.toISOString()} to ${currentEvent.end.toISOString()}`);
           }
         }
         currentEvent = null;
@@ -155,56 +149,36 @@ const parseICalData = (icalData) => {
       }
     }
     
-    return events.filter(event => event.start && event.end);
+    const validEvents = events.filter(event => event.start && event.end);
+    if (DEBUG) console.log(`Parsed ${validEvents.length} valid busy events from VEVENT blocks`);
+    return validEvents;
   } catch (err) {
+    if (DEBUG) console.error("Error parsing iCal data:", err);
     return [];
   }
 };
 
-// Function to check cache and retrieve calendar data
-const getFromCache = (key) => {
-  if (calendarCache.has(key)) {
-    const { data, timestamp } = calendarCache.get(key);
-    // Cache data for 2 hours
-    if (Date.now() - timestamp < 2 * 60 * 60 * 1000) {
-      return data;
+// Simple cache implementation
+const cache = {
+  data: new Map(),
+  set: function(key, value, ttl = 3600000) { // Default TTL: 1 hour
+    this.data.set(key, {
+      value,
+      expires: Date.now() + ttl
+    });
+    return value;
+  },
+  get: function(key) {
+    const item = this.data.get(key);
+    if (!item) return null;
+    if (Date.now() > item.expires) {
+      this.data.delete(key);
+      return null;
     }
-  }
-  
-  // Check localStorage for longer term storage
-  try {
-    const stored = localStorage.getItem(`calendar_${key}`);
-    if (stored) {
-      const { data, timestamp } = JSON.parse(stored);
-      // Cache data for 24 hours in localStorage
-      if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
-        // Also update memory cache
-        calendarCache.set(key, { data, timestamp });
-        return data;
-      }
-    }
-  } catch (e) {
-    // Silently fail on localStorage errors
-  }
-  
-  return null;
-};
-
-// Function to save data to cache
-const saveToCache = (key, data) => {
-  const cacheObj = { 
-    data, 
-    timestamp: Date.now() 
-  };
-  
-  // Save to memory cache
-  calendarCache.set(key, cacheObj);
-  
-  // Also save to localStorage for persistence
-  try {
-    localStorage.setItem(`calendar_${key}`, JSON.stringify(cacheObj));
-  } catch (e) {
-    // Silently fail on localStorage errors
+    return item.value;
+  },
+  clear: function() {
+    this.data.clear();
   }
 };
 
@@ -237,15 +211,16 @@ const extractCalendarId = (url) => {
   return url;
 };
 
-// Availability check function
+// Availability check function with improved date handling
 const isAvailable = (selectedDate, bookedPeriods) => {
-  // If no selected date, we can't determine availability
+  if (DEBUG) console.log(`Checking availability for date: ${selectedDate}`);
+  
   if (!selectedDate) {
     return false;
   }
   
-  // If no booked periods data, assume the boat is available
   if (!bookedPeriods || bookedPeriods.length === 0) {
+    if (DEBUG) console.log("No booked periods found, marking as available");
     return true;
   }
   
@@ -263,10 +238,8 @@ const isAvailable = (selectedDate, bookedPeriods) => {
     // Normalize dates to YYYY-MM-DD for comparison
     const startDateStr = startDate.toISOString().split('T')[0];
     
-    // Normalize the event end date to account for midnight boundary cases
+    // Handle midnight boundary case (if the event ends at exactly midnight)
     let normalizedEndDate;
-    
-    // If the event ends exactly at midnight (00:00:00), adjust it to be the previous day
     if (endDate.getUTCHours() === 0 && endDate.getUTCMinutes() === 0 && endDate.getUTCSeconds() === 0) {
       // Create a new date that's 1 millisecond earlier (23:59:59.999 of the previous day)
       normalizedEndDate = new Date(endDate.getTime() - 1);
@@ -277,13 +250,20 @@ const isAvailable = (selectedDate, bookedPeriods) => {
     // Get the normalized end date in YYYY-MM-DD format
     const normalizedEndDateStr = normalizedEndDate.toISOString().split('T')[0];
     
-    // Now check if our selected date is within the normalized range
-    return startDateStr <= selectedDateStr && selectedDateStr <= normalizedEndDateStr;
+    // Check if our selected date is within the normalized range
+    const isBooked = startDateStr <= selectedDateStr && selectedDateStr <= normalizedEndDateStr;
+    
+    if (isBooked && DEBUG) {
+      console.log(`BOOKED: Date ${selectedDateStr} is within period ${startDateStr} to ${normalizedEndDateStr}`);
+    }
+    
+    return isBooked;
   });
   
   return !isBusy;
 };
 
+// Get availability status for display
 const getAvailabilityStatus = (boat, selectedDate, availabilityData) => {
   if (!selectedDate) return null;
   
@@ -296,6 +276,7 @@ const getAvailabilityStatus = (boat, selectedDate, availabilityData) => {
   };
 };
 
+// Boat card component
 const BoatCard = ({ boat, selectedDate, availabilityData }) => (
   <div className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow">
     <div className="relative w-full h-64">
@@ -335,6 +316,7 @@ const BoatCard = ({ boat, selectedDate, availabilityData }) => (
   </div>
 );
 
+// Main component
 const BoatFinder = () => {
   const [boats, setBoats] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -348,10 +330,9 @@ const BoatFinder = () => {
     maxPrice: '',
   });
   const [activeSearch, setActiveSearch] = useState(false);
-  const [currentProxyIndex, setCurrentProxyIndex] = useState(0);
   const [forceRefresh, setForceRefresh] = useState(false);
 
-  // Function to fetch boat availability
+  // Simplified function to fetch boat availability using only the API route
   const fetchBoatAvailability = async (boat) => {
     if (!boat.icalUrl) {
       return;
@@ -360,10 +341,10 @@ const BoatFinder = () => {
     try {
       setCalendarLoading(prev => ({ ...prev, [boat.id]: true }));
       
-      // Use the extractCalendarId helper function
+      // Extract calendar ID
       const calendarId = extractCalendarId(boat.icalUrl);
       if (!calendarId) {
-        throw new Error(`Could not extract valid calendar ID from URL: ${boat.icalUrl}`);
+        throw new Error(`Could not extract valid calendar ID`);
       }
   
       // Determine calendar URL based on the format
@@ -376,195 +357,80 @@ const BoatFinder = () => {
         calendarUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
       }
   
-      // Add anti-cache parameter to always get fresh data
+      if (DEBUG) console.log(`Processing calendar for ${boat.name}: ${calendarUrl}`);
+
+      // Add anti-cache parameter - only for the API request
       const antiCacheParam = `?nocache=${Date.now()}`;
-      const calendarUrlWithAntiCache = calendarUrl + antiCacheParam;
 
       // Skip cache when force refreshing
       const cacheKey = btoa(calendarUrl);
       const shouldUseCache = !forceRefresh;
-      const cachedData = shouldUseCache ? getFromCache(cacheKey) : null;
+      const cachedData = shouldUseCache ? cache.get(cacheKey) : null;
       
       if (cachedData) {
-        const events = parseICalData(cachedData);
+        if (DEBUG) console.log(`Using cached calendar data for ${boat.name}`);
         setAvailabilityData(prev => ({
           ...prev,
-          [boat.id]: events
+          [boat.id]: cachedData
         }));
         return;
       }
 
-      // Try the API route first with anti-cache parameter
+      // Try the API route - this is the primary method
       try {
-        const backendUrl = `/api/calendar?url=${encodeURIComponent(calendarUrlWithAntiCache)}`;
-        const response = await fetch(backendUrl);
+        if (DEBUG) console.log(`Fetching calendar via API for ${boat.name}`);
         
-        if (response.ok) {
-          try {
-            const data = await response.json();
-            
-            if (data.events) {
-              setAvailabilityData(prev => ({
-                ...prev,
-                [boat.id]: data.events || []
-              }));
-              
-              // Save to cache for future use (if not force refreshing)
-              if (!forceRefresh && data.data) {
-                saveToCache(cacheKey, data.data);
-              }
-              return;
-            } else if (data.data) {
-              const events = parseICalData(data.data);
-              
-              setAvailabilityData(prev => ({
-                ...prev,
-                [boat.id]: events
-              }));
-              
-              // Save to cache for future use (if not force refreshing)
-              if (!forceRefresh) {
-                saveToCache(cacheKey, data.data);
-              }
-              return;
-            }
-          } catch (jsonError) {
-            // Continue to fallback methods
-          }
-        }
-      } catch (apiError) {
-        // Continue to fallback methods
-      }
-      
-      // Try direct fetch with no-cors as a fallback
-      try {
-        // Execute the fetch without storing the unused response
-        await fetch(calendarUrlWithAntiCache, {
-          method: 'GET',
-          mode: 'no-cors',
-          cache: 'no-store',
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate'
-          }
-        });
+        // Use a direct URL with the antiCacheParam
+        const backendUrl = `/api/calendar?url=${encodeURIComponent(calendarUrl + antiCacheParam)}`;
+        const apiResponse = await fetch(backendUrl);
         
-        // Try CORS proxies next
-        let proxySuccess = false;
-        
-        // Try each proxy in order until one works
-        for (let i = 0; i < CORS_PROXIES.length; i++) {
-          if (proxySuccess) break;
+        if (apiResponse.ok) {
+          const data = await apiResponse.json();
           
-          const proxyIndex = (currentProxyIndex + i) % CORS_PROXIES.length;
-          const proxy = CORS_PROXIES[proxyIndex];
+          if (DEBUG) console.log(`API success for ${boat.name}: ${data.events?.length || 0} events`);
           
-          try {
-            const response = await fetch(`${proxy}${encodeURIComponent(calendarUrlWithAntiCache)}`, {
-              method: 'GET',
-              headers: {
-                'Origin': window.location.origin,
-                'Accept': 'text/calendar, text/plain, */*',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Cache-Control': 'no-cache, no-store, must-revalidate'
-              },
-              cache: 'no-store'
-            });
-            
-            if (!response.ok) {
-              continue;
-            }
-            
-            const icalData = await response.text();
-            
-            // Verify we got real iCal data, not an error page
-            if (!icalData.includes('BEGIN:VCALENDAR') && !icalData.includes('BEGIN:VEVENT')) {
-              continue;
-            }
-            
-            proxySuccess = true;
-            
-            // Remember this successful proxy for next time
-            setCurrentProxyIndex(proxyIndex);
-            
-            // Add to cache for future use (if not force refreshing)
-            if (!forceRefresh) {
-              saveToCache(cacheKey, icalData);
-            }
-            
-            // Parse the calendar data
-            const events = parseICalData(icalData);
-            
+          if (data.events) {
+            const events = data.events;
             setAvailabilityData(prev => ({
               ...prev,
               [boat.id]: events
             }));
             
-            break;
-          } catch (proxyError) {
-            // Continue to next proxy
-          }
-        }
-        
-        // If all proxies failed, set a default value based on our strategy
-        if (!proxySuccess) {
-          if (DEFAULT_TO_AVAILABLE) {
-            // Assume available (empty array means no busy periods)
+            // Save to cache
+            cache.set(cacheKey, events);
+            return;
+          } else if (data.data) {
+            // Parse the raw data
+            const events = parseICalData(data.data);
             setAvailabilityData(prev => ({
               ...prev,
-              [boat.id]: []
+              [boat.id]: events
             }));
-          } else {
-            // Assume busy (create a fake event that blocks the date range)
-            const today = new Date();
-            const endOfYear = new Date(today.getFullYear() + 1, 11, 31); // One year from now
             
-            const blockingEvent = [{
-              start: today,
-              end: endOfYear,
-              transparent: false,
-              note: "Calendar unavailable - assuming busy for safety"
-            }];
-            
-            setAvailabilityData(prev => ({
-              ...prev,
-              [boat.id]: blockingEvent
-            }));
+            // Save to cache
+            cache.set(cacheKey, events);
+            return;
           }
-        }
-      } catch (directError) {
-        // Default to our chosen availability strategy
-        if (DEFAULT_TO_AVAILABLE) {
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: []
-          }));
         } else {
-          // Create a blocking event for safety
-          const today = new Date();
-          const endOfYear = new Date(today.getFullYear() + 1, 11, 31);
-          
-          const blockingEvent = [{
-            start: today,
-            end: endOfYear,
-            transparent: false,
-            note: "Calendar unavailable - assuming busy for safety"
-          }];
-          
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: blockingEvent
-          }));
+          if (DEBUG) console.warn(`API failed for ${boat.name}: ${apiResponse.status}`);
+          // Continue to fallback
         }
+      } catch (apiError) {
+        if (DEBUG) console.error(`API error for ${boat.name}:`, apiError);
+        // Continue to fallback
       }
-    } catch (error) {
-      // Default to our chosen availability strategy
+      
+      // Last resort - use default availability
+      if (DEBUG) console.log(`Using default availability for ${boat.name}: ${DEFAULT_TO_AVAILABLE ? 'AVAILABLE' : 'BUSY'}`);
+      
       if (DEFAULT_TO_AVAILABLE) {
+        // Default to available (empty array means no busy periods)
         setAvailabilityData(prev => ({
           ...prev,
           [boat.id]: []
         }));
       } else {
-        // Create a blocking event for safety
+        // Default to busy
         const today = new Date();
         const endOfYear = new Date(today.getFullYear() + 1, 11, 31);
         
@@ -572,7 +438,7 @@ const BoatFinder = () => {
           start: today,
           end: endOfYear,
           transparent: false,
-          note: "Calendar unavailable - assuming busy for safety"
+          note: "Calendar unavailable"
         }];
         
         setAvailabilityData(prev => ({
@@ -580,8 +446,33 @@ const BoatFinder = () => {
           [boat.id]: blockingEvent
         }));
       }
+    } catch (error) {
+      if (DEBUG) console.error(`Error for ${boat.name}:`, error);
       
-      setError(`Failed to fetch calendar for ${boat.name}: ${error.message}`);
+      // Use default availability strategy on error
+      if (DEFAULT_TO_AVAILABLE) {
+        // Default to available
+        setAvailabilityData(prev => ({
+          ...prev,
+          [boat.id]: []
+        }));
+      } else {
+        // Default to busy
+        const today = new Date();
+        const endOfYear = new Date(today.getFullYear() + 1, 11, 31);
+        
+        const blockingEvent = [{
+          start: today,
+          end: endOfYear,
+          transparent: false,
+          note: "Calendar unavailable"
+        }];
+        
+        setAvailabilityData(prev => ({
+          ...prev,
+          [boat.id]: blockingEvent
+        }));
+      }
     } finally {
       setCalendarLoading(prev => ({ ...prev, [boat.id]: false }));
     }
@@ -589,23 +480,12 @@ const BoatFinder = () => {
 
   // Force Reload function
   const handleForceReload = async () => {
+    if (DEBUG) console.log("Force reloading all calendars");
     setError(null);
-    
-    // Set force refresh mode
     setForceRefresh(true);
     
-    // Clear all caches
-    calendarCache.clear();
-    
-    // Clear localStorage items related to calendars
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('calendar_')) {
-        localStorage.removeItem(key);
-      }
-    });
-    
-    // Move to next proxy for retries
-    setCurrentProxyIndex((currentProxyIndex + 1) % CORS_PROXIES.length);
+    // Clear cache
+    cache.clear();
     
     // Get boats with calendars
     const calendarBoats = boats.filter(
@@ -620,14 +500,14 @@ const BoatFinder = () => {
       setCalendarLoading(prev => ({ ...prev, [boat.id]: true }));
     });
     
-    // Fetch all calendars again with larger delays
+    // Fetch all calendars again with delays
     try {
       for (const boat of calendarBoats) {
         await fetchBoatAvailability(boat);
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     } finally {
-      // Clear loading state and reset force refresh mode
+      // Clear loading state
       calendarBoats.forEach(boat => {
         setCalendarLoading(prev => ({ ...prev, [boat.id]: false }));
       });
@@ -637,38 +517,24 @@ const BoatFinder = () => {
   
   // Handle retry of all calendar data
   const handleRetryCalendars = async () => {
+    if (DEBUG) console.log("Retrying calendars");
     setError(null);
-    
-    // Move to next proxy for retries
-    setCurrentProxyIndex((currentProxyIndex + 1) % CORS_PROXIES.length);
     
     // Get boats with calendars
     const calendarBoats = boats.filter(
       boat => boat.availabilityType === 'ical' && boat.icalUrl
     );
     
-    // Clear existing availability data
-    setAvailabilityData({});
-    
     // Fetch all calendars again
     for (const boat of calendarBoats) {
       await fetchBoatAvailability(boat);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 800));
     }
   };
 
-  // Clear cache for fresh data
+  // Clear cache
   const handleClearCache = () => {
-    // Clear memory cache
-    calendarCache.clear();
-    
-    // Clear localStorage items related to calendars
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('calendar_')) {
-        localStorage.removeItem(key);
-      }
-    });
-    
+    cache.clear();
     alert('Calendar cache cleared. Click Refresh Calendars to fetch new data.');
   };
   
@@ -685,19 +551,23 @@ const BoatFinder = () => {
         
         setBoats(boatsData);
 
+        if (DEBUG) console.log(`Loaded ${boatsData.length} boats from database`);
+
         // Fetch calendars for boats with iCal URLs
         const calendarBoats = boatsData.filter(
           boat => boat.availabilityType === 'ical' && boat.icalUrl
         );
         
-        // Fetch calendars one by one to avoid overwhelming the system
+        if (DEBUG) console.log(`Found ${calendarBoats.length} boats with iCal URLs`);
+        
+        // Fetch calendars one by one
         for (const boat of calendarBoats) {
           await fetchBoatAvailability(boat);
-          // Increasing delay between requests to prevent rate limiting
-          await new Promise(resolve => setTimeout(resolve, 800));
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
 
       } catch (err) {
+        if (DEBUG) console.error(`Error fetching boats:`, err);
         setError(err.message);
       } finally {
         setLoading(false);
@@ -839,6 +709,104 @@ const BoatFinder = () => {
           </div>
         </div>
       </div>
+
+      {/* Debug Information - Only visible in DEBUG mode */}
+      {DEBUG && selectedDate && (
+        <div className="bg-gray-100 p-4 mb-6 rounded-lg">
+          <h3 className="font-bold mb-2">Availability Debug Info:</h3>
+          <p>Selected Date: {selectedDate}</p>
+          <p>Total Boats: {boats.length}</p>
+          <p>Boats with Calendars: {Object.keys(availabilityData).length}</p>
+          <p>Filtered Boats: {filteredBoats.length}</p>
+          <p>Default to Available: {DEFAULT_TO_AVAILABLE ? 'YES' : 'NO'}</p>
+          
+          {/* Calendar data status */}
+          <div className="mt-2">
+            <h4 className="font-semibold">Calendar Data Status:</h4>
+            <ul className="mt-1 space-y-1">
+              {boats
+                .filter(boat => boat.availabilityType === 'ical')
+                .map(boat => (
+                  <li key={boat.id} className="text-sm">
+                    {boat.name}: {' '}
+                    {calendarLoading[boat.id] ? (
+                      <span className="text-yellow-600">Loading...</span>
+                    ) : availabilityData[boat.id] ? (
+                      <span className="text-green-600">
+                        {availabilityData[boat.id].length} events loaded
+                      </span>
+                    ) : (
+                      <span className="text-red-600">No data</span>
+                    )}
+                  </li>
+                ))}
+            </ul>
+          </div>
+          
+          {/* Calendar Events for Selected Date */}
+          <div className="mt-4">
+            <h4 className="font-semibold">Calendar Events for Selected Date:</h4>
+            <div className="mt-2 p-3 bg-white rounded shadow">
+              <ul className="space-y-2">
+                {boats
+                  .filter(boat => boat.availabilityType === 'ical')
+                  .map(boat => {
+                    const events = availabilityData[boat.id] || [];
+                    
+                    // Check which events affect the selected date
+                    const selectedDateStr = new Date(selectedDate + 'T00:00:00Z').toISOString().split('T')[0];
+                    
+                    const dateEvents = events.filter(event => {
+                      if (!event || !event.start || !event.end) return false;
+                      
+                      const startDate = new Date(event.start);
+                      const endDate = new Date(event.end);
+                      
+                      const startDateStr = startDate.toISOString().split('T')[0];
+                      
+                      // Normalize end date for midnight boundaries
+                      let normalizedEndDate;
+                      if (endDate.getUTCHours() === 0 && endDate.getUTCMinutes() === 0 && endDate.getUTCSeconds() === 0) {
+                        normalizedEndDate = new Date(endDate.getTime() - 1);
+                      } else {
+                        normalizedEndDate = new Date(endDate);
+                      }
+                      
+                      const normalizedEndDateStr = normalizedEndDate.toISOString().split('T')[0];
+                      
+                      return startDateStr <= selectedDateStr && selectedDateStr <= normalizedEndDateStr;
+                    });
+                    
+                    return (
+                      <li key={boat.id} className="text-sm">
+                        <span className="font-semibold">{boat.name}:</span>{' '}
+                        {dateEvents.length === 0 ? (
+                          <span className="text-green-600">Available</span>
+                        ) : (
+                          <span className="text-red-600">
+                            Busy - {dateEvents.length} event(s) found
+                          </span>
+                        )}
+                        {dateEvents.length > 0 && (
+                          <ul className="ml-4 mt-1 space-y-1 text-xs">
+                            {dateEvents.map((event, idx) => (
+                              <li key={idx} className="text-gray-700">
+                                {new Date(event.start).toLocaleString()} to {new Date(event.end).toLocaleString()}
+                                {event.note && (
+                                  <span className="ml-2 text-orange-500">[{event.note}]</span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Results Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

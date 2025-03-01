@@ -9,16 +9,30 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'URL parameter is required' });
   }
   
+  // Add CORS headers to allow any origin
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // Handle preflight request
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   try {
+    console.log(`Server fetching calendar from: ${url}`);
+    
     // Server-side fetching doesn't have CORS issues
     const response = await fetch(url, {
       headers: {
-        'Accept': 'text/calendar, text/plain, */*'
+        'Accept': 'text/calendar, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (compatible; BoatCalendarBot/1.0)'
       },
       timeout: 10000 // 10-second timeout to prevent hanging requests
     });
     
     if (!response.ok) {
+      console.error(`Server fetch failed with status: ${response.status}`);
       return res.status(response.status).json({ 
         error: `Failed to fetch calendar data: ${response.statusText}`,
         status: response.status
@@ -29,6 +43,7 @@ export default async function handler(req, res) {
     
     // Basic validation to ensure we got actual calendar data
     if (!icalData.includes('BEGIN:VCALENDAR') && !icalData.includes('BEGIN:VEVENT') && !icalData.includes('BEGIN:VFREEBUSY')) {
+      console.error('Received invalid iCal data');
       return res.status(400).json({ error: 'Invalid iCal data received' });
     }
     
@@ -41,6 +56,7 @@ export default async function handler(req, res) {
       data: icalData
     });
   } catch (error) {
+    console.error('Server error fetching calendar:', error);
     return res.status(500).json({ error: error.message });
   }
 }
@@ -185,6 +201,7 @@ function parseICalData(icalData) {
     
     return events.filter(event => event.start && event.end);
   } catch (err) {
+    console.error("Error parsing iCal data:", err);
     return [];
   }
 }
