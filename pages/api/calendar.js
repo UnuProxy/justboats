@@ -3,42 +3,43 @@
 import fetch from 'node-fetch';
 
 export default async function handler(req, res) {
+  // Set CORS headers for all responses
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // Handle OPTIONS request (preflight)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   const { url } = req.query;
   
   if (!url) {
     return res.status(400).json({ error: 'URL parameter is required' });
   }
   
-  // Add CORS headers to allow any origin
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  // Handle preflight request
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  console.log(`Fetching calendar data from: ${url}`);
   
   try {
-    console.log(`Server fetching calendar from: ${url}`);
-    
-    // Server-side fetching doesn't have CORS issues
+    // Fetch the calendar data
     const response = await fetch(url, {
       headers: {
-        'Accept': 'text/calendar, text/plain, */*',
-        'User-Agent': 'Mozilla/5.0 (compatible; BoatCalendarBot/1.0)'
+        'User-Agent': 'Mozilla/5.0 (compatible; BoatCalendarBot/1.0)',
+        'Accept': 'text/calendar, text/plain, */*'
       },
-      timeout: 10000 // 10-second timeout to prevent hanging requests
+      timeout: 15000 // 15 seconds timeout
     });
     
     if (!response.ok) {
-      console.error(`Server fetch failed with status: ${response.status}`);
+      console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
       return res.status(response.status).json({ 
         error: `Failed to fetch calendar data: ${response.statusText}`,
         status: response.status
       });
     }
     
+    // Get the raw iCal data
     const icalData = await response.text();
     
     // Basic validation to ensure we got actual calendar data
@@ -49,6 +50,7 @@ export default async function handler(req, res) {
     
     // Parse iCal data to extract events
     const events = parseICalData(icalData);
+    console.log(`Parsed ${events.length} events from calendar data`);
     
     // Return both raw data and parsed events
     return res.status(200).json({
@@ -56,8 +58,8 @@ export default async function handler(req, res) {
       data: icalData
     });
   } catch (error) {
-    console.error('Server error fetching calendar:', error);
-    return res.status(500).json({ error: error.message });
+    console.error('Error fetching calendar data:', error);
+    return res.status(500).json({ error: error.message || 'Unknown error' });
   }
 }
 
@@ -66,11 +68,7 @@ function parseICalData(icalData) {
   // Function to safely parse dates from iCal format
   const safeParseDate = (dateStr) => {
     try {
-      // Handle different iCal date formats
       if (!dateStr) return null;
-      
-      // If it's already a Date object
-      if (dateStr instanceof Date) return dateStr;
       
       let parsedDate;
       
@@ -104,18 +102,20 @@ function parseICalData(icalData) {
           parseInt(day, 10)
         ));
       }
-      // Try standard date parsing
+      // Try standard date parsing for other formats
       else {
         parsedDate = new Date(dateStr);
       }
       
       // Validate if parsedDate is valid
       if (isNaN(parsedDate.getTime())) {
+        console.warn(`Failed to parse date: ${dateStr}`);
         return null;
       }
       
       return parsedDate;
     } catch (error) {
+      console.warn(`Error parsing date '${dateStr}':`, error.message);
       return null;
     }
   };
