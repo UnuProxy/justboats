@@ -36,9 +36,4 @@ secrets/
 credentials/
 
 # IDE
-.codegpt
-.idea/
-.vscode/
 
-# misc
-.DS_Store

@@ -1,120 +1,137 @@
-// functions/index.js
 
-// Import the v2 APIs for Firestore and HTTPS triggers
+
+// Import required dependencies from v2
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
-const { onCall, onRequest } = require('firebase-functions/v2/https');
-
-// Import and initialize the admin SDK
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onRequest } = require('firebase-functions/v2/https');
+const functions = require('firebase-functions/v2');
 const admin = require('firebase-admin');
-const functions = require('firebase-functions');
+const cors = require('cors')({ origin: true });
+const axios = require('axios'); // Make sure to install: npm install axios
+require('dotenv').config();
 
-// Initialize admin SDK only once
-if (!admin.apps.length) {
-  admin.initializeApp();
-}
+// Initialize admin SDK once
+admin.initializeApp();
 
-// Import and configure SendGrid
-const sgMail = require('@sendgrid/mail');
+console.log('Firebase Functions initialized');
 
-// Get SendGrid API key from config
-const sendGridConfig = functions.config().sendgrid || {};
-const sendGridApiKey = sendGridConfig.key || sendGridConfig.api_key || process.env.SENDGRID_API_KEY;
-
-if (!sendGridApiKey) {
-  console.error('SendGrid API key is missing. Email functions will fail.');
-} else {
-  console.log('SendGrid API key exists with length:', sendGridApiKey.length);
-  sgMail.setApiKey(sendGridApiKey);
-}
-
+// Template ID for SendGrid
 const SENDGRID_TEMPLATE_ID = 'd-a0536d03f0c74ef2b52e722e8b26ef4e';
 
-// ------------------------------
-// HTTP Endpoint for Health Check
-// ------------------------------
-exports.healthCheck = onRequest((req, res) => {
-  res.status(200).send({
-    status: 'OK',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// -------------------------------------------------
-// Firestore Trigger: Process New Booking Email
-// Using a completely new name
-// -------------------------------------------------
-exports.processBookingEmail2025 = onDocumentCreated('bookings/{bookingId}', async (event) => {
-  try {
-    const booking = event.data.data();
-    if (!booking) {
-      console.error('No booking data found');
-      return null;
-    }
-    
-    // Prepare template data
-    const templateData = {
-      clientName: booking.clientDetails?.name || 'Guest',
-      bookingDate: booking.bookingDetails?.date || 'N/A',
-      startTime: booking.bookingDetails?.startTime || 'N/A',
-      endTime: booking.bookingDetails?.endTime || 'N/A',
-      boatName: booking.bookingDetails?.boatName || 'N/A',
-      passengers: booking.bookingDetails?.passengers || 'N/A',
-      totalAmount: booking.pricing?.finalPrice || 0,
-      depositRequired: booking.pricing?.deposit || 0,
-    };
-
-    console.log('Email template data:', templateData);
-
-    const emailData = {
-      to: booking.clientDetails?.email,
-      from: 'info@justenjoyibiza.com',
-      templateId: SENDGRID_TEMPLATE_ID,
-      dynamic_template_data: templateData,
-    };
-
-    console.log('SendGrid message data:', emailData);
-
-    try {
-      await sgMail.send(emailData);
-      console.log('Email sent successfully to:', booking.clientDetails?.email);
-      
-      await event.data.ref.update({
-        emailSent: true,
-        emailSentTimestamp: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    } catch (sgError) {
-      console.error('SendGrid Error:', sgError);
-      if (sgError.response) {
-        console.error('SendGrid Error Body:', sgError.response.body);
-      }
-      throw sgError;
-    }
+// Get API key from environment - DO NOT hardcode in the file
+function getApiKey() {
+  // Try Firebase config first (v1 style)
+  if (functions.config && functions.config().sendgrid && functions.config().sendgrid.key) {
+    return functions.config().sendgrid.key;
+  }
+  
+  // Next try v2 params
+  if (functions.params && functions.params.sendgrid && functions.params.sendgrid.key) {
+    return functions.params.sendgrid.key;
+  }
+  
+  // Finally try process.env 
+  const key = process.env.SENDGRID_API_KEY;
+  if (!key) {
+    console.error('SendGrid API key not found in environment variables');
     return null;
+  }
+  return key;
+}
+
+// DIRECT API approach instead of using the SendGrid library
+async function sendEmailDirectApi(emailData) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error('SendGrid API key is not configured');
+  }
+  
+  try {
+    console.log('Preparing to send email to:', emailData.to);
+    
+    // Use direct Axios request instead of the SendGrid library
+    const response = await axios({
+      method: 'post',
+      url: 'https://api.sendgrid.com/v3/mail/send',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      data: {
+        personalizations: [{
+          to: [{ email: emailData.to }],
+          dynamic_template_data: emailData.dynamic_template_data
+        }],
+        from: { email: emailData.from },
+        template_id: emailData.templateId
+      }
+    });
+    
+    console.log('Email sent through direct API, status:', response.status);
+    return { success: true, status: response.status };
   } catch (error) {
-    console.error('Error processing email:', error);
+    console.error('Error sending email via direct API:', error.message);
+    if (error.response) {
+      console.error('API Response:', error.response.data);
+    }
     throw error;
   }
+}
+
+// NEW function name for booking email processing
+exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}', async (event) => {
+  const booking = event.data.data();
+  if (!booking) {
+    console.error('No booking data found');
+    return null;
+  }
+  
+  // Prepare template data
+  const templateData = {
+    clientName: booking.clientDetails?.name || 'Guest',
+    bookingDate: booking.bookingDetails?.date || 'N/A',
+    startTime: booking.bookingDetails?.startTime || 'N/A',
+    endTime: booking.bookingDetails?.endTime || 'N/A',
+    boatName: booking.bookingDetails?.boatName || 'N/A',
+    passengers: booking.bookingDetails?.passengers || 'N/A',
+    totalAmount: booking.pricing?.finalPrice || 0,
+    depositRequired: booking.pricing?.deposit || 0,
+  };
+
+  console.log('Email template data:', templateData);
+
+  const emailData = {
+    to: booking.clientDetails?.email,
+    from: 'info@justenjoyibiza.com',
+    templateId: SENDGRID_TEMPLATE_ID,
+    dynamic_template_data: templateData,
+  };
+
+  try {
+    await sendEmailDirectApi(emailData);
+    console.log('Email sent successfully to:', booking.clientDetails?.email);
+    
+    // Update the booking document to mark the email as sent
+    await event.data.ref.update({
+      emailSent: true,
+      emailSentTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (sgError) {
+    console.error('Error in processNewBookingNotification:', sgError);
+  }
+  return null;
 });
 
-// -------------------------------------------------
-// Callable Function: Send Booking Confirmation Email
-// -------------------------------------------------
-exports.sendBookingConfirmation = onCall({ 
-  cors: [
-    "https://justboats.vercel.app",
-    "http://localhost:3000"  // Add this for local development
-  ]
+// Keep original function name to match frontend code
+exports.sendBookingConfirmation = onCall({
+  cors: true,
+  maxInstances: 10
 }, async (request) => {
   const data = request.data;
   console.log('Received data in Cloud Function:', data);
-  
-  // Validate required fields
+
   if (!data?.clientName || !data?.clientEmail) {
-    console.error('Missing fields:', { name: data?.clientName, email: data?.clientEmail });
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'Missing required client details'
-    );
+    throw new HttpsError('invalid-argument', 'Missing required client details');
   }
 
   const emailData = {
@@ -128,32 +145,65 @@ exports.sendBookingConfirmation = onCall({
       endTime: data.bookingDetails?.endTime || 'N/A',
       boatName: data.bookingDetails?.boatName || 'N/A',
       passengers: data.bookingDetails?.passengers || 'N/A',
-      totalAmount: data.bookingDetails?.price || 0
+      totalAmount: data.bookingDetails?.price || 0,
     },
   };
 
   try {
     console.log('Attempting to send email with:', emailData);
-    await sgMail.send(emailData);
+    const result = await sendEmailDirectApi(emailData);
     console.log('Email sent successfully');
-    return { success: true };
+    return { success: true, result };
   } catch (error) {
-    console.error('SendGrid Error:', error);
-    if (error.response) {
-      console.error('SendGrid Error Body:', error.response.body);
-    }
-    throw new functions.https.HttpsError(
-      'internal',
-      'Failed to send email: ' + error.message
-    );
+    console.error('Error in sendBookingConfirmation:', error);
+    throw new HttpsError('internal', 'Failed to send email: ' + error.message);
   }
 });
 
-// -------------------------------------------------
-// Firestore Trigger: New Order Notification
-// Using a completely new name
-// -------------------------------------------------
-exports.newOrderAlert2025 = onDocumentCreated('orders/{orderId}', async (event) => {
+// Alternative HTTP function
+exports.sendBookingConfirmationHttp = onRequest({
+  cors: true
+}, async (req, res) => {
+  // Only allow POST method
+  if (req.method !== 'POST') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+
+  try {
+    const data = req.body;
+    console.log('Received data in HTTP Function:', data);
+
+    if (!data?.clientName || !data?.clientEmail) {
+      res.status(400).send({ error: 'Missing required client details' });
+      return;
+    }
+
+    const emailData = {
+      to: data.clientEmail,
+      from: 'info@justenjoyibiza.com',
+      templateId: SENDGRID_TEMPLATE_ID,
+      dynamic_template_data: {
+        clientName: data.clientName,
+        bookingDate: data.bookingDetails?.date || 'N/A',
+        startTime: data.bookingDetails?.startTime || 'N/A',
+        endTime: data.bookingDetails?.endTime || 'N/A',
+        boatName: data.bookingDetails?.boatName || 'N/A',
+        passengers: data.bookingDetails?.passengers || 'N/A',
+        totalAmount: data.bookingDetails?.price || 0,
+      },
+    };
+
+    await sendEmailDirectApi(emailData);
+    res.status(200).send({ success: true });
+  } catch (error) {
+    console.error('Error in sendBookingConfirmationHttp:', error);
+    res.status(500).send({ error: 'Failed to send email: ' + error.message });
+  }
+});
+
+// New function name for order notification to avoid conflicts
+exports.orderAlertNotification = onDocumentCreated('orders/{orderId}', async (event) => {
   const order = event.data.data();
   if (!order) {
     console.error('No order data found');
@@ -164,7 +214,7 @@ exports.newOrderAlert2025 = onDocumentCreated('orders/{orderId}', async (event) 
     notification: {
       title: 'New Order Received',
       body: `Delivery Date: ${order.deliveryDate || 'Not specified'}. Check order details.`,
-      click_action: 'https://your-admin-dashboard-url.com', // Update as needed
+      click_action: 'https://your-admin-dashboard-url.com',
     },
     data: {
       orderId: event.params.orderId,
@@ -185,53 +235,6 @@ exports.newOrderAlert2025 = onDocumentCreated('orders/{orderId}', async (event) 
     console.error('Error sending notification:', error);
   }
   return null;
-});
-
-// -------------------------------------------------
-// Test Email Function
-// -------------------------------------------------
-exports.testEmail = onCall({ cors: true }, async (request) => {
-  const data = request.data || {};
-  const testEmail = data.email || 'your-email@example.com';
-  
-  console.log('SendGrid API key exists:', !!sendGridApiKey);
-  console.log('SendGrid API key length:', sendGridApiKey ? sendGridApiKey.length : 0);
-  
-  // Simple email without template
-  const msg = {
-    to: testEmail,
-    from: 'info@justenjoyibiza.com',
-    subject: 'Test Email',
-    text: 'This is a test email from Firebase Functions',
-    html: '<strong>This is a test email from Firebase Functions</strong>',
-  };
-  
-  try {
-    console.log('Sending test email to:', testEmail);
-    const result = await sgMail.send(msg);
-    console.log('Email sent successfully. Response:', result && result[0] ? result[0].statusCode : 'No response data');
-    return { 
-      success: true,
-      message: 'Email sent successfully'
-    };
-  } catch (error) {
-    console.error('Error sending test email:', error);
-    let errorDetails = {
-      message: error.message,
-      code: error.code || 'unknown'
-    };
-    
-    if (error.response) {
-      errorDetails.responseBody = error.response.body;
-      errorDetails.responseStatus = error.response.statusCode;
-    }
-    
-    return { 
-      success: false, 
-      error: error.message,
-      details: errorDetails
-    };
-  }
 });
 
 
