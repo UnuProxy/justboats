@@ -32,3 +32,6 @@ node_modules/
 functions/node_modules/
 .env
 functions/.env
+.env*
+.env*
+functions/.env.crm-boats
