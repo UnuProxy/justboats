@@ -14,27 +14,38 @@ import { functions } from '../firebase/firebaseConfig';
 const sendBookingConfirmationEmail = async (bookingData) => {
   try {
 
-     const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
-     // Ensure all required fields are present with proper values
-     const emailPayload = {
-         clientName: bookingData.clientDetails?.name || '',
-         clientEmail: bookingData.clientDetails?.email || '',
-         bookingDetails: {
-             boatName: bookingData.bookingDetails?.boatName || '',
-             date: bookingData.bookingDetails?.date || '',
-             startTime: bookingData.bookingDetails?.startTime || '',
-             endTime: bookingData.bookingDetails?.endTime || '',
-             passengers: bookingData.bookingDetails?.passengers?.toString() || '',
-             price: bookingData.pricing?.agreedPrice?.toString() || '0'
-         }
-     }; // Added missing closing brace here
- 
-     // Rest of your function would continue here
-     // For example: await sendEmail(emailPayload);
+    const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
+    
+    // Ensure all required fields are present with proper values
+    const emailPayload = {
+      clientName: bookingData.clientDetails?.name || '',
+      clientEmail: bookingData.clientDetails?.email || '',
+      bookingDetails: {
+        boatName: bookingData.bookingDetails?.boatName || '',
+        date: bookingData.bookingDetails?.date || '',
+        startTime: bookingData.bookingDetails?.startTime || '',
+        endTime: bookingData.bookingDetails?.endTime || '',
+        passengers: bookingData.bookingDetails?.passengers?.toString() || '',
+        price: bookingData.pricing?.agreedPrice?.toString() || '0'
+      }
+    };
+
+    // Validate required fields before sending
+    if (!emailPayload.clientName || !emailPayload.clientEmail) {
+      console.error('Missing required fields:', { 
+        name: emailPayload.clientName, 
+        email: emailPayload.clientEmail 
+      });
+      return;
+    }
+
+    // Send the email if validation passes
+    await sendEmail(emailPayload);
+
   } catch (error) {
-     // Error handling
+    console.error('Error sending booking confirmation email:', error);
   }
- };
+};
 
 
     // Validate required fields before sending
