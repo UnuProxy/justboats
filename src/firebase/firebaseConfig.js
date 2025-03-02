@@ -5,7 +5,8 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
-import { getFunctions } from "firebase/functions";
+import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
+
 
 
 const firebaseConfig = {
@@ -27,12 +28,14 @@ const storage = getStorage(app);
 const functions = getFunctions(app);
 functions.region = "us-central1";
 
+// Connect to functions emulator when running locally
+if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
+  console.log('Connecting to Firebase Functions Emulator...');
+  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+}
+
 export { auth, googleProvider, db, storage, functions };
 export default app;
-
-
-
-
 
 
   

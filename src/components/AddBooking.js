@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from "react";
 import { collection, query, where, addDoc, getDocs } from "firebase/firestore";
 import { db } from '../firebase/firebaseConfig';
@@ -12,6 +13,7 @@ import { functions } from '../firebase/firebaseConfig';
 
 const sendBookingConfirmationEmail = async (bookingData) => {
   try {
+
     const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
     
     // Ensure all required fields are present with proper values
@@ -39,10 +41,12 @@ const sendBookingConfirmationEmail = async (bookingData) => {
 
     // Send the email if validation passes
     await sendEmail(emailPayload);
+
   } catch (error) {
     console.error('Error sending booking confirmation email:', error);
   }
 };
+
 
     // Validate required fields before sending
     if (!emailPayload.clientName || !emailPayload.clientEmail) {

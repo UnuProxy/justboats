@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+functions/node_modules
 /.pnp
 .pnp.js
 
@@ -11,27 +12,28 @@
 # production
 /build
 
-# misc
-.DS_Store
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+firestore-debug.log*
+pubsub-debug.log*
+ui-debug.log*
+
+# environment files
+.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
-
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.env
-.codegpt
-firebase-debug.log
+.runtimeconfig.json
 functions/.runtimeconfig.json
-node_modules/
-functions/node_modules/
-functions/.env
-node_modules/
-functions/node_modules/
-.env
-functions/.env
-.env*
-.env*
-functions/.env.crm-boats
+
+# secrets and credentials
+config.json
+secrets/
+credentials/
+
+# IDE
+
