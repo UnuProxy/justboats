@@ -1,11 +1,51 @@
-import React, { useState, useEffect } from "react";
+// AddBooking.js (React Component)
+
+import React, { useState, useEffect, useCallback } from "react";
 import { collection, query, where, addDoc, getDocs } from "firebase/firestore";
-import { db } from '../firebase/firebaseConfig.js';
+import { db } from '../firebase/firebaseConfig';
 import { Users, Ship, Euro, MapPin } from "lucide-react";
 import { getAuth } from 'firebase/auth';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import ClientPaymentForm from './ClientPaymentForm';
+import { createBookingNotification, createPaymentNotification, createClientUpdateNotification, createTransferNotification } from '../utils/notification-utils';
+import { increment } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../firebase/firebaseConfig';
 
+const sendBookingConfirmationEmail = async (bookingData) => {
+  try {
+    const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
+    
+    // Ensure all required fields are present with proper values
+    const emailPayload = {
+      clientName: bookingData.clientDetails?.name || '',
+      clientEmail: bookingData.clientDetails?.email || '',
+      bookingDetails: {
+        boatName: bookingData.bookingDetails?.boatName || '',
+        date: bookingData.bookingDetails?.date || '',
+        startTime: bookingData.bookingDetails?.startTime || '',
+        endTime: bookingData.bookingDetails?.endTime || '',
+        passengers: bookingData.bookingDetails?.passengers?.toString() || '',
+        price: bookingData.pricing?.agreedPrice?.toString() || '0'
+      }
+    };
 
+    // Validate required fields before sending
+    if (!emailPayload.clientName || !emailPayload.clientEmail) {
+      console.error('Missing required fields:', { 
+        name: emailPayload.clientName, 
+        email: emailPayload.clientEmail 
+      });
+      return;
+    }
+
+    console.log('Final email payload:', JSON.stringify(emailPayload, null, 2));
+    const result = await sendEmail(emailPayload);
+    console.log('Email send result:', result);
+  } catch (error) {
+    console.error('Error sending booking confirmation email:', error);
+  }
+};
 
 function AddBooking() {
   const [activeStep, setActiveStep] = useState(1);
@@ -19,6 +59,7 @@ function AddBooking() {
       phone: "",
       email: "",
       passportNumber: "",
+      address: "",
     },
     bookingDetails: {
       boatCompany: "",
@@ -29,12 +70,26 @@ function AddBooking() {
       endTime: "",
     },
     pricing: {
-      basePrice: "",
-      discount: "",
-      finalPrice: "",
-      deposit: "",
-      remainingPayment: "",
+      agreedPrice: "",
+      pricingType: "standard", 
+      firstPayment: {
+        useCustomAmount: false,
+        percentage: "30",
+        amount: "",
+        method: "cash",
+        received: false,
+        date: "",
+        excludeVAT: false  // Add this
+      },
+      secondPayment: {
+        amount: "",
+        method: "pos",
+        received: false,
+        date: "",
+        excludeVAT: false  // Add this
+      },
       paymentStatus: "No Payment",
+      totalPaid: 0,
     },
     transfer: {
       required: false,
@@ -118,24 +173,7 @@ function AddBooking() {
     return () => clearTimeout(debounce);
   }, [searchTerm]);
 
-  // Calculate pricing
-  useEffect(() => {
-    const { basePrice, discount } = formData.pricing;
-    const finalPrice = Math.max(0, parseFloat(basePrice || 0) - parseFloat(discount || 0));
-    const deposit = finalPrice * 0.5;
-
-    if (finalPrice !== formData.pricing.finalPrice) {
-      setFormData(prev => ({
-        ...prev,
-        pricing: {
-          ...prev.pricing,
-          finalPrice,
-          deposit,
-          remainingPayment: finalPrice - deposit,
-        },
-      }));
-    }
-  }, [formData.pricing.basePrice, formData.pricing.discount]);
+ 
 
   const handleClientTypeSelect = (type) => {
     setFormData((prev) => ({
@@ -174,70 +212,192 @@ function AddBooking() {
 
   const handleInputChange = (section, field, value) => {
     setFormData((prev) => {
-      if (typeof value === 'string') {
-        value = value.trim();
+      
+      let processedValue = value;
+if (typeof value === 'string' && 
+    !(section === 'bookingDetails' && (field === 'boatName' || field === 'boatCompany')) &&
+    !(section === 'clientDetails' && field === 'name')) {
+  processedValue = value.trim();
+}
+      if (section === 'bookingDetails' && field === 'startTime') {
+        const startHour = parseInt(value.split(':')[0]);
+        const startMinutes = value.split(':')[1];
+        const endHour = (startHour + 8).toString().padStart(2, '0');
+        
+        return {
+          ...prev,
+          bookingDetails: {
+            ...prev.bookingDetails,
+            startTime: value,
+            endTime: `${endHour}:${startMinutes}`
+          }
+        };
       }
   
       // Handle transfer section
       if (section === 'transfer') {
-        // Special handling for transfer.required field
         if (field === 'required') {
           return {
             ...prev,
             transfer: {
               ...prev.transfer,
-              required: value // Directly set the boolean value
+              required: processedValue
             }
           };
         }
-        
-        // Handle nested pickup/dropoff objects
         return {
           ...prev,
           transfer: {
             ...prev.transfer,
             [field]: {
               ...prev.transfer[field],
-              ...value,
+              ...processedValue,
             },
           },
         };
       }
   
-      // Rest of your existing code...
+      // Handle pricing section
+      if (section === 'pricing') {
+        // Special handling for payments array
+        if (field === 'payments') {
+          return {
+            ...prev,
+            pricing: {
+              ...prev.pricing,
+              payments: processedValue
+            }
+          };
+        }
+        // Handle other pricing fields
+        const newPricing = {
+          ...prev.pricing,
+          [field]: processedValue
+        };
+        // Calculate final price when basePrice or discount changes
+        if (field === 'basePrice' || field === 'discount') {
+          const basePrice = field === 'basePrice' ? Number(processedValue) : Number(prev.pricing.basePrice);
+          const discount = field === 'discount' ? Number(processedValue) : Number(prev.pricing.discount);
+          newPricing.finalPrice = Math.max(0, basePrice - discount);
+          newPricing.deposit = newPricing.finalPrice * 0.5;
+          newPricing.remainingPayment = newPricing.finalPrice - newPricing.deposit;
+          if (newPricing.finalPrice === 0) {
+            newPricing.paymentStatus = 'No Payment';
+          } else if (newPricing.deposit >= newPricing.finalPrice) {
+            newPricing.paymentStatus = 'Completed';
+          } else if (newPricing.deposit > 0) {
+            newPricing.paymentStatus = 'Partial';
+          }
+        }
+        return {
+          ...prev,
+          pricing: newPricing
+        };
+      }
+  
+      // Handle clientDetails section
       if (section === 'clientDetails') {
         return {
           ...prev,
           clientDetails: {
             ...prev.clientDetails,
-            [field]: value || "",
+            [field]: processedValue || "",
           },
         };
       }
   
+      // Handle bookingDetails section
       if (section === 'bookingDetails') {
         return {
           ...prev,
           bookingDetails: {
             ...prev.bookingDetails,
-            [field]: value || "",
+            [field]: processedValue || "",
           },
         };
       }
   
+      // Default case
       return {
         ...prev,
         [section]: {
           ...prev[section],
-          [field]: value || "",
+          [field]: processedValue || "",
         },
       };
     });
   };
-
+  const handlePricingChange = useCallback(async (pricingData) => {
+    // Calculate actual monetary values for first payment
+    const firstPaymentAmount = pricingData.pricingType === 'standard' && !pricingData.firstPayment.useCustomAmount 
+      ? parseFloat(pricingData.agreedPrice) * (parseFloat(pricingData.firstPayment.percentage) / 100)
+      : parseFloat(pricingData.firstPayment.amount) || 0;
   
+    // Calculate second payment based on the total and first payment
+    const secondPaymentAmount = pricingData.pricingType === 'standard'
+      ? parseFloat(pricingData.agreedPrice) - firstPaymentAmount
+      : parseFloat(pricingData.secondPayment.amount) || 0;
   
-
+    setFormData((prev) => ({
+      ...prev,
+      pricing: {
+        ...prev.pricing,
+        agreedPrice: pricingData.agreedPrice,
+        pricingType: pricingData.pricingType,
+        firstPayment: {
+          ...pricingData.firstPayment,
+          amount: firstPaymentAmount.toFixed(2),
+          percentage: pricingData.firstPayment.percentage // Keep the original percentage
+        },
+        secondPayment: {
+          ...pricingData.secondPayment,
+          amount: secondPaymentAmount.toFixed(2)
+        },
+        totalPaid: 
+          (pricingData.firstPayment.received ? firstPaymentAmount : 0) +
+          (pricingData.secondPayment.received ? secondPaymentAmount : 0),
+        paymentStatus: pricingData.paymentStatus,
+      },
+    }));
+  
+    // Update Firestore if needed
+    try {
+      if (formData.id) {
+        await updateDoc(doc(db, "bookings", formData.id), {
+          pricing: {
+            agreedPrice: parseFloat(pricingData.agreedPrice),
+            pricingType: pricingData.pricingType,
+            payments: [
+              {
+                type: 'first',
+                amount: firstPaymentAmount,
+                percentage: parseFloat(pricingData.firstPayment.percentage),
+                method: pricingData.firstPayment.method,
+                received: pricingData.firstPayment.received,
+                date: pricingData.firstPayment.date,
+                excludeVAT: pricingData.firstPayment.excludeVAT
+              },
+              {
+                type: 'second',
+                amount: secondPaymentAmount,
+                method: pricingData.secondPayment.method,
+                received: pricingData.secondPayment.received,
+                date: pricingData.secondPayment.date,
+                excludeVAT: pricingData.secondPayment.excludeVAT
+              }
+            ],
+            totalPaid: 
+              (pricingData.firstPayment.received ? firstPaymentAmount : 0) +
+              (pricingData.secondPayment.received ? secondPaymentAmount : 0),
+            paymentStatus: pricingData.paymentStatus,
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Error updating payment data in Firestore:", error);
+    }
+  }, [formData.id]);
+  
   const renderStep1 = () => (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
@@ -319,24 +479,36 @@ function AddBooking() {
         </div>
       )}
 
-      <div className="mt-6 space-y-4">
-        <h4 className="font-medium">Client Details</h4>
-        {["name", "phone", "email", "passportNumber"].map((field) => (
-          <div key={field}>
-            <label className="block text-sm font-medium text-gray-700">
-              {field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, " $1")}
-            </label>
-            <input
-              type={field === "email" ? "email" : "text"}
-              className="mt-1 w-full p-2 border rounded"
-              value={formData.clientDetails[field]}
-              onChange={(e) =>
-                handleInputChange("clientDetails", field, e.target.value)
-              }
-            />
-          </div>
-        ))}
-      </div>
+<div className="mt-6 space-y-4">
+  <h4 className="font-medium">Client Details</h4>
+  {["name", "phone", "email", "passportNumber", "address"].map((field) => (
+    <div key={field}>
+      <label className="block text-sm font-medium text-gray-700">
+        {field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, " $1")}
+      </label>
+      {field === "address" ? (
+        <textarea
+          className="mt-1 w-full p-2 border rounded"
+          rows="2"
+          value={formData.clientDetails[field]}
+          onChange={(e) =>
+            handleInputChange("clientDetails", field, e.target.value)
+          }
+          placeholder="Enter client's address"
+        />
+      ) : (
+        <input
+          type={field === "email" ? "email" : "text"}
+          className="mt-1 w-full p-2 border rounded"
+          value={formData.clientDetails[field]}
+          onChange={(e) =>
+            handleInputChange("clientDetails", field, e.target.value)
+          }
+        />
+      )}
+    </div>
+  ))}
+</div>
     </div>
   );
   const renderStep2 = () => (
@@ -422,94 +594,16 @@ function AddBooking() {
     </div>
   );
   const renderStep3 = () => (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center gap-2 mb-4">
         <Euro className="w-5 h-5 text-gray-600" />
         <h3 className="text-lg font-semibold">Pricing Details</h3>
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Base Price (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.pricing.basePrice}
-            onChange={(e) =>
-              handleInputChange("pricing", "basePrice", e.target.value)
-            }
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Discount (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.pricing.discount}
-            onChange={(e) =>
-              handleInputChange("pricing", "discount", e.target.value)
-            }
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Final Price (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded bg-gray-50"
-            value={formData.pricing.finalPrice}
-            readOnly
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Deposit (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded bg-gray-50"
-            value={formData.pricing.deposit}
-            readOnly
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Remaining Payment (€)
-          </label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded bg-gray-50"
-            value={formData.pricing.remainingPayment}
-            readOnly
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Payment Status
-          </label>
-          <select
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.pricing.paymentStatus}
-            onChange={(e) =>
-              handleInputChange("pricing", "paymentStatus", e.target.value)
-            }
-          >
-            <option value="No Payment">No Payment</option>
-            <option value="Partial">Partial Payment</option>
-            <option value="Completed">Completed</option>
-          </select>
-        </div>
-      </div>
+      
+      <ClientPaymentForm 
+        onPricingChange={handlePricingChange}
+        initialData={formData.pricing}
+      />
     </div>
   );
   const renderStep4 = () => (
@@ -732,25 +826,55 @@ function AddBooking() {
         }
         break;
 
-      case 3:
-        if (!formData.pricing.basePrice || formData.pricing.basePrice <= 0) {
-          alert("Please enter a valid base price");
+        case 3:
+      if (formData.pricing.pricingType !== 'custom' && 
+          (!formData.pricing.agreedPrice || parseFloat(formData.pricing.agreedPrice) <= 0)) {
+        alert("Please enter a valid agreed price");
+        return false;
+      }
+      // For custom type, check if at least one payment is entered
+      if (formData.pricing.pricingType === 'custom') {
+        const firstPayment = parseFloat(formData.pricing.firstPayment.amount) || 0;
+        const secondPayment = parseFloat(formData.pricing.secondPayment.amount) || 0;
+        if (firstPayment === 0 && secondPayment === 0) {
+          alert("Please enter at least one payment amount");
           return false;
         }
-        break;
+      }
+      break;
 
       case 4:
-        if (formData.transfer.required) {
-          if (!formData.transfer.pickup.location || !formData.transfer.pickup.address) {
-            alert("Please complete the pickup details");
-            return false;
-          }
-          if (!formData.transfer.dropoff.location || !formData.transfer.dropoff.address) {
-            alert("Please complete the drop-off details");
-            return false;
-          }
-        }
-        break;
+  if (formData.transfer.required) {
+    // Validate Pickup Details
+    if (!formData.transfer.pickup.location) {
+      alert("Please select a pickup location type");
+      return false;
+    }
+    if (
+      (formData.transfer.pickup.location === "Hotel" || formData.transfer.pickup.location === "Other") &&
+      !formData.transfer.pickup.locationDetail
+    ) {
+      alert("Please provide pickup location details");
+      return false;
+    }
+
+    // Validate Drop-off Details
+    if (!formData.transfer.dropoff.location) {
+      alert("Please select a drop-off location type");
+      return false;
+    }
+    if (
+      (formData.transfer.dropoff.location === "Hotel" ||
+        formData.transfer.dropoff.location === "Other" ||
+        formData.transfer.dropoff.location === "Marina") &&
+      !formData.transfer.dropoff.locationDetail
+    ) {
+      alert("Please provide drop-off location details");
+      return false;
+    }
+  }
+  break;
+
 
       default:
         alert("Invalid step");
@@ -758,7 +882,7 @@ function AddBooking() {
     }
     return true;
   };
-  
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (activeStep !== 4 || !validateForm()) return;
@@ -777,51 +901,70 @@ function AddBooking() {
         setLoading(true);
 
         const bookingData = {
-            clientType: formData.clientType || "",
-            selectedPartner: formData.selectedPartner || "",
-            clientSource: formData.clientSource || "",
-            clientDetails: {
-                name: formData.clientDetails.name || "",
-                phone: formData.clientDetails.phone || "",
-                email: formData.clientDetails.email || "",
-                passportNumber: formData.clientDetails.passportNumber || "",
-            },
-            bookingDetails: {
-                boatCompany: formData.bookingDetails.boatCompany || "",
-                boatName: formData.bookingDetails.boatName || "",
-                passengers: formData.bookingDetails.passengers || "",
-                date: formData.bookingDetails.date || "",
-                startTime: formData.bookingDetails.startTime || "",
-                endTime: formData.bookingDetails.endTime || "",
-                transferAddress: formData.transfer.required
-                    ? {
-                          pickup: formData.transfer.pickup || {},
-                          dropoff: formData.transfer.dropoff || {},
-                      }
-                    : null,
-            },
-            pricing: {
-                basePrice: parseFloat(formData.pricing.basePrice || 0),
-                discount: parseFloat(formData.pricing.discount || 0),
-                finalPrice: parseFloat(formData.pricing.finalPrice || 0),
-                deposit: parseFloat(formData.pricing.deposit || 0),
-                remainingPayment: parseFloat(formData.pricing.remainingPayment || 0),
-                paymentStatus: formData.pricing.paymentStatus || "No Payment",
-            },
-            transfer: formData.transfer || {},
-            notes: formData.notes || "",
-            createdAt: new Date().toISOString(),
-            lastUpdated: new Date().toISOString(),
-            status: "active",
-            createdBy: createdByInfo,
-            restaurantName: restaurantName || "",
+          clientType: formData.clientType || "",
+          selectedPartner: formData.selectedPartner || "",
+          clientSource: formData.clientSource || "",
+          clientDetails: {
+              name: formData.clientDetails.name || "",
+              phone: formData.clientDetails.phone || "",
+              email: formData.clientDetails.email || "",
+              passportNumber: formData.clientDetails.passportNumber || "",
+              address: formData.clientDetails.address || "",
+          },
+          clientName: formData.clientDetails.name || "",
+          bookingDate: formData.bookingDetails.date || "",
+          bookingDetails: {
+              boatCompany: formData.bookingDetails.boatCompany || "",
+              boatName: formData.bookingDetails.boatName || "",
+              passengers: formData.bookingDetails.passengers || "",
+              date: formData.bookingDetails.date || "",
+              startTime: formData.bookingDetails.startTime || "",
+              endTime: formData.bookingDetails.endTime || "",
+              transferAddress: formData.transfer.required
+                  ? {
+                        pickup: formData.transfer.pickup || {},
+                        dropoff: formData.transfer.dropoff || {},
+                    }
+                  : null,
+          },
+          pricing: {
+            agreedPrice: parseFloat(formData.pricing.agreedPrice) || 0,
+            pricingType: formData.pricing.pricingType,
+            totalPaid: parseFloat(formData.pricing.totalPaid) || 0,
+            paymentStatus: formData.pricing.paymentStatus || "No Payment",
+            payments: [
+              {
+                type: 'first',
+                amount: parseFloat(formData.pricing.firstPayment.amount) || 0,
+                percentage: parseFloat(formData.pricing.firstPayment.percentage),
+                method: formData.pricing.firstPayment.method || '',
+                received: formData.pricing.firstPayment.received || false,
+                date: formData.pricing.firstPayment.date || '',
+                excludeVAT: formData.pricing.firstPayment.excludeVAT || false,
+                recordedAt: new Date().toISOString()
+              },
+              {
+                type: 'second',
+                amount: parseFloat(formData.pricing.secondPayment.amount) || 0,
+                method: formData.pricing.secondPayment.method || '',
+                received: formData.pricing.secondPayment.received || false,
+                date: formData.pricing.secondPayment.date || '',
+                excludeVAT: formData.pricing.secondPayment.excludeVAT || false,
+                recordedAt: new Date().toISOString()
+              }
+            ]
+          },
+          transfer: formData.transfer || {},
+          notes: formData.notes || "",
+          createdAt: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+          status: "active",
+          createdBy: createdByInfo,
+          restaurantName: restaurantName || "",
         };
 
         let clientId = null;
-        if (
-            formData.clientType === "Direct" ||
-            ["Hotel", "Collaborator"].includes(formData.clientType)
-        ) {
+        if (formData.clientType) {
             const clientsRef = collection(db, "clients");
 
             let existingClientQuery = query(
@@ -830,7 +973,7 @@ function AddBooking() {
             );
             let existingClientSnapshot = await getDocs(existingClientQuery);
 
-            if (existingClientSnapshot.empty) {
+            if (existingClientSnapshot.empty && formData.clientDetails.phone) {
                 existingClientQuery = query(
                     clientsRef,
                     where("phone", "==", formData.clientDetails.phone)
@@ -839,47 +982,113 @@ function AddBooking() {
             }
 
             if (!existingClientSnapshot.empty) {
+                // Update existing client
                 clientId = existingClientSnapshot.docs[0].id;
-
+                await createClientUpdateNotification(
+                    formData.clientDetails.name,
+                    'updated'
+                );
                 await updateDoc(doc(db, "clients", clientId), {
                     name: formData.clientDetails.name,
                     email: formData.clientDetails.email,
                     phone: formData.clientDetails.phone,
                     passportNumber: formData.clientDetails.passportNumber,
+                   address: formData.clientDetails.address || '',
+                    clientType: formData.clientType,
+                    source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
                     lastUpdated: new Date().toISOString(),
+                    totalBookings: increment(1),
+                    totalSpent: increment(parseFloat(formData.pricing.agreedPrice) || 0)
                 });
-
-                console.log("Updated existing client with ID:", clientId);
             } else {
+                // Create new client
                 const clientData = {
-                    name: formData.clientDetails.name,
-                    email: formData.clientDetails.email,
-                    phone: formData.clientDetails.phone,
-                    passportNumber: formData.clientDetails.passportNumber,
-                    source:
-                        formData.clientType === "Direct"
-                            ? formData.clientSource
-                            : formData.clientType,
-                    createdAt: new Date().toISOString(),
-                    createdBy: createdByInfo,
-                    bookings: [],
-                    totalBookings: 1,
-                    totalSpent: bookingData.pricing.finalPrice,
+                  name: formData.clientDetails.name || "",
+                  email: formData.clientDetails.email || "",
+                  phone: formData.clientDetails.phone || "",
+                  passportNumber: formData.clientDetails.passportNumber || "",
+                  address: formData.clientDetails.address || "",  // Added fallback
+                  clientType: formData.clientType,
+                  source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
+                  createdAt: new Date().toISOString(),
+                  lastUpdated: new Date().toISOString(),
+                  createdBy: createdByInfo,
+                  bookings: [],
+                  totalBookings: 1,
+                  totalSpent: parseFloat(formData.pricing.agreedPrice) || 0,
+                  notes: formData.notes || "",
+                  dob: ""
                 };
 
                 const clientDoc = await addDoc(clientsRef, clientData);
+                await createClientUpdateNotification(
+                    formData.clientDetails.name,
+                    'created'
+                );
                 clientId = clientDoc.id;
             }
             bookingData.clientId = clientId;
         }
 
-        console.log("Full Booking Data:", JSON.stringify(bookingData, null, 2));
-
+        // Create booking document
         const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
-        console.log("Booking created with ID:", bookingRef.id);
+console.log('About to send email with data:', bookingData);  // Add this line
+await sendBookingConfirmationEmail(bookingData);
+        // Add booking notification
+        await createBookingNotification(
+            formData.clientDetails.name,
+            formData.bookingDetails.boatName,
+            new Date(formData.bookingDetails.date).toLocaleDateString(),
+            bookingRef.id
+        );
 
-        if (formData.clientType === "Direct") {
-            await updateDoc(doc(db, "clients", bookingData.clientId), {
+        if (formData.transfer.required) {
+            const pickupTime = new Date(`${formData.bookingDetails.date} ${formData.bookingDetails.startTime}`);
+            await createTransferNotification(
+                bookingRef.id,
+                formData.clientDetails.name,
+                pickupTime.toLocaleTimeString()
+            );
+        }
+
+        if (formData.pricing.firstPayment.received) {
+            await createPaymentNotification(
+                formData.pricing.firstPayment.amount,
+                formData.clientDetails.name,
+                bookingRef.id
+            );
+        }
+
+        if (formData.pricing.secondPayment.received) {
+            await createPaymentNotification(
+                formData.pricing.secondPayment.amount,
+                formData.clientDetails.name,
+                bookingRef.id
+            );
+        }
+
+        await updateDoc(doc(db, "bookings", bookingRef.id), {
+            id: bookingRef.id
+        });
+
+        const payments = bookingData.pricing.payments.filter(payment => payment.amount > 0);
+        if (payments.length > 0) {
+            const paymentRecords = payments.map(payment => ({
+                ...payment,
+                bookingId: bookingRef.id,
+                clientId: bookingData.clientId,
+                createdBy: createdByInfo,
+                createdAt: new Date().toISOString()
+            }));
+
+            await Promise.all(paymentRecords.map(record => 
+                addDoc(collection(db, "payments"), record)
+            ));
+        }
+
+        // Update client's bookings array
+        if (clientId) {
+            await updateDoc(doc(db, "clients", clientId), {
                 bookings: arrayUnion(bookingRef.id),
             });
         }
@@ -894,6 +1103,7 @@ function AddBooking() {
                 phone: "",
                 email: "",
                 passportNumber: "",
+                address: "",
             },
             bookingDetails: {
                 boatCompany: "",
@@ -904,21 +1114,36 @@ function AddBooking() {
                 endTime: "",
             },
             pricing: {
-                basePrice: 0,
-                discount: 0,
-                finalPrice: 0,
-                deposit: 0,
-                remainingPayment: 0,
+                agreedPrice: "",
+                pricingType: "standard",
+                firstPayment: {
+                    useCustomAmount: false,
+                    percentage: "30",
+                    amount: "",
+                    method: "cash",
+                    received: false,
+                    date: "",
+                    excludeVAT: false
+                },
+                secondPayment: {
+                    amount: "",
+                    method: "pos",
+                    received: false,
+                    date: "",
+                    excludeVAT: false
+                },
                 paymentStatus: "No Payment",
+                totalPaid: 0
             },
             transfer: {
                 required: false,
-                pickup: { location: "", address: "" },
-                dropoff: { location: "", address: "" },
+                pickup: { location: "", locationDetail: "" },
+                dropoff: { location: "", locationDetail: "" },
             },
             notes: "",
         });
         setActiveStep(1);
+        setRestaurantName("");
     } catch (error) {
         console.error("Error saving booking:", error);
         alert("Error saving booking. Please try again.");
@@ -926,9 +1151,6 @@ function AddBooking() {
         setLoading(false);
     }
 };
-
-
-
   return (
     <div className="min-h-screen bg-gray-50 p-2 sm:p-6">
       <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-lg">

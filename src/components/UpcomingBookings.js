@@ -13,8 +13,13 @@ import { db } from '../firebase/firebaseConfig';
 import BookingFilters from './BookingFilters';
 import BookingItem from './BookingItem';
 import BookingDetails from './BookingDetails';
+import { useSearchParams } from 'react-router-dom';
 
-const UpcomingBookings = () => {
+function UpcomingBookings() {
+  // Get URL parameters for booking highlight
+  const [searchParams] = useSearchParams();
+  const viewBookingId = searchParams.get('view');
+
   // State variables
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,7 +38,22 @@ const UpcomingBookings = () => {
   // Which filters are actively applied
   const [appliedFilters, setAppliedFilters] = useState(filters);
 
-  // (Optional) Flatten or manipulate booking data
+  // Highlight effect for selected booking
+  useEffect(() => {
+    if (viewBookingId) {
+      const bookingElement = document.getElementById(`booking-${viewBookingId}`);
+      if (bookingElement) {
+        bookingElement.scrollIntoView({ behavior: 'smooth' });
+        bookingElement.classList.add('bg-blue-50');
+        
+        setTimeout(() => {
+          bookingElement.classList.remove('bg-blue-50');
+        }, 3000);
+      }
+    }
+  }, [viewBookingId]);
+
+  // Normalize booking data
   const normalizeBookingData = useCallback((booking) => {
     const basePrice = parseFloat(booking.pricing?.basePrice || 0);
     const discount = parseFloat(booking.pricing?.discount || 0);
@@ -41,7 +61,6 @@ const UpcomingBookings = () => {
     let deposit = parseFloat(booking.pricing?.deposit || 0);
     let remainingPayment = parseFloat(booking.pricing?.remainingPayment || 0);
   
-    // Declare the 'passengers' variable here
     const passengers = booking.bookingDetails?.passengers;
   
     return {
@@ -77,18 +96,14 @@ const UpcomingBookings = () => {
 
   // Real-time listener setup
   useEffect(() => {
-    // 1. Reference to 'bookings' collection
     const bookingsRef = collection(db, 'bookings');
-    // 2. Sort by bookingDetails.date ascending
     const q = query(bookingsRef, orderBy('bookingDetails.date', 'asc'));
 
-    // 3. Listen for changes in real time
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
         const bookingsData = snapshot.docs.map(doc => ({
           id: doc.id,
-          // If you prefer not to flatten, just do: ...doc.data()
           ...normalizeBookingData(doc.data())
         }));
         setBookings(bookingsData);
@@ -101,11 +116,10 @@ const UpcomingBookings = () => {
       }
     );
 
-    // Cleanup the listener when component unmounts
     return () => unsubscribe();
   }, [normalizeBookingData]);
 
-  // Filter changes
+  // Filter handlers
   const handleFilterChange = (field, value) => {
     setFilters(prevFilters => ({
       ...prevFilters,
@@ -113,12 +127,10 @@ const UpcomingBookings = () => {
     }));
   };
 
-  // Apply filters
   const handleApplyFilters = () => {
     setAppliedFilters(filters);
   };
 
-  // Clear filters
   const handleClearFilters = () => {
     const defaultFilters = {
       dateFrom: '',
@@ -132,37 +144,32 @@ const UpcomingBookings = () => {
   };
 
   // Filter logic
-  // Update the filterBookings function
-const filterBookings = () => {
-  const today = new Date().toISOString().split('T')[0];
-  return bookings.filter(booking => {
-    // By default (no filters), show only today's bookings
-    if (!Object.values(appliedFilters).some(Boolean) && booking.bookingDate !== today) return false;
-    
-    // Rest of filter logic
-    if (appliedFilters.dateFrom && booking.bookingDate < appliedFilters.dateFrom) return false;
-    if (appliedFilters.dateTo && booking.bookingDate > appliedFilters.dateTo) return false;
-    if (appliedFilters.clientType && booking.clientType !== appliedFilters.clientType) return false;
-    if (appliedFilters.paymentStatus && booking.paymentStatus !== appliedFilters.paymentStatus) return false;
-    if (appliedFilters.bookingStatus === 'active' && booking.isCancelled) return false;
-    if (appliedFilters.bookingStatus === 'cancelled' && !booking.isCancelled) return false;
-    return true;
-  });
-};
+  const filterBookings = () => {
+    const today = new Date().toISOString().split('T')[0];
+    return bookings.filter(booking => {
+      if (!Object.values(appliedFilters).some(Boolean) && booking.bookingDate !== today) return false;
+      
+      if (appliedFilters.dateFrom && booking.bookingDate < appliedFilters.dateFrom) return false;
+      if (appliedFilters.dateTo && booking.bookingDate > appliedFilters.dateTo) return false;
+      if (appliedFilters.clientType && booking.clientType !== appliedFilters.clientType) return false;
+      if (appliedFilters.paymentStatus && booking.paymentStatus !== appliedFilters.paymentStatus) return false;
+      if (appliedFilters.bookingStatus === 'active' && booking.isCancelled) return false;
+      if (appliedFilters.bookingStatus === 'cancelled' && !booking.isCancelled) return false;
+      return true;
+    });
+  };
 
   const filteredBookings = filterBookings();
 
-  // When a booking is selected from list
+  // Booking handlers
   const handleBookingSelect = (booking) => {
     setSelectedBooking(booking);
   };
 
-  // Close modal
   const handleBookingClose = () => {
     setSelectedBooking(null);
   };
 
-  // Cancel booking
   const handleBookingDelete = async (bookingId) => {
     if (window.confirm('Are you sure you want to delete this booking? This action cannot be undone.')) {
       try {
@@ -176,75 +183,67 @@ const filterBookings = () => {
       }
     }
   };
-  
 
-  // Save booking
-const handleBookingSave = async (bookingId, updatedBooking) => {
-  try {
-    const docRef = doc(db, "bookings", bookingId);
-    
-    // Restructure the flat data back into nested format
-    const dataToUpdate = {
-      clientType: updatedBooking.clientType,
-      status: updatedBooking.isCancelled ? 'cancelled' : 'active',
-      lastUpdated: new Date().toISOString(),
-      restaurantName: updatedBooking.restaurantName || '',
+  const handleBookingSave = async (bookingId, updatedBooking) => {
+    try {
+      const docRef = doc(db, "bookings", bookingId);
       
-      // Client Details
-      clientDetails: {
-        name: updatedBooking.clientName,
-        phone: updatedBooking.clientPhone,
-        email: updatedBooking.clientEmail,
-        passportNumber: updatedBooking.clientPassport
-      },
-      
-      // Booking Details
-      bookingDetails: {
-        boatCompany: updatedBooking.boatCompanyName,
-        boatName: updatedBooking.boatName,
-        passengers: updatedBooking.numberOfPassengers,
-        date: updatedBooking.bookingDate,
-        startTime: updatedBooking.startTime,
-        endTime: updatedBooking.endTime
-      },
-      
-      // Pricing
-      pricing: {
-        basePrice: updatedBooking.basePrice,
-        discount: updatedBooking.discount,
-        finalPrice: updatedBooking.finalPrice,
-        deposit: updatedBooking.deposit,
-        remainingPayment: updatedBooking.remainingPayment,
-        paymentStatus: updatedBooking.paymentStatus
-      },
-      
-      // Transfer Details (if exists)
-      transfer: updatedBooking.privateTransfer ? {
-        required: true,
-        pickup: {
-          location: updatedBooking.pickupLocation,
-          address: updatedBooking.pickupAddress
+      const dataToUpdate = {
+        clientType: updatedBooking.clientType,
+        status: updatedBooking.isCancelled ? 'cancelled' : 'active',
+        lastUpdated: new Date().toISOString(),
+        restaurantName: updatedBooking.restaurantName || '',
+        
+        clientDetails: {
+          name: updatedBooking.clientName,
+          phone: updatedBooking.clientPhone,
+          email: updatedBooking.clientEmail,
+          passportNumber: updatedBooking.clientPassport
         },
-        dropoff: {
-          location: updatedBooking.dropoffLocation,
-          address: updatedBooking.dropoffAddress
-        }
-      } : null,
-      
-      notes: updatedBooking.clientNotes
-    };
+        
+        bookingDetails: {
+          boatCompany: updatedBooking.boatCompanyName,
+          boatName: updatedBooking.boatName,
+          passengers: updatedBooking.numberOfPassengers,
+          date: updatedBooking.bookingDate,
+          startTime: updatedBooking.startTime,
+          endTime: updatedBooking.endTime
+        },
+        
+        pricing: {
+          basePrice: updatedBooking.basePrice,
+          discount: updatedBooking.discount,
+          finalPrice: updatedBooking.finalPrice,
+          deposit: updatedBooking.deposit,
+          remainingPayment: updatedBooking.remainingPayment,
+          paymentStatus: updatedBooking.paymentStatus
+        },
+        
+        transfer: updatedBooking.privateTransfer ? {
+          required: true,
+          pickup: {
+            location: updatedBooking.pickupLocation,
+            address: updatedBooking.pickupAddress
+          },
+          dropoff: {
+            location: updatedBooking.dropoffLocation,
+            address: updatedBooking.dropoffAddress
+          }
+        } : null,
+        
+        notes: updatedBooking.clientNotes
+      };
 
-    await updateDoc(docRef, dataToUpdate);
-    alert("Booking updated successfully!");
-    // No need to re-fetch, onSnapshot will update automatically
-    setSelectedBooking(null);
-  } catch (error) {
-    console.error("Error saving booking:", error);
-    alert("Failed to update booking. Please try again.");
-  }
-};
+      await updateDoc(docRef, dataToUpdate);
+      alert("Booking updated successfully!");
+      setSelectedBooking(null);
+    } catch (error) {
+      console.error("Error saving booking:", error);
+      alert("Failed to update booking. Please try again.");
+    }
+  };
 
-  // Render loading state
+  // Loading state
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -253,7 +252,7 @@ const handleBookingSave = async (bookingId, updatedBooking) => {
     );
   }
 
-  // Render error state
+  // Error state
   if (error) {
     return (
       <div className="bg-red-50 p-4 rounded-lg">
@@ -265,13 +264,11 @@ const handleBookingSave = async (bookingId, updatedBooking) => {
   // Main content
   return (
     <div className="p-4 md:p-6 space-y-4">
-      {/* Header with Calendar Icon */}
       <div className="flex items-center gap-2 mb-4 md:mb-6">
         <Calendar className="h-6 w-6 text-gray-600" />
         <h2 className="text-lg md:text-xl font-semibold">Upcoming Bookings</h2>
       </div>
 
-      {/* BookingFilters Component */}
       <BookingFilters
         filters={filters}
         onFilterChange={handleFilterChange}
@@ -279,7 +276,6 @@ const handleBookingSave = async (bookingId, updatedBooking) => {
         onApply={handleApplyFilters}
       />
 
-      {/* Bookings List or No Results Message */}
       {filteredBookings.length === 0 ? (
         <div className="text-center p-4 md:p-8 bg-gray-50 rounded-lg">
           <p className="text-gray-600">No bookings match the selected filters</p>
@@ -296,7 +292,6 @@ const handleBookingSave = async (bookingId, updatedBooking) => {
         </div>
       )}
 
-      {/* BookingDetails Modal */}
       {selectedBooking && (
         <BookingDetails
           booking={selectedBooking}
@@ -307,6 +302,6 @@ const handleBookingSave = async (bookingId, updatedBooking) => {
       )}
     </div>
   );
-};
+}
 
 export default UpcomingBookings;

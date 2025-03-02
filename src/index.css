@@ -15,3 +15,29 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+@media print {
+  /* Hide everything except the invoice content when printing */
+  body * {
+    visibility: hidden;
+  }
+  
+  #root > * {
+    visibility: hidden;
+  }
+  
+  .invoice-to-print, .invoice-to-print * {
+    visibility: visible;
+  }
+  
+  .invoice-to-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  
+  /* Hide buttons when printing */
+  .no-print {
+    display: none !important;
+  }
+}

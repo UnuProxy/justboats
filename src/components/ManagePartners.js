@@ -92,8 +92,7 @@ const ManagePartners = () => {
       setHistoryLoading(true);
       setShowHistory(true);
       setSelectedPartnerHistory({ id: partnerId, name: partnerName });
-  
-      // Query bookings for this partner
+      
       const bookingsRef = collection(db, 'bookings');
       const q = query(
         bookingsRef,
@@ -101,16 +100,42 @@ const ManagePartners = () => {
       );
   
       const querySnapshot = await getDocs(q);
-      const bookings = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const bookings = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        const ownerPayments = data.ownerPayments || {};
+        
+        // Check both payments status
+        const firstPaymentReceived = data.pricing?.payments?.find(p => p.type === 'first')?.received || false;
+        const secondPaymentReceived = data.pricing?.payments?.find(p => p.type === 'second')?.received || false;
+        const bothPaymentsReceived = firstPaymentReceived && secondPaymentReceived;
   
-      // Sort bookings by date on the client side if needed
+        return {
+          id: doc.id,
+          bookingDate: data.bookingDetails?.date || '',
+          clientName: data.clientName || '',
+          boatName: data.bookingDetails?.boatName || '',
+          amount: data.pricing?.agreedPrice || 0,
+          firstPayment: {
+            received: firstPaymentReceived,
+            date: data.pricing?.payments?.find(p => p.type === 'first')?.date || null
+          },
+          secondPayment: {
+            received: secondPaymentReceived,
+            date: data.pricing?.payments?.find(p => p.type === 'second')?.date || null
+          },
+          bothPaymentsReceived,
+          commissionPaid: ownerPayments?.firstPayment?.paid || false,
+          commissionAmount: ownerPayments?.firstPayment?.amount || 0,
+          canPayCommission: bothPaymentsReceived && !ownerPayments?.firstPayment?.paid,
+          commission: (data.pricing?.agreedPrice || 0) * (data.commissionRate || 0) / 100,
+          commissionRate: data.commissionRate || 0
+        };
+      });
+  
       bookings.sort((a, b) => {
-        const dateA = new Date(a.bookingDetails?.date || 0);
-        const dateB = new Date(b.bookingDetails?.date || 0);
-        return dateB - dateA; // descending order
+        const dateA = new Date(a.bookingDate || 0);
+        const dateB = new Date(b.bookingDate || 0);
+        return dateB - dateA;
       });
   
       setBookingHistory(bookings);
@@ -227,38 +252,61 @@ const ManagePartners = () => {
 
   const getFilteredBookings = (bookings) => {
     return bookings.filter(booking => {
-      const bookingDate = new Date(booking.bookingDetails.date);
-      const bookingAmount = parseFloat(booking.pricing.finalPrice);
-
-      if (dateRange.startDate && bookingDate < new Date(dateRange.startDate)) return false;
-      if (dateRange.endDate && bookingDate > new Date(dateRange.endDate)) return false;
+      // Safely handle dates and amounts with optional chaining and nullish coalescing
+      const bookingDate = booking?.bookingDate ? new Date(booking.bookingDate) : null;
+      const bookingAmount = parseFloat(booking?.amount || 0);
+  
+      // Date range filtering
+      if (dateRange.startDate && bookingDate && bookingDate < new Date(dateRange.startDate)) return false;
+      if (dateRange.endDate && bookingDate && bookingDate > new Date(dateRange.endDate)) return false;
+  
+      // Amount filtering
       if (minAmount && bookingAmount < parseFloat(minAmount)) return false;
       if (maxAmount && bookingAmount > parseFloat(maxAmount)) return false;
-
+  
       return true;
     });
   };
 
   const downloadExcel = (filteredBookings) => {
     const exportData = filteredBookings.map(booking => ({
-      'Date': new Date(booking.bookingDetails.date).toLocaleDateString(),
-      'Client Name': booking.clientDetails.name,
-      'Boat': booking.bookingDetails.boatName,
-      'Amount': `€${booking.pricing.finalPrice}`,
-      'Commission Rate': `${booking.commissionRate}%`,
-      'Commission Amount': `€${(booking.pricing.finalPrice * booking.commissionRate / 100).toFixed(2)}`
+      'Date': new Date(booking.bookingDate).toLocaleDateString(),
+      'Client Name': booking.clientName,
+      'Boat': booking.boatName,
+      'Amount': `€${booking.amount}`,
+      'First Payment': booking.firstPayment.received ? 
+        new Date(booking.firstPayment.date).toLocaleDateString() : 'Pending',
+      'Second Payment': booking.secondPayment.received ? 
+        new Date(booking.secondPayment.date).toLocaleDateString() : 'Pending',
+      'Commission Amount': `€${booking.commission.toFixed(2)}`,
+      'Commission Paid': booking.commissionPaid ? 'Yes' : 'No',
+      'Status': (booking.firstPayment.received && booking.secondPayment.received && booking.commissionPaid) ? 
+        'Complete' : 'Pending'
     }));
-
+  
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Bookings');
-
+    XLSX.utils.book_append_sheet(wb, ws, 'Partner Bookings');
+  
+    // Set column widths
+    ws['!cols'] = [
+      { wch: 12 }, // Date
+      { wch: 20 }, // Client Name
+      { wch: 20 }, // Boat
+      { wch: 12 }, // Amount
+      { wch: 15 }, // First Payment
+      { wch: 15 }, // Second Payment
+      { wch: 15 }, // Commission Amount
+      { wch: 15 }, // Commission Paid
+      { wch: 12 }  // Status
+    ];
+  
     let filename = `${selectedPartnerHistory.name}_bookings`;
     if (dateRange.startDate || dateRange.endDate) {
       filename += `_${dateRange.startDate || 'start'}_to_${dateRange.endDate || 'end'}`;
     }
     filename += '.xlsx';
-
+  
     XLSX.writeFile(wb, filename);
   };
 
@@ -356,35 +404,149 @@ const ManagePartners = () => {
             ) : filteredBookings.length === 0 ? (
               <p className="text-center text-gray-500">No bookings found matching the selected filters.</p>
             ) : (
-              <div className="space-y-4">
-                {filteredBookings.map((booking) => (
-                  <div 
-                    key={booking.id}
-                    className="border rounded-lg p-4 hover:bg-gray-50"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="font-semibold">{booking.clientDetails.name}</p>
-                        <p className="text-sm text-gray-600">
-                          Date: {new Date(booking.bookingDetails.date).toLocaleDateString()}
-                        </p>
-                        <p className="text-sm text-gray-600">
-                          Boat: {booking.bookingDetails.boatName}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-semibold">€{booking.pricing.finalPrice}</p>
-                        <p className="text-sm text-blue-600">
-                          Commission Rate: {booking.commissionRate}%
-                        </p>
-                        <p className="text-sm text-green-600">
-                          Commission: €{(booking.pricing.finalPrice * booking.commissionRate / 100).toFixed(2)}
-                        </p>
+              <table className="min-w-full divide-y divide-gray-200">
+  <thead className="bg-gray-50">
+    <tr>
+      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">Booking Details</th>
+      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/5">Payment Status</th>
+      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">Commission Details</th>
+    </tr>
+  </thead>
+  <tbody className="bg-white divide-y divide-gray-200">
+    {filteredBookings.map((booking) => (
+      <tr key={booking.id} className={`hover:bg-gray-50 ${booking.bothPaymentsReceived ? 'bg-green-50' : ''}`}>
+        <td className="px-4 py-4">
+          <div className="flex flex-col gap-1">
+            <div className="flex justify-between items-start">
+              <div className="font-medium text-lg">{booking.clientName}</div>
+              <div className="text-sm text-gray-500">ID: {booking.id.slice(-4)}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <span className="text-gray-500">Date:</span>
+                <span className="ml-2 font-medium">{new Date(booking.bookingDate).toLocaleDateString()}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Boat:</span>
+                <span className="ml-2 font-medium">{booking.boatName}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Price:</span>
+                <span className="ml-2 font-medium text-blue-600">€{booking.amount.toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Commission Rate:</span>
+                <span className="ml-2 font-medium text-purple-600">{booking.commissionRate}%</span>
+              </div>
+            </div>
+            <div className="mt-1 text-sm">
+              <span className="text-gray-500">Expected Commission:</span>
+              <span className="ml-2 font-medium text-green-600">€{(booking.amount * booking.commissionRate / 100).toLocaleString()}</span>
+            </div>
+          </div>
+        </td>
+
+        <td className="px-4 py-4">
+          <div className="flex flex-col gap-2">
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-md ${
+              booking.firstPayment.received ? 'bg-green-100' : 'bg-yellow-100'
+            }`}>
+              <span className={`text-sm font-medium ${
+                booking.firstPayment.received ? 'text-green-800' : 'text-yellow-800'
+              }`}>
+                First Payment: {booking.firstPayment.received ? '✓' : 'Pending'}
+              </span>
+              {booking.firstPayment.received && (
+                <span className="text-xs text-gray-600">
+                  {new Date(booking.firstPayment.date).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+            
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-md ${
+              booking.secondPayment.received ? 'bg-green-100' : 'bg-yellow-100'
+            }`}>
+              <span className={`text-sm font-medium ${
+                booking.secondPayment.received ? 'text-green-800' : 'text-yellow-800'
+              }`}>
+                Second Payment: {booking.secondPayment.received ? '✓' : 'Pending'}
+              </span>
+              {booking.secondPayment.received && (
+                <span className="text-xs text-gray-600">
+                  {new Date(booking.secondPayment.date).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+          </div>
+        </td>
+
+        <td className="px-4 py-4">
+          {booking.bothPaymentsReceived ? (
+            <div className="space-y-3">
+              {!booking.commissionPaid ? (
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="flex-1">
+                      <label className="block text-xs text-gray-500 mb-1">Enter Commission Amount</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          placeholder="Amount"
+                          className="w-32 px-3 py-2 text-sm border rounded-md focus:ring-2 focus:ring-blue-500"
+                          value={booking.commissionAmount || ''}
+                          onChange={async (e) => {
+                            const newAmount = parseFloat(e.target.value);
+                            const bookingRef = doc(db, 'bookings', booking.id);
+                            await updateDoc(bookingRef, {
+                              'ownerPayments.firstPayment.amount': newAmount
+                            });
+                            await loadPartnerHistory(selectedPartnerHistory.id, selectedPartnerHistory.name);
+                          }}
+                        />
+                        <span className="text-sm">€</span>
                       </div>
                     </div>
+                    <button
+                      onClick={async () => {
+                        if (!booking.commissionAmount) {
+                          alert('Please enter commission amount first');
+                          return;
+                        }
+                        const bookingRef = doc(db, 'bookings', booking.id);
+                        await updateDoc(bookingRef, {
+                          'ownerPayments.firstPayment.paid': true,
+                          'ownerPayments.firstPayment.date': new Date().toISOString()
+                        });
+                        await loadPartnerHistory(selectedPartnerHistory.id, selectedPartnerHistory.name);
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                    >
+                      Confirm Payment
+                    </button>
                   </div>
-                ))}
-              </div>
+                </div>
+              ) : (
+                <div className="bg-green-50 p-3 rounded-md">
+                  <div className="text-sm text-green-800 font-medium">Commission Paid</div>
+                  <div className="text-sm text-gray-600">Amount: €{booking.commissionAmount}</div>
+                  <div className="text-xs text-gray-500">
+                    Date: {new Date(booking.ownerPayments?.firstPayment?.date).toLocaleDateString()}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-yellow-50 p-3 rounded-md">
+              <span className="text-sm text-yellow-800">
+                Awaiting All Payments Before Commission
+              </span>
+            </div>
+          )}
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>
             )}
           </div>
         </div>
