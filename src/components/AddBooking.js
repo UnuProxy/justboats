@@ -47,6 +47,7 @@ const sendBookingConfirmationEmail = async (bookingData) => {
   }
 };
 
+
 function AddBooking() {
   const [activeStep, setActiveStep] = useState(1);
   const [loading, setLoading] = useState(false);
