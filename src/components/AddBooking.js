@@ -48,14 +48,7 @@ const sendBookingConfirmationEmail = async (bookingData) => {
 };
 
 
-    // Validate required fields before sending
-    if (!emailPayload.clientName || !emailPayload.clientEmail) {
-      console.error('Missing required fields:', { 
-        name: emailPayload.clientName, 
-        email: emailPayload.clientEmail 
-      });
-      return;
-    }
+   
 
 
 
