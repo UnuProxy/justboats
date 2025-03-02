@@ -1,4 +1,3 @@
-// AddBooking.js (React Component)
 
 import React, { useState, useEffect, useCallback } from "react";
 import { collection, query, where, addDoc, getDocs } from "firebase/firestore";
@@ -14,21 +13,29 @@ import { functions } from '../firebase/firebaseConfig';
 
 const sendBookingConfirmationEmail = async (bookingData) => {
   try {
-    const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
-    
-    // Ensure all required fields are present with proper values
-    const emailPayload = {
-      clientName: bookingData.clientDetails?.name || '',
-      clientEmail: bookingData.clientDetails?.email || '',
-      bookingDetails: {
-        boatName: bookingData.bookingDetails?.boatName || '',
-        date: bookingData.bookingDetails?.date || '',
-        startTime: bookingData.bookingDetails?.startTime || '',
-        endTime: bookingData.bookingDetails?.endTime || '',
-        passengers: bookingData.bookingDetails?.passengers?.toString() || '',
-        price: bookingData.pricing?.agreedPrice?.toString() || '0'
-      }
-    };
+
+     const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
+     // Ensure all required fields are present with proper values
+     const emailPayload = {
+         clientName: bookingData.clientDetails?.name || '',
+         clientEmail: bookingData.clientDetails?.email || '',
+         bookingDetails: {
+             boatName: bookingData.bookingDetails?.boatName || '',
+             date: bookingData.bookingDetails?.date || '',
+             startTime: bookingData.bookingDetails?.startTime || '',
+             endTime: bookingData.bookingDetails?.endTime || '',
+             passengers: bookingData.bookingDetails?.passengers?.toString() || '',
+             price: bookingData.pricing?.agreedPrice?.toString() || '0'
+         }
+     }; // Added missing closing brace here
+ 
+     // Rest of your function would continue here
+     // For example: await sendEmail(emailPayload);
+  } catch (error) {
+     // Error handling
+  }
+ };
+
 
     // Validate required fields before sending
     if (!emailPayload.clientName || !emailPayload.clientEmail) {
@@ -38,6 +45,7 @@ const sendBookingConfirmationEmail = async (bookingData) => {
       });
       return;
     }
+
 
 
 function AddBooking() {
