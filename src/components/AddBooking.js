@@ -39,14 +39,6 @@ const sendBookingConfirmationEmail = async (bookingData) => {
       return;
     }
 
-    console.log('Final email payload:', JSON.stringify(emailPayload, null, 2));
-    const result = await sendEmail(emailPayload);
-    console.log('Email send result:', result);
-  } catch (error) {
-    console.error('Error sending booking confirmation email:', error);
-  }
-};
-
 
 function AddBooking() {
   const [activeStep, setActiveStep] = useState(1);

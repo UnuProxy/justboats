@@ -20,7 +20,8 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 
 // Initialize functions with region
-const functions = getFunctions(app, 'us-central1');
+const functions = getFunctions(app);
+functions.region = "us-central1";
 
 // Connect to functions emulator when running locally
 if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
@@ -30,6 +31,7 @@ if (process.env.NODE_ENV === 'development' || window.location.hostname === 'loca
 
 export { auth, googleProvider, db, storage, functions };
 export default app;
+
 
   
   
