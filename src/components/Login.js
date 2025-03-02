@@ -1,13 +1,15 @@
+// Login.js
 import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { db } from '../firebase/firebaseConfig';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 const Login = () => {
-  const { loginWithGoogle, authError, user, userRole, loading } = useAuth();
+  const { loginWithGoogle, authError, user, userRole, loading, setAuthError } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Redirect based on user role once authenticated
     if (!loading && user && userRole) {
       if (userRole === 'admin') {
         navigate('/user-management');
@@ -17,12 +19,65 @@ const Login = () => {
     }
   }, [user, userRole, loading, navigate]);
 
-  const handleGoogleLogin = async () => {
-    await loginWithGoogle();
-    // Redirection is handled by useEffect
+  const updateUserActivity = async (userId, userData) => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      
+      await setDoc(userRef, {
+        ...userData,
+        lastLogin: serverTimestamp(),
+        lastActive: serverTimestamp(),
+        loginCount: (userData.loginCount || 0) + 1,
+        deviceInfo: {
+          userAgent: navigator.userAgent,
+          platform: navigator.platform,
+          language: navigator.language
+        },
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      console.log('User activity updated successfully');
+    } catch (error) {
+      console.error('Error updating user activity:', error);
+    }
   };
 
-  // Handle loading state for the login button
+  const handleGoogleLogin = async () => {
+    try {
+      const result = await loginWithGoogle();
+      
+      if (result.user) {
+        // Check if user exists in approvedUsers collection
+        const approvedUserDoc = await getDoc(doc(db, 'approvedUsers', result.user.email));
+        
+        if (approvedUserDoc.exists()) {
+          const approvedData = approvedUserDoc.data();
+          
+          // Prepare user data
+          const userData = {
+            email: result.user.email,
+            displayName: result.user.displayName,
+            photoURL: result.user.photoURL,
+            role: approvedData.role,
+            createdAt: new Date(),
+            // Track first login separately
+            firstLogin: serverTimestamp()
+          };
+
+          // Update user data and activity
+          await updateUserActivity(result.user.uid, userData);
+        } else {
+          // If user is not approved, delete their auth account
+          await result.user.delete();
+          throw new Error('Your account is not approved. Please contact an administrator.');
+        }
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setAuthError(error.message);
+    }
+  };
+
   const isLoginLoading = loading && !user;
 
   return (
@@ -36,7 +91,7 @@ const Login = () => {
             Please sign in to continue
           </p>
         </div>
-        
+
         {authError && (
           <div className="bg-red-50 border-l-4 border-red-400 p-4 my-4">
             <div className="flex">
