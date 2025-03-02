@@ -25,3 +25,6 @@ yarn-error.log*
 .codegpt
 firebase-debug.log
 functions/.runtimeconfig.json
+node_modules/
+functions/node_modules/
+functions/.env
