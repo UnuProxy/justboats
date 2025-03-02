@@ -26,6 +26,7 @@ const CheckboxGroup = ({ title, items, values, onChange }) => (
     </div>
 );
 
+
 const AddBoat = () => {
     const navigate = useNavigate();
     const { id } = useParams();
@@ -38,6 +39,7 @@ const AddBoat = () => {
 
     const initialBoatState = {
         // Basic Information
+        icalUrl: '',
         name: '',
         images: [],
         specs: '',
@@ -56,7 +58,8 @@ const AddBoat = () => {
             'Max Speed': '',
             Class: '',
             Engine: '',
-            HP: ''
+            HP: '',
+            Cabins: ''
         },
 
         // Seasonal Prices
@@ -334,49 +337,50 @@ const handleInputChange = (e, section = null) => {
                 throw error;
             }
         });
-
+    
         return Promise.all(uploadPromises);
     };
-
-     const handleSubmit = async (e) => {
+    
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
-
+    
         try {
-           const newImageUrls = await uploadImages(imageFiles.filter(file => typeof file !== 'string'));
-
             let finalImageUrls = [];
-
-             if (isEditing && boatData.images) {
-              // Preserve existing images and add new ones
-              const existingImageUrls = Array.isArray(boatData.images)
-                  ? boatData.images.filter(url => imagePreviews.includes(url))
-                : [];
-              finalImageUrls = [...existingImageUrls, ...newImageUrls];
-
-             } else {
-               finalImageUrls = newImageUrls;
-           }
-
-
+            
+            if (isEditing) {
+                // Keep existing URLs in the current order
+                const existingUrls = imageFiles
+                    .map(file => typeof file === 'string' ? file : null)
+                    .filter(url => url !== null);
+                finalImageUrls = existingUrls;
+            }
+    
+            // Upload new files
+            const newFiles = imageFiles.filter(file => typeof file !== 'string');
+            if (newFiles.length > 0) {
+                const newUrls = await uploadImages(newFiles);
+                finalImageUrls = [...finalImageUrls, ...newUrls];
+            }
+    
+            const boatDataToSave = {
+                ...boatData,
+                images: finalImageUrls,
+                updatedAt: new Date()
+            };
+    
             if (isEditing) {
                 const boatRef = doc(db, 'boats', id);
-                await updateDoc(boatRef, {
-                    ...boatData,
-                    images: finalImageUrls,
-                    updatedAt: new Date()
-                });
-                navigate('/boats');
+                await updateDoc(boatRef, boatDataToSave);
             } else {
                 const boatsRef = collection(db, 'boats');
                 await addDoc(boatsRef, {
-                    ...boatData,
-                    images: finalImageUrls,
+                    ...boatDataToSave,
                     createdAt: new Date()
                 });
-                navigate('/boats');
             }
+            navigate('/boats');
         } catch (err) {
             setError(err.message);
         } finally {
@@ -396,7 +400,8 @@ const handleInputChange = (e, section = null) => {
             'Max Speed': "e.g., 36 knots",
             Class: "e.g., Motoryacht",
             Engine: "e.g., 2 x MTU 12V 4000 M90",
-            HP: "e.g., 5,470"
+            HP: "e.g., 5,470",
+            Cabins: "e.g., 4 (2 Master, 2 Twin)"
         },
         seasonalPrices: {
             'May / October': "e.g., €11,000 per day",
@@ -462,12 +467,52 @@ const handleInputChange = (e, section = null) => {
                                     imagePreviews.length > 0 && (
                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
                                             {imagePreviews.map((preview, index) => (
-                                                <div key={index} className="relative group">
+                                                <div 
+                                                    key={index} 
+                                                    className="relative group cursor-move border-2 border-transparent hover:border-blue-500"
+                                                    draggable="true"
+                                                    onDragStart={(e) => {
+                                                        e.dataTransfer.setData('text/plain', index.toString());
+                                                    }}
+                                                    onDragOver={(e) => {
+                                                        e.preventDefault();
+                                                    }}
+                                                    onDrop={(e) => {
+                                                        e.preventDefault();
+                                                        const dragIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                                                        const dropIndex = index;
+                                                        
+                                                        if (dragIndex === dropIndex) return;
+                                    
+                                                        // Create new arrays with reordered items
+                                                        const newPreviews = [...imagePreviews];
+                                                        const newFiles = [...imageFiles];
+                                                        
+                                                        // Reorder the items
+                                                        const [movedPreview] = newPreviews.splice(dragIndex, 1);
+                                                        const [movedFile] = newFiles.splice(dragIndex, 1);
+                                                        
+                                                        newPreviews.splice(dropIndex, 0, movedPreview);
+                                                        newFiles.splice(dropIndex, 0, movedFile);
+                                                        
+                                                        // Update both states
+                                                        setImagePreviews(newPreviews);
+                                                        setImageFiles(newFiles);
+                                                    }}
+                                                >
                                                     <img
                                                         src={preview}
                                                         alt={`Preview ${index + 1}`}
                                                         className="w-full h-24 object-cover rounded-lg"
                                                     />
+                                                    {index === 0 && (
+                                                        <div className="absolute top-0 right-0 bg-green-500 text-white px-2 py-1 text-xs rounded-bl-lg">
+                                                            Main Image
+                                                        </div>
+                                                    )}
+                                                    <div className="absolute top-0 left-0 bg-black bg-opacity-50 text-white px-2 py-1 text-xs rounded-tl-lg">
+                                                        Position {index + 1}
+                                                    </div>
                                                     <button
                                                         type="button"
                                                         onClick={() => removeImage(index)}
@@ -500,19 +545,19 @@ const handleInputChange = (e, section = null) => {
                 <div className="space-y-4">
                     <h2 className="text-xl font-semibold">Detailed Specifications</h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {Object.keys(boatData.detailedSpecs).map(spec => (
-                            <div key={spec}>
-                                <label className="block text-sm font-medium text-gray-700">{spec}</label>
-                                <input
-                                    type="text"
-                                    name={spec}
-                                    value={boatData.detailedSpecs[spec]}
-                                    onChange={(e) => handleInputChange(e, 'detailedSpecs')}
-                                    placeholder={placeholders.specs[spec]}
-                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                />
-                            </div>
-                        ))}
+                    {Object.keys(boatData.detailedSpecs).map(spec => (
+                        <div key={spec}>
+                            <label className="block text-sm font-medium text-gray-700">{spec}</label>
+                            <input
+                                type="text"
+                                name={spec}
+                                value={boatData.detailedSpecs[spec]}
+                                onChange={(e) => handleInputChange(e, 'detailedSpecs')}
+                                placeholder={placeholders.specs[spec]}
+                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                            />
+                        </div>
+                    ))}
                     </div>
                 </div>
 
@@ -759,6 +804,26 @@ const handleInputChange = (e, section = null) => {
                 }
             }, 'additional.safety')}
     />
+</div>
+
+
+{/* iCal Calendar Integration */}
+<div className="space-y-4 border-b pb-6">
+    <h3 className="text-lg font-medium">Calendar Integration</h3>
+    <div>
+        <label className="block text-sm font-medium text-gray-700">iCal Calendar URL (Optional)</label>
+        <input
+            type="url"
+            name="icalUrl"
+            value={boatData.icalUrl || ''}
+            onChange={handleInputChange}
+            placeholder="https://example.com/calendar.ics"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+        />
+        <p className="mt-1 text-sm text-gray-500">
+            Add a calendar URL to sync boat availability
+        </p>
+    </div>
 </div>
 
                 <div className="flex justify-end space-x-4">
