@@ -1,4 +1,4 @@
-// functions/index.js
+
 
 // Import required dependencies from v2
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
