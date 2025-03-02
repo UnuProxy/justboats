@@ -13,7 +13,6 @@ import { functions } from '../firebase/firebaseConfig';
 
 const sendBookingConfirmationEmail = async (bookingData) => {
   try {
-
     const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
     
     // Ensure all required fields are present with proper values
