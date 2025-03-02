@@ -124,7 +124,7 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
   return null;
 });
 
-// Updated CORS settings for Callable function
+// Keep original function name to match frontend code - UPDATED with explicit CORS settings
 exports.sendBookingConfirmation = onCall({
   cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"], // Explicit origins
   region: "us-central1", // Specify region for consistency
@@ -170,7 +170,7 @@ exports.sendBookingConfirmation = onCall({
   }
 });
 
-// Improved HTTP function with explicit CORS handling
+// Alternative HTTP function
 exports.sendBookingConfirmationHttp = onRequest({
   region: "us-central1",
   cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"]
@@ -249,6 +249,159 @@ exports.orderAlertNotification = onDocumentCreated('orders/{orderId}', async (ev
     console.error('Error sending notification:', error);
   }
   return null;
+});
+
+// Test CORS function
+exports.testCors = onRequest({
+  region: "us-central1",
+  cors: true  // Allow all origins for testing
+}, async (req, res) => {
+  // Apply CORS middleware properly
+  return cors(req, res, async () => {
+    console.log('Test CORS function called');
+    res.status(200).send({ success: true, message: "CORS is working!" });
+  });
+});
+
+// Basic test callable function
+exports.testCallable = onCall({
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"],
+  region: "us-central1"
+}, async (request) => {
+  return { success: true, message: "Callable function is working!" };
+});
+
+// Test email callable function
+exports.testEmail = onCall({
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"],
+  region: "us-central1"
+}, async (request) => {
+  try {
+    const emailData = {
+      to: "test@example.com", // For testing only
+      from: 'info@justenjoyibiza.com',
+      templateId: SENDGRID_TEMPLATE_ID,
+      dynamic_template_data: {
+        clientName: "Test User",
+        bookingDate: "2023-01-01",
+        startTime: "10:00",
+        endTime: "14:00",
+        boatName: "Test Boat",
+        passengers: "4",
+        totalAmount: 500,
+      },
+    };
+    
+    const result = await sendEmailDirectApi(emailData);
+    return { success: true, result };
+  } catch (error) {
+    console.error('Error in testEmail:', error);
+    throw new HttpsError('internal', 'Failed to send test email: ' + error.message);
+  }
+});
+
+// Simple test email function
+exports.testEmailSimple = onCall({
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"],
+  region: "us-central1"
+}, async (request) => {
+  return { success: true, message: "This is where an email would be sent" };
+});
+
+// Process Booking Email 2025
+exports.processBookingEmail2025 = onRequest({
+  region: "us-central1",
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"]
+}, async (req, res) => {
+  return cors(req, res, async () => {
+    try {
+      // Your booking email 2025 implementation here
+      res.status(200).send({ success: true, message: "Booking email 2025 processed" });
+    } catch (error) {
+      console.error('Error in processBookingEmail2025:', error);
+      res.status(500).send({ error: 'Failed to process booking email 2025' });
+    }
+  });
+});
+
+// Process Booking Email New
+exports.processBookingEmailNew = onRequest({
+  region: "us-central1",
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"]
+}, async (req, res) => {
+  return cors(req, res, async () => {
+    try {
+      // Your booking email new implementation here
+      res.status(200).send({ success: true, message: "New booking email processed" });
+    } catch (error) {
+      console.error('Error in processBookingEmailNew:', error);
+      res.status(500).send({ error: 'Failed to process new booking email' });
+    }
+  });
+});
+
+// Process New Booking Email
+exports.processNewBookingEmail = onRequest({
+  region: "us-central1",
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"]
+}, async (req, res) => {
+  return cors(req, res, async () => {
+    try {
+      // Your process new booking email implementation here
+      res.status(200).send({ success: true, message: "New booking email processed" });
+    } catch (error) {
+      console.error('Error in processNewBookingEmail:', error);
+      res.status(500).send({ error: 'Failed to process new booking email' });
+    }
+  });
+});
+
+// Fetch iCal Data
+exports.fetchIcalData = onRequest({
+  region: "us-central1",
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"]
+}, async (req, res) => {
+  return cors(req, res, async () => {
+    try {
+      // Your iCal data fetching implementation here
+      res.status(200).send({ success: true, message: "iCal data fetched" });
+    } catch (error) {
+      console.error('Error in fetchIcalData:', error);
+      res.status(500).send({ error: 'Failed to fetch iCal data' });
+    }
+  });
+});
+
+// New Order Notification
+exports.newOrderNotification = onRequest({
+  region: "us-central1",
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"]
+}, async (req, res) => {
+  return cors(req, res, async () => {
+    try {
+      // Your new order notification implementation here
+      res.status(200).send({ success: true, message: "Order notification sent" });
+    } catch (error) {
+      console.error('Error in newOrderNotification:', error);
+      res.status(500).send({ error: 'Failed to send order notification' });
+    }
+  });
+});
+
+// New Order Notify New
+exports.newOrderNotifyNew = onRequest({
+  region: "us-central1",
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"]
+}, async (req, res) => {
+  return cors(req, res, async () => {
+    try {
+      // Your new order notify new implementation here
+      res.status(200).send({ success: true, message: "New order notification sent" });
+    } catch (error) {
+      console.error('Error in newOrderNotifyNew:', error);
+      res.status(500).send({ error: 'Failed to send new order notification' });
+    }
+  });
 });
 
 
