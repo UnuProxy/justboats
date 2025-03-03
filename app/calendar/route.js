@@ -2,89 +2,125 @@
 export const runtime = 'edge';
 
 /**
- * Edge function to fetch calendar data without CORS issues
+ * Reliable Edge function to fetch calendar data without CORS issues
  */
 export async function GET(request) {
-  // Get URL from query parameters
-  const { searchParams } = new URL(request.url);
-  const calendarUrl = searchParams.get('url');
-
-  if (!calendarUrl) {
-    return new Response(
-      JSON.stringify({ error: 'Missing url parameter' }),
-      {
-        status: 400,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        },
-      }
-    );
-  }
+  // Set CORS headers
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': '*',
+    'Content-Type': 'application/json'
+  };
 
   try {
-    // Fetch the calendar data from the provided URL
-    const response = await fetch(calendarUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)',
-        'Accept': 'text/calendar, text/plain, */*',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-      },
-    });
-
+    // Get URL from query parameters
+    const { searchParams } = new URL(request.url);
+    let calendarUrl = searchParams.get('url');
+    
+    // If no URL is provided, check for calendarId
+    if (!calendarUrl) {
+      const calendarId = searchParams.get('calendarId');
+      if (!calendarId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing url or calendarId parameter' }),
+          { status: 400, headers }
+        );
+      }
+      
+      // Create Google Calendar URL from ID
+      let encodedId = encodeURIComponent(calendarId);
+      calendarUrl = `https://calendar.google.com/calendar/ical/${encodedId}/public/basic.ics`;
+    }
+    
+    // Add cache-busting parameter if not already present
+    if (!calendarUrl.includes('nocache=')) {
+      const separator = calendarUrl.includes('?') ? '&' : '?';
+      calendarUrl = `${calendarUrl}${separator}nocache=${Date.now()}`;
+    }
+    
+    console.log(`Fetching calendar data from: ${calendarUrl}`);
+    
+    // Fetch the calendar data with multiple retries
+    let response = null;
+    let retries = 0;
+    const maxRetries = 3;
+    
+    while (retries < maxRetries) {
+      try {
+        response = await fetch(calendarUrl, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; BoatFinder/1.0)',
+            'Accept': 'text/calendar, text/plain, */*',
+            // Important: do NOT include Cache-Control here as it can trigger CORS preflight
+            // The cache-busting is handled via the URL parameter
+          },
+          redirect: 'follow',
+          cache: 'no-store' // Bypass browser cache
+        });
+        
+        if (response.ok) break;
+        
+        console.log(`Retry ${retries + 1}/${maxRetries} failed with status: ${response.status}`);
+        retries++;
+        
+        // Use exponential backoff for retries
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retries)));
+      } catch (fetchError) {
+        console.error(`Fetch attempt ${retries + 1} failed:`, fetchError);
+        retries++;
+        
+        if (retries >= maxRetries) throw fetchError;
+        
+        // Wait before retrying
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retries)));
+      }
+    }
+    
     if (!response.ok) {
       throw new Error(`Calendar fetch failed with status: ${response.status}`);
     }
 
     const calendarData = await response.text();
-
-    // Verify it's actual iCal data
-    if (!calendarData.includes('BEGIN:VCALENDAR') && 
-        !calendarData.includes('BEGIN:VEVENT') && 
-        !calendarData.includes('BEGIN:VFREEBUSY')) {
+    
+    // Verify it's actual iCal data using more flexible checking
+    const isCalendarData = 
+      calendarData.includes('BEGIN:VCALENDAR') || 
+      calendarData.includes('BEGIN:VEVENT') || 
+      calendarData.includes('BEGIN:VFREEBUSY');
+    
+    if (!isCalendarData) {
+      console.error('Invalid calendar data received:', calendarData.substring(0, 100) + '...');
       throw new Error('Invalid iCal data received');
     }
 
-    // Return the calendar data with proper CORS headers
     return new Response(
       JSON.stringify({ success: true, data: calendarData }),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-        },
-      }
+      { status: 200, headers }
     );
+    
   } catch (error) {
+    console.error('Calendar proxy error:', error);
+    
     return new Response(
-      JSON.stringify({ error: error.message }),
-      {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        },
-      }
+      JSON.stringify({ 
+        error: error.message,
+        details: 'Failed to fetch calendar data. Please ensure the calendar is public and correctly configured.'
+      }),
+      { status: 500, headers }
     );
   }
 }
 
-export async function OPTIONS(request) {
+export async function OPTIONS() {
   return new Response(null, {
     status: 204,
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '86400',
-    },
+      'Access-Control-Allow-Headers': '*',
+      'Access-Control-Max-Age': '86400'
+    }
   });
 }

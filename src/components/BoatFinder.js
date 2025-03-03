@@ -352,8 +352,7 @@ const BoatFinder = () => {
   const [forceRefresh, setForceRefresh] = useState(false);
 
   // Function to fetch boat availability
-  // Replace your current fetchBoatAvailability function with this version
-
+  // Updated fetchBoatAvailability function to use the improved API endpoint
 const fetchBoatAvailability = async (boat) => {
   if (!boat.icalUrl) {
     return;
@@ -362,28 +361,14 @@ const fetchBoatAvailability = async (boat) => {
   try {
     setCalendarLoading(prev => ({ ...prev, [boat.id]: true }));
     
-    // Extract calendar ID
+    // Extract calendar ID/URL
     const calendarId = extractCalendarId(boat.icalUrl);
     if (!calendarId) {
       throw new Error(`Could not extract valid calendar ID from URL: ${boat.icalUrl}`);
     }
 
-    // Determine calendar URL based on the format
-    let calendarUrl;
-    if (calendarId.startsWith('http') || calendarId.startsWith('https') || calendarId.startsWith('webcal')) {
-      calendarUrl = calendarId.replace('webcal://', 'https://');
-    } else if (calendarId.includes('@')) {
-      calendarUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
-    } else {
-      calendarUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
-    }
-
-    // Add anti-cache parameter
-    const antiCacheParam = `?nocache=${Date.now()}`;
-    const calendarUrlWithAntiCache = calendarUrl + antiCacheParam;
-
     // Skip cache when force refreshing
-    const cacheKey = btoa(calendarUrl);
+    const cacheKey = btoa(calendarId);
     const shouldUseCache = !forceRefresh;
     const cachedData = shouldUseCache ? getFromCache(cacheKey) : null;
     
@@ -401,373 +386,65 @@ const fetchBoatAvailability = async (boat) => {
     console.log(`Fetching calendar for ${boat.name} (${boat.id})`);
     
     const origin = window.location.origin;
-    let success = false;
-
-    // ==================================================
-    // Method 1: Try the Edge API route (app/api/calendar)
-    // ==================================================
-    if (!success) {
-      try {
-        const edgeApiUrl = `${origin}/api/calendar?url=${encodeURIComponent(calendarUrlWithAntiCache)}`;
-        
-        console.log(`Trying Edge API route: ${edgeApiUrl}`);
-        
-        const response = await fetch(edgeApiUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'Cache-Control': 'no-cache'
-          }
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Edge API returned ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.error) {
-          throw new Error(data.error);
-        }
-        
-        if (data.data) {
-          console.log(`Edge API success for ${boat.name}`);
-          const events = parseICalData(data.data);
-          
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: events
-          }));
-          
-          // Save to cache
-          if (!forceRefresh) {
-            saveToCache(cacheKey, data.data);
-          }
-          success = true;
-        }
-      } catch (edgeApiError) {
-        console.error(`Edge API route failed: ${edgeApiError.message}`);
-        // Continue to next method
-      }
+    let apiEndpoint = `${origin}/api/calendar`;
+    
+    // Determine if we should pass a direct URL or a Google Calendar ID
+    let apiParams;
+    if (calendarId.includes('@') && !calendarId.includes('://')) {
+      // This is likely a Google Calendar email ID
+      apiParams = `?calendarId=${encodeURIComponent(calendarId)}`;
+    } else if (calendarId.startsWith('http') || calendarId.startsWith('https') || calendarId.startsWith('webcal')) {
+      // This is a full URL
+      apiParams = `?url=${encodeURIComponent(calendarId.replace('webcal://', 'https://'))}`;
+    } else {
+      // Assume it's a Google Calendar ID
+      apiParams = `?calendarId=${encodeURIComponent(calendarId)}`;
     }
-
-    // ==================================================
-    // Method 2: Try your existing API route (pages/api/calendar.js)
-    // ==================================================
-    if (!success) {
-      try {
-        const existingApiUrl = `${origin}/api/calendar?url=${encodeURIComponent(calendarUrlWithAntiCache)}`;
-        
-        console.log(`Trying existing API route: ${existingApiUrl}`);
-        
-        const response = await fetch(existingApiUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'Cache-Control': 'no-cache'
-          }
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Existing API returned ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.error) {
-          throw new Error(data.error);
-        }
-        
-        if (data.data) {
-          console.log(`Existing API success for ${boat.name}`);
-          const events = parseICalData(data.data);
-          
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: events
-          }));
-          
-          // Save to cache
-          if (!forceRefresh) {
-            saveToCache(cacheKey, data.data);
-          }
-          success = true;
-        }
-      } catch (existingApiError) {
-        console.error(`Existing API route failed: ${existingApiError.message}`);
-        // Continue to next method
-      }
+    
+    // Add nocache parameter
+    apiParams += `&nocache=${Date.now()}`;
+    
+    const apiUrl = apiEndpoint + apiParams;
+    console.log(`Calling API at: ${apiUrl}`);
+    
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      },
+      cache: 'no-store' // Bypass browser cache
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API returned status ${response.status}: ${errorText}`);
     }
-
-    // ==================================================
-    // Method 3: Try your Google Calendar proxy for Google calendars
-    // ==================================================
-    if (!success && calendarUrl.includes('calendar.google.com')) {
-      try {
-        // Extract email or calendar ID from Google Calendar URL
-        let googleCalendarId = calendarId;
-        if (googleCalendarId.includes('calendar/ical/')) {
-          googleCalendarId = googleCalendarId.split('calendar/ical/')[1].split('/')[0];
-        }
-        
-        const googleProxyUrl = `${origin}/api/google-calendar-proxy?calendarId=${encodeURIComponent(googleCalendarId)}`;
-        
-        console.log(`Trying Google Calendar proxy: ${googleProxyUrl}`);
-        
-        const response = await fetch(googleProxyUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'text/calendar, application/json',
-            'Cache-Control': 'no-cache'
-          }
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Google Calendar proxy returned ${response.status}`);
-        }
-        
-        // Check response type to handle both JSON and direct calendar data
-        const contentType = response.headers.get('content-type');
-        let icalData;
-        
-        if (contentType && contentType.includes('application/json')) {
-          const data = await response.json();
-          if (data.error) {
-            throw new Error(data.error);
-          }
-          icalData = data.data || data;
-        } else {
-          icalData = await response.text();
-        }
-        
-        if (icalData && (icalData.includes('BEGIN:VCALENDAR') || icalData.includes('BEGIN:VEVENT'))) {
-          console.log(`Google Calendar proxy success for ${boat.name}`);
-          const events = parseICalData(icalData);
-          
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: events
-          }));
-          
-          // Save to cache
-          if (!forceRefresh) {
-            saveToCache(cacheKey, icalData);
-          }
-          success = true;
-        }
-      } catch (googleProxyError) {
-        console.error(`Google Calendar proxy failed: ${googleProxyError.message}`);
-        // Continue to next method
-      }
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      throw new Error(data.error);
     }
-
-    // ==================================================
-    // Method 4: Try your general iCal proxy
-    // ==================================================
-    if (!success) {
-      try {
-        const icalProxyUrl = `${origin}/api/ical-proxy?url=${encodeURIComponent(calendarUrlWithAntiCache)}`;
-        
-        console.log(`Trying iCal proxy: ${icalProxyUrl}`);
-        
-        const response = await fetch(icalProxyUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'text/calendar, application/json',
-            'Cache-Control': 'no-cache'
-          }
-        });
-        
-        if (!response.ok) {
-          throw new Error(`iCal proxy returned ${response.status}`);
-        }
-        
-        // Check response type to handle both JSON and direct calendar data
-        const contentType = response.headers.get('content-type');
-        let icalData;
-        
-        if (contentType && contentType.includes('application/json')) {
-          const data = await response.json();
-          if (data.error) {
-            throw new Error(data.error);
-          }
-          icalData = data.data || data;
-        } else {
-          icalData = await response.text();
-        }
-        
-        if (icalData && (icalData.includes('BEGIN:VCALENDAR') || icalData.includes('BEGIN:VEVENT'))) {
-          console.log(`iCal proxy success for ${boat.name}`);
-          const events = parseICalData(icalData);
-          
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: events
-          }));
-          
-          // Save to cache
-          if (!forceRefresh) {
-            saveToCache(cacheKey, icalData);
-          }
-          success = true;
-        }
-      } catch (icalProxyError) {
-        console.error(`iCal proxy failed: ${icalProxyError.message}`);
-        // Continue to next method
-      }
+    
+    if (!data.data) {
+      throw new Error('No calendar data received from API');
     }
-
-    // ==================================================
-    // Method 5: Try your simple proxy as a last resort
-    // ==================================================
-    if (!success) {
-      try {
-        const simpleProxyUrl = `${origin}/api/proxy?url=${encodeURIComponent(calendarUrlWithAntiCache)}`;
-        
-        console.log(`Trying simple proxy: ${simpleProxyUrl}`);
-        
-        const response = await fetch(simpleProxyUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'text/calendar, application/json',
-            'Cache-Control': 'no-cache'
-          }
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Simple proxy returned ${response.status}`);
-        }
-        
-        // Check response type to handle both JSON and direct calendar data
-        const contentType = response.headers.get('content-type');
-        let icalData;
-        
-        if (contentType && contentType.includes('application/json')) {
-          const data = await response.json();
-          if (data.error) {
-            throw new Error(data.error);
-          }
-          icalData = data.data || data;
-        } else {
-          icalData = await response.text();
-        }
-        
-        if (icalData && (icalData.includes('BEGIN:VCALENDAR') || icalData.includes('BEGIN:VEVENT'))) {
-          console.log(`Simple proxy success for ${boat.name}`);
-          const events = parseICalData(icalData);
-          
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: events
-          }));
-          
-          // Save to cache
-          if (!forceRefresh) {
-            saveToCache(cacheKey, icalData);
-          }
-          success = true;
-        }
-      } catch (simpleProxyError) {
-        console.error(`Simple proxy failed: ${simpleProxyError.message}`);
-        // Continue to next method
-      }
+    
+    console.log(`Successfully fetched calendar data for ${boat.name}`);
+    const events = parseICalData(data.data);
+    
+    setAvailabilityData(prev => ({
+      ...prev,
+      [boat.id]: events
+    }));
+    
+    // Save to cache
+    if (!forceRefresh) {
+      saveToCache(cacheKey, data.data);
     }
-
-    // ==================================================
-    // Method 6: Try external CORS proxies as a last resort
-    // ==================================================
-    if (!success) {
-      // Try each proxy in order until one works
-      for (let i = 0; i < CORS_PROXIES.length; i++) {
-        if (success) break;
-        
-        const proxyIndex = (currentProxyIndex + i) % CORS_PROXIES.length;
-        const proxy = CORS_PROXIES[proxyIndex];
-        
-        try {
-          console.log(`Trying external proxy ${proxy} for boat ${boat.name}`);
-          
-          const response = await fetch(`${proxy}${encodeURIComponent(calendarUrlWithAntiCache)}`, {
-            method: 'GET',
-            headers: {
-              'Origin': window.location.origin,
-              'Accept': 'text/calendar, text/plain, */*',
-              'X-Requested-With': 'XMLHttpRequest',
-              'Cache-Control': 'no-cache, no-store, must-revalidate'
-            },
-            cache: 'no-store'
-          });
-          
-          if (!response.ok) {
-            console.warn(`Proxy ${proxy} failed with status ${response.status}`);
-            continue;
-          }
-          
-          const icalData = await response.text();
-          
-          // Verify we got real iCal data, not an error page
-          if (!icalData.includes('BEGIN:VCALENDAR') && !icalData.includes('BEGIN:VEVENT')) {
-            console.warn(`Proxy ${proxy} returned invalid iCal data`);
-            continue;
-          }
-          
-          // Remember this successful proxy for next time
-          setCurrentProxyIndex(proxyIndex);
-          
-          // Add to cache for future use (if not force refreshing)
-          if (!forceRefresh) {
-            saveToCache(cacheKey, icalData);
-          }
-          
-          // Parse the calendar data
-          const events = parseICalData(icalData);
-          
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: events
-          }));
-          
-          success = true;
-          break;
-        } catch (proxyError) {
-          console.error(`Proxy ${proxy} failed: ${proxyError.message}`);
-          // Continue to next proxy
-        }
-      }
-    }
-
-    // ==================================================
-    // All methods failed, fall back to default availability
-    // ==================================================
-    if (!success) {
-      console.warn(`All fetch methods failed for boat ${boat.name}. Using default availability.`);
-      
-      if (DEFAULT_TO_AVAILABLE) {
-        // Assume available (empty array means no busy periods)
-        setAvailabilityData(prev => ({
-          ...prev,
-          [boat.id]: []
-        }));
-      } else {
-        // Assume busy (create a fake event that blocks the date range)
-        const today = new Date();
-        const endOfYear = new Date(today.getFullYear() + 1, 11, 31);
-        
-        const blockingEvent = [{
-          start: today,
-          end: endOfYear,
-          transparent: false,
-          note: "Calendar unavailable - assuming busy for safety"
-        }];
-        
-        setAvailabilityData(prev => ({
-          ...prev,
-          [boat.id]: blockingEvent
-        }));
-      }
-    }
+    
   } catch (error) {
-    console.error(`Calendar fetch completely failed for ${boat.name}: ${error.message}`);
+    console.error(`Calendar fetch failed for ${boat.name}: ${error.message}`);
     
     // Default to our chosen availability strategy
     if (DEFAULT_TO_AVAILABLE) {
