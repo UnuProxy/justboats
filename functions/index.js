@@ -126,7 +126,7 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
 
 // Keep original function name to match frontend code - UPDATED with explicit CORS settings
 exports.sendBookingConfirmation = onCall({
-  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"], // Explicit origins
+  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"], 
   region: "us-central1", // Specify region for consistency
   maxInstances: 10
 }, async (request) => {
