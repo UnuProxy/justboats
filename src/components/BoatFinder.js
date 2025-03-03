@@ -352,221 +352,174 @@ const BoatFinder = () => {
   const [forceRefresh, setForceRefresh] = useState(false);
 
   // Function to fetch boat availability
-  const fetchBoatAvailability = async (boat) => {
-    if (!boat.icalUrl) {
+  // Update the fetchBoatAvailability function to improve reliability
+
+const fetchBoatAvailability = async (boat) => {
+  if (!boat.icalUrl) {
+    return;
+  }
+  
+  try {
+    setCalendarLoading(prev => ({ ...prev, [boat.id]: true }));
+    
+    // Use the extractCalendarId helper function
+    const calendarId = extractCalendarId(boat.icalUrl);
+    if (!calendarId) {
+      throw new Error(`Could not extract valid calendar ID from URL: ${boat.icalUrl}`);
+    }
+
+    // Determine calendar URL based on the format
+    let calendarUrl;
+    if (calendarId.startsWith('http') || calendarId.startsWith('https') || calendarId.startsWith('webcal')) {
+      calendarUrl = calendarId.replace('webcal://', 'https://');
+    } else if (calendarId.includes('@')) {
+      calendarUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
+    } else {
+      calendarUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
+    }
+
+    // Add anti-cache parameter to always get fresh data
+    const antiCacheParam = `?nocache=${Date.now()}`;
+    const calendarUrlWithAntiCache = calendarUrl + antiCacheParam;
+
+    // Skip cache when force refreshing
+    const cacheKey = btoa(calendarUrl);
+    const shouldUseCache = !forceRefresh;
+    const cachedData = shouldUseCache ? getFromCache(cacheKey) : null;
+    
+    if (cachedData) {
+      const events = parseICalData(cachedData);
+      setAvailabilityData(prev => ({
+        ...prev,
+        [boat.id]: events
+      }));
       return;
     }
-    
-    try {
-      setCalendarLoading(prev => ({ ...prev, [boat.id]: true }));
-      
-      // Use the extractCalendarId helper function
-      const calendarId = extractCalendarId(boat.icalUrl);
-      if (!calendarId) {
-        throw new Error(`Could not extract valid calendar ID from URL: ${boat.icalUrl}`);
-      }
-  
-      // Determine calendar URL based on the format
-      let calendarUrl;
-      if (calendarId.startsWith('http') || calendarId.startsWith('https') || calendarId.startsWith('webcal')) {
-        calendarUrl = calendarId.replace('webcal://', 'https://');
-      } else if (calendarId.includes('@')) {
-        calendarUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
-      } else {
-        calendarUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
-      }
-  
-      // Add anti-cache parameter to always get fresh data
-      const antiCacheParam = `?nocache=${Date.now()}`;
-      const calendarUrlWithAntiCache = calendarUrl + antiCacheParam;
 
-      // Skip cache when force refreshing
-      const cacheKey = btoa(calendarUrl);
-      const shouldUseCache = !forceRefresh;
-      const cachedData = shouldUseCache ? getFromCache(cacheKey) : null;
+    // =====================================================
+    // IMPORTANT: Always use the server-side API route first
+    // =====================================================
+    try {
+      // Use absolute URL to ensure it works in both development and production
+      const origin = window.location.origin;
+      const backendUrl = `${origin}/api/calendar?url=${encodeURIComponent(calendarUrlWithAntiCache)}`;
       
-      if (cachedData) {
-        const events = parseICalData(cachedData);
+      const response = await fetch(backendUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
+        },
+        cache: 'no-store'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server API returned ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      if (data.data) {
+        const events = parseICalData(data.data);
+        
         setAvailabilityData(prev => ({
           ...prev,
           [boat.id]: events
         }));
+        
+        // Save to cache for future use (if not force refreshing)
+        if (!forceRefresh) {
+          saveToCache(cacheKey, data.data);
+        }
         return;
       }
-
-      // Try the API route first with anti-cache parameter
-      try {
-        const backendUrl = `/api/calendar?url=${encodeURIComponent(calendarUrlWithAntiCache)}`;
-        const response = await fetch(backendUrl);
-        
-        if (response.ok) {
-          try {
-            const data = await response.json();
-            
-            if (data.events) {
-              setAvailabilityData(prev => ({
-                ...prev,
-                [boat.id]: data.events || []
-              }));
-              
-              // Save to cache for future use (if not force refreshing)
-              if (!forceRefresh && data.data) {
-                saveToCache(cacheKey, data.data);
-              }
-              return;
-            } else if (data.data) {
-              const events = parseICalData(data.data);
-              
-              setAvailabilityData(prev => ({
-                ...prev,
-                [boat.id]: events
-              }));
-              
-              // Save to cache for future use (if not force refreshing)
-              if (!forceRefresh) {
-                saveToCache(cacheKey, data.data);
-              }
-              return;
-            }
-          } catch (jsonError) {
-            // Continue to fallback methods
-          }
-        }
-      } catch (apiError) {
-        // Continue to fallback methods
-      }
+    } catch (apiError) {
+      console.error(`API route failed: ${apiError.message}`);
+      // Continue to fallback methods
+    }
+    
+    // ===============================================
+    // If server API route fails, try CORS proxies
+    // ===============================================
+    let proxySuccess = false;
+    
+    // Try each proxy in order until one works
+    for (let i = 0; i < CORS_PROXIES.length; i++) {
+      if (proxySuccess) break;
       
-      // Try direct fetch with no-cors as a fallback
+      const proxyIndex = (currentProxyIndex + i) % CORS_PROXIES.length;
+      const proxy = CORS_PROXIES[proxyIndex];
+      
       try {
-        // Execute the fetch without storing the unused response
-        await fetch(calendarUrlWithAntiCache, {
+        console.log(`Trying proxy ${proxy} for boat ${boat.name}`);
+        
+        const response = await fetch(`${proxy}${encodeURIComponent(calendarUrlWithAntiCache)}`, {
           method: 'GET',
-          mode: 'no-cors',
-          cache: 'no-store',
           headers: {
+            'Origin': window.location.origin,
+            'Accept': 'text/calendar, text/plain, */*',
+            'X-Requested-With': 'XMLHttpRequest',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
-          }
+          },
+          cache: 'no-store'
         });
         
-        // Try CORS proxies next
-        let proxySuccess = false;
-        
-        // Try each proxy in order until one works
-        for (let i = 0; i < CORS_PROXIES.length; i++) {
-          if (proxySuccess) break;
-          
-          const proxyIndex = (currentProxyIndex + i) % CORS_PROXIES.length;
-          const proxy = CORS_PROXIES[proxyIndex];
-          
-          try {
-            const response = await fetch(`${proxy}${encodeURIComponent(calendarUrlWithAntiCache)}`, {
-              method: 'GET',
-              headers: {
-                'Origin': window.location.origin,
-                'Accept': 'text/calendar, text/plain, */*',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Cache-Control': 'no-cache, no-store, must-revalidate'
-              },
-              cache: 'no-store'
-            });
-            
-            if (!response.ok) {
-              continue;
-            }
-            
-            const icalData = await response.text();
-            
-            // Verify we got real iCal data, not an error page
-            if (!icalData.includes('BEGIN:VCALENDAR') && !icalData.includes('BEGIN:VEVENT')) {
-              continue;
-            }
-            
-            proxySuccess = true;
-            
-            // Remember this successful proxy for next time
-            setCurrentProxyIndex(proxyIndex);
-            
-            // Add to cache for future use (if not force refreshing)
-            if (!forceRefresh) {
-              saveToCache(cacheKey, icalData);
-            }
-            
-            // Parse the calendar data
-            const events = parseICalData(icalData);
-            
-            setAvailabilityData(prev => ({
-              ...prev,
-              [boat.id]: events
-            }));
-            
-            break;
-          } catch (proxyError) {
-            // Continue to next proxy
-          }
+        if (!response.ok) {
+          console.warn(`Proxy ${proxy} failed with status ${response.status}`);
+          continue;
         }
         
-        // If all proxies failed, set a default value based on our strategy
-        if (!proxySuccess) {
-          if (DEFAULT_TO_AVAILABLE) {
-            // Assume available (empty array means no busy periods)
-            setAvailabilityData(prev => ({
-              ...prev,
-              [boat.id]: []
-            }));
-          } else {
-            // Assume busy (create a fake event that blocks the date range)
-            const today = new Date();
-            const endOfYear = new Date(today.getFullYear() + 1, 11, 31); // One year from now
-            
-            const blockingEvent = [{
-              start: today,
-              end: endOfYear,
-              transparent: false,
-              note: "Calendar unavailable - assuming busy for safety"
-            }];
-            
-            setAvailabilityData(prev => ({
-              ...prev,
-              [boat.id]: blockingEvent
-            }));
-          }
+        const icalData = await response.text();
+        
+        // Verify we got real iCal data, not an error page
+        if (!icalData.includes('BEGIN:VCALENDAR') && !icalData.includes('BEGIN:VEVENT')) {
+          console.warn(`Proxy ${proxy} returned invalid iCal data`);
+          continue;
         }
-      } catch (directError) {
-        // Default to our chosen availability strategy
-        if (DEFAULT_TO_AVAILABLE) {
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: []
-          }));
-        } else {
-          // Create a blocking event for safety
-          const today = new Date();
-          const endOfYear = new Date(today.getFullYear() + 1, 11, 31);
-          
-          const blockingEvent = [{
-            start: today,
-            end: endOfYear,
-            transparent: false,
-            note: "Calendar unavailable - assuming busy for safety"
-          }];
-          
-          setAvailabilityData(prev => ({
-            ...prev,
-            [boat.id]: blockingEvent
-          }));
+        
+        proxySuccess = true;
+        
+        // Remember this successful proxy for next time
+        setCurrentProxyIndex(proxyIndex);
+        
+        // Add to cache for future use (if not force refreshing)
+        if (!forceRefresh) {
+          saveToCache(cacheKey, icalData);
         }
+        
+        // Parse the calendar data
+        const events = parseICalData(icalData);
+        
+        setAvailabilityData(prev => ({
+          ...prev,
+          [boat.id]: events
+        }));
+        
+        break;
+      } catch (proxyError) {
+        console.error(`Proxy ${proxy} failed: ${proxyError.message}`);
+        // Continue to next proxy
       }
-    } catch (error) {
-      // Default to our chosen availability strategy
+    }
+    
+    // If all proxies failed, set a default value based on our strategy
+    if (!proxySuccess) {
+      console.warn(`All proxies failed for boat ${boat.name}. Using default availability.`);
+      
       if (DEFAULT_TO_AVAILABLE) {
+        // Assume available (empty array means no busy periods)
         setAvailabilityData(prev => ({
           ...prev,
           [boat.id]: []
         }));
       } else {
-        // Create a blocking event for safety
+        // Assume busy (create a fake event that blocks the date range)
         const today = new Date();
-        const endOfYear = new Date(today.getFullYear() + 1, 11, 31);
+        const endOfYear = new Date(today.getFullYear() + 1, 11, 31); // One year from now
         
         const blockingEvent = [{
           start: today,
@@ -580,12 +533,39 @@ const BoatFinder = () => {
           [boat.id]: blockingEvent
         }));
       }
-      
-      setError(`Failed to fetch calendar for ${boat.name}: ${error.message}`);
-    } finally {
-      setCalendarLoading(prev => ({ ...prev, [boat.id]: false }));
     }
-  };
+  } catch (error) {
+    console.error(`Calendar fetch failed for ${boat.name}: ${error.message}`);
+    
+    // Default to our chosen availability strategy
+    if (DEFAULT_TO_AVAILABLE) {
+      setAvailabilityData(prev => ({
+        ...prev,
+        [boat.id]: []
+      }));
+    } else {
+      // Create a blocking event for safety
+      const today = new Date();
+      const endOfYear = new Date(today.getFullYear() + 1, 11, 31);
+      
+      const blockingEvent = [{
+        start: today,
+        end: endOfYear,
+        transparent: false,
+        note: "Calendar unavailable - assuming busy for safety"
+      }];
+      
+      setAvailabilityData(prev => ({
+        ...prev,
+        [boat.id]: blockingEvent
+      }));
+    }
+    
+    setError(`Failed to fetch calendar for ${boat.name}: ${error.message}`);
+  } finally {
+    setCalendarLoading(prev => ({ ...prev, [boat.id]: false }));
+  }
+};
 
   // Force Reload function
   const handleForceReload = async () => {
