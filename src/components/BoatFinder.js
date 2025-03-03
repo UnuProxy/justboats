@@ -352,7 +352,7 @@ const BoatFinder = () => {
   const [forceRefresh, setForceRefresh] = useState(false);
 
   // Function to fetch boat availability
-  // Updated fetchBoatAvailability function to use the improved API endpoint
+  // Updated fetchBoatAvailability function with better error handling
 const fetchBoatAvailability = async (boat) => {
   if (!boat.icalUrl) {
     return;
@@ -386,25 +386,11 @@ const fetchBoatAvailability = async (boat) => {
     console.log(`Fetching calendar for ${boat.name} (${boat.id})`);
     
     const origin = window.location.origin;
-    let apiEndpoint = `${origin}/api/calendar`;
     
-    // Determine if we should pass a direct URL or a Google Calendar ID
-    let apiParams;
-    if (calendarId.includes('@') && !calendarId.includes('://')) {
-      // This is likely a Google Calendar email ID
-      apiParams = `?calendarId=${encodeURIComponent(calendarId)}`;
-    } else if (calendarId.startsWith('http') || calendarId.startsWith('https') || calendarId.startsWith('webcal')) {
-      // This is a full URL
-      apiParams = `?url=${encodeURIComponent(calendarId.replace('webcal://', 'https://'))}`;
-    } else {
-      // Assume it's a Google Calendar ID
-      apiParams = `?calendarId=${encodeURIComponent(calendarId)}`;
-    }
+    // IMPORTANT: Use the pages/api route (which is definitely deployed)
+    // instead of the app/api route (which might not be properly deployed yet)
+    const apiUrl = `${origin}/api/calendar?calendarId=${encodeURIComponent(calendarId)}&nocache=${Date.now()}`;
     
-    // Add nocache parameter
-    apiParams += `&nocache=${Date.now()}`;
-    
-    const apiUrl = apiEndpoint + apiParams;
     console.log(`Calling API at: ${apiUrl}`);
     
     const response = await fetch(apiUrl, {
@@ -415,12 +401,29 @@ const fetchBoatAvailability = async (boat) => {
       cache: 'no-store' // Bypass browser cache
     });
     
+    // Check if response is OK first
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API returned status ${response.status}: ${errorText}`);
+      let errorDetail = '';
+      try {
+        // Try to get error details if available
+        const errorText = await response.text();
+        errorDetail = errorText.length < 100 ? 
+          errorText : 
+          errorText.substring(0, 100) + '...';
+      } catch (e) {
+        // Ignore errors while getting error details
+      }
+      
+      throw new Error(`API returned status ${response.status}${errorDetail ? ': ' + errorDetail : ''}`);
     }
     
-    const data = await response.json();
+    // Now safely try to parse the JSON
+    let data;
+    try {
+      data = await response.json();
+    } catch (jsonError) {
+      throw new Error(`Failed to parse API response as JSON: ${jsonError.message}`);
+    }
     
     if (data.error) {
       throw new Error(data.error);
