@@ -13,7 +13,12 @@ import { functions } from '../firebase/firebaseConfig';
 
 const sendBookingConfirmationEmail = async (bookingData) => {
   try {
-    const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
+    console.log('Starting email send process with data:', {
+      client: bookingData.clientDetails?.name,
+      email: bookingData.clientDetails?.email,
+      boat: bookingData.bookingDetails?.boatName,
+      date: bookingData.bookingDetails?.date
+    });
     
     // Ensure all required fields are present with proper values
     const emailPayload = {
@@ -35,14 +40,58 @@ const sendBookingConfirmationEmail = async (bookingData) => {
         name: emailPayload.clientName, 
         email: emailPayload.clientEmail 
       });
-      return;
+      return false;
     }
 
-    // Send the email if validation passes
-    await sendEmail(emailPayload);
-
+    // Try to use the callable function first
+    try {
+      console.log('Attempting to send email using callable function');
+      const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
+      const result = await sendEmail(emailPayload);
+      console.log('Email sent successfully via callable function:', result.data);
+      return true;
+    } catch (callableError) {
+      console.error('Error sending email via callable function:', callableError);
+      
+      // Try HTTP fallback if callable fails
+      try {
+        console.log('Falling back to HTTP function for email');
+        const response = await fetch('https://sendbookingconfirmationhttp-xwscel2gqa-uc.a.run.app', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Origin': window.location.origin
+          },
+          body: JSON.stringify(emailPayload)
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(`HTTP function failed with status ${response.status}: ${JSON.stringify(errorData)}`);
+        }
+        
+        console.log('Email sent successfully via HTTP function');
+        return true;
+      } catch (httpError) {
+        console.error('HTTP function failed:', httpError);
+        console.log('All email sending methods failed');
+        
+        // Store this failed email for later retry if needed
+        try {
+          sessionStorage.setItem('failedEmail', JSON.stringify({
+            timestamp: new Date().toISOString(),
+            payload: emailPayload
+          }));
+        } catch (storageError) {
+          console.error('Could not store failed email details:', storageError);
+        }
+        
+        return false;
+      }
+    }
   } catch (error) {
-    console.error('Error sending booking confirmation email:', error);
+    console.error('Unexpected error in sendBookingConfirmationEmail:', error);
+    return false;
   }
 };
 
@@ -1036,8 +1085,8 @@ if (typeof value === 'string' &&
 
         // Create booking document
         const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
-console.log('About to send email with data:', bookingData);  // Add this line
-await sendBookingConfirmationEmail(bookingData);
+        console.log('About to send email with data:', bookingData);  // Add this line
+        await sendBookingConfirmationEmail(bookingData);
         // Add booking notification
         await createBookingNotification(
             formData.clientDetails.name,
