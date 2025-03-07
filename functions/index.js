@@ -22,22 +22,14 @@ const SENDGRID_TEMPLATE_ID = 'd-a0536d03f0c74ef2b52e722e8b26ef4e';
 
 // Get API key from environment - DO NOT hardcode in the file
 function getApiKey() {
-  // Try Firebase config first (v1 style)
-  if (functions.config && functions.config().sendgrid && functions.config().sendgrid.key) {
-    return functions.config().sendgrid.key;
-  }
-  
-  // Next try v2 params
-  if (functions.params && functions.params.sendgrid && functions.params.sendgrid.key) {
-    return functions.params.sendgrid.key;
-  }
-  
-  // Finally try process.env 
+  // In v2, we should use process.env directly
   const key = process.env.SENDGRID_API_KEY;
+  
   if (!key) {
     console.error('SendGrid API key not found in environment variables');
-    return null;
+    throw new Error('SendGrid API key is not configured');
   }
+  
   return key;
 }
 
@@ -178,19 +170,22 @@ exports.sendBookingConfirmation = onCall({
 });
 
 // UPDATED HTTP function with improved CORS handling
+// Fixed HTTP function with proper CORS headers
 exports.sendBookingConfirmationHttp = onRequest({
-  region: "us-central1",
-  cors: {
-    origin: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"],
-    methods: ["GET", "POST", "OPTIONS"],
-    credentials: true
-  }
+  region: "us-central1"
 }, async (req, res) => {
-  // Set CORS headers manually for preflight requests
-  res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.set('Access-Control-Max-Age', '3600');
+  // Set CORS headers manually for all requests
+  const allowedOrigins = ['https://justboats.vercel.app', 'https://justenjoyibizaboats.com'];
+  const origin = req.headers.origin;
+  
+  // Check if the origin is in our allowed list
+  if (allowedOrigins.includes(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Access-Control-Max-Age', '3600');
+  }
   
   // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {

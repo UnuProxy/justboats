@@ -38,36 +38,56 @@ const sendBookingConfirmationEmail = async (bookingData) => {
 
     console.log('About to send email with data:', emailPayload);
 
-    try {
-      // Try using the callable function first
-      const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
-      await sendEmail(emailPayload);
-      console.log('Email sent successfully via callable function');
-      return;
-    } catch (callableError) {
-      // If callable function fails, log the error and try the HTTP function
-      console.warn('Callable function failed, trying HTTP function:', callableError);
-      
-      // Use the HTTP function as fallback
-      const response = await fetch('https://us-central1-crm-boats.cloudfunctions.net/sendBookingConfirmationHttp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(emailPayload),
-        credentials: 'include' // Include credentials for CORS
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP function failed with status ${response.status}: ${errorText}`);
+    // First try: Use the callable function approach
+    const sendEmailViaCallable = async () => {
+      try {
+        const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
+        const result = await sendEmail(emailPayload);
+        console.log('Email sent successfully via callable function', result);
+        return true;
+      } catch (error) {
+        console.warn('Callable function failed:', error);
+        return false;
       }
+    };
 
-      const result = await response.json();
-      console.log('Email sent successfully via HTTP function:', result);
+    // Second try: Use the HTTP function approach
+    const sendEmailViaHttp = async () => {
+      try {
+        console.log('Falling back to HTTP function for email');
+        const response = await fetch('https://us-central1-crm-boats.cloudfunctions.net/sendBookingConfirmationHttp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(emailPayload),
+          credentials: 'same-origin'
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP function failed with status ${response.status}: ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('Email sent successfully via HTTP function:', result);
+        return true;
+      } catch (error) {
+        console.error('HTTP function failed:', error);
+        return false;
+      }
+    };
+
+    // Try callable function first, then fall back to HTTP
+    const callableSuccess = await sendEmailViaCallable();
+    if (!callableSuccess) {
+      const httpSuccess = await sendEmailViaHttp();
+      if (!httpSuccess) {
+        console.error('All email sending methods failed');
+      }
     }
   } catch (error) {
-    console.error('Error sending booking confirmation email:', error);
+    console.error('Error in email sending process:', error);
   }
 };
 
