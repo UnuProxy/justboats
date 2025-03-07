@@ -13,9 +13,7 @@ import { functions } from '../firebase/firebaseConfig';
 
 const sendBookingConfirmationEmail = async (bookingData) => {
   try {
-    const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
-    
-    // Ensure all required fields are present with proper values
+    // Prepare email payload
     const emailPayload = {
       clientName: bookingData.clientDetails?.name || '',
       clientEmail: bookingData.clientDetails?.email || '',
@@ -38,17 +36,40 @@ const sendBookingConfirmationEmail = async (bookingData) => {
       return;
     }
 
-    // Send the email if validation passes
-    await sendEmail(emailPayload);
+    console.log('About to send email with data:', emailPayload);
 
+    try {
+      // Try using the callable function first
+      const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
+      await sendEmail(emailPayload);
+      console.log('Email sent successfully via callable function');
+      return;
+    } catch (callableError) {
+      // If callable function fails, log the error and try the HTTP function
+      console.warn('Callable function failed, trying HTTP function:', callableError);
+      
+      // Use the HTTP function as fallback
+      const response = await fetch('https://us-central1-crm-boats.cloudfunctions.net/sendBookingConfirmationHttp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(emailPayload),
+        credentials: 'include' // Include credentials for CORS
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP function failed with status ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('Email sent successfully via HTTP function:', result);
+    }
   } catch (error) {
     console.error('Error sending booking confirmation email:', error);
   }
 };
-
-
-   
-
 
 
 function AddBooking() {

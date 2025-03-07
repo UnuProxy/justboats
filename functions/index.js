@@ -124,11 +124,18 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
   return null;
 });
 
-// Keep original function name to match frontend code - UPDATED with explicit CORS settings
+// UPDATED Callable function with improved CORS settings
 exports.sendBookingConfirmation = onCall({
-  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"], 
-  region: "us-central1", // Specify region for consistency
-  maxInstances: 10
+  cors: {
+    origin: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"],
+    methods: ["POST"],
+    maxAge: 3600,
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+  },
+  region: "us-central1",
+  maxInstances: 10,
+  timeoutSeconds: 60 // Add timeout to ensure function has enough time
 }, async (request) => {
   // Log auth context for debugging
   if (request.auth) {
@@ -170,50 +177,63 @@ exports.sendBookingConfirmation = onCall({
   }
 });
 
-// Alternative HTTP function
+// UPDATED HTTP function with improved CORS handling
 exports.sendBookingConfirmationHttp = onRequest({
   region: "us-central1",
-  cors: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"]
+  cors: {
+    origin: ["https://justboats.vercel.app", "https://justenjoyibizaboats.com"],
+    methods: ["GET", "POST", "OPTIONS"],
+    credentials: true
+  }
 }, async (req, res) => {
-  // Apply CORS middleware properly
-  return cors(req, res, async () => {
-    // Only allow POST method
-    if (req.method !== 'POST') {
-      res.status(405).send('Method Not Allowed');
+  // Set CORS headers manually for preflight requests
+  res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Max-Age', '3600');
+  
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
+  // Only allow POST method for actual requests
+  if (req.method !== 'POST') {
+    res.status(405).send({error: 'Method Not Allowed'});
+    return;
+  }
+
+  try {
+    const data = req.body;
+    console.log('Received data in HTTP Function:', data);
+
+    if (!data?.clientName || !data?.clientEmail) {
+      res.status(400).send({error: 'Missing required client details'});
       return;
     }
 
-    try {
-      const data = req.body;
-      console.log('Received data in HTTP Function:', data);
+    const emailData = {
+      to: data.clientEmail,
+      from: 'info@justenjoyibiza.com',
+      templateId: SENDGRID_TEMPLATE_ID,
+      dynamic_template_data: {
+        clientName: data.clientName,
+        bookingDate: data.bookingDetails?.date || 'N/A',
+        startTime: data.bookingDetails?.startTime || 'N/A',
+        endTime: data.bookingDetails?.endTime || 'N/A',
+        boatName: data.bookingDetails?.boatName || 'N/A',
+        passengers: data.bookingDetails?.passengers || 'N/A',
+        totalAmount: data.bookingDetails?.price || 0,
+      },
+    };
 
-      if (!data?.clientName || !data?.clientEmail) {
-        res.status(400).send({ error: 'Missing required client details' });
-        return;
-      }
-
-      const emailData = {
-        to: data.clientEmail,
-        from: 'info@justenjoyibiza.com',
-        templateId: SENDGRID_TEMPLATE_ID,
-        dynamic_template_data: {
-          clientName: data.clientName,
-          bookingDate: data.bookingDetails?.date || 'N/A',
-          startTime: data.bookingDetails?.startTime || 'N/A',
-          endTime: data.bookingDetails?.endTime || 'N/A',
-          boatName: data.bookingDetails?.boatName || 'N/A',
-          passengers: data.bookingDetails?.passengers || 'N/A',
-          totalAmount: data.bookingDetails?.price || 0,
-        },
-      };
-
-      await sendEmailDirectApi(emailData);
-      res.status(200).send({ success: true });
-    } catch (error) {
-      console.error('Error in sendBookingConfirmationHttp:', error);
-      res.status(500).send({ error: 'Failed to send email: ' + error.message });
-    }
-  });
+    await sendEmailDirectApi(emailData);
+    res.status(200).send({success: true});
+  } catch (error) {
+    console.error('Error in sendBookingConfirmationHttp:', error);
+    res.status(500).send({error: 'Failed to send email: ' + error.message});
+  }
 });
 
 // New function name for order notification to avoid conflicts
