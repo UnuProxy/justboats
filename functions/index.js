@@ -34,12 +34,6 @@ function getApiKey() {
     return functions.params.sendgrid.key;
   }
   
-  // Next try Firebase config v1 style (legacy)
-  if (functions.config && functions.config().sendgrid && functions.config().sendgrid.key) {
-    console.log('Using SendGrid API key from Firebase config v1');
-    return functions.config().sendgrid.key;
-  }
-  
   // Finally try process.env (for secrets or .env file)
   const key = process.env.SENDGRID_API_KEY;
   if (key) {
