@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
     Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3,
     User, Wallet, CreditCard, Euro, Ship, MessageSquare,
-    Settings, Building, ChevronDown, ChevronUp, Utensils, Package, Box, ShoppingCart, FileText
+    Settings, Building, ChevronDown, ChevronUp, Utensils, Package, Box, ShoppingCart, FileText,
+    Star, StarOff
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -14,6 +15,13 @@ const Sidebar = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const [expandedGroup, setExpandedGroup] = useState(null);
+    
+    // User-specific favorites with unique storage key
+    const favoritesStorageKey = `favorites_${user?.uid || 'guest'}`;
+    const [favorites, setFavorites] = useState(() => {
+        const savedFavorites = localStorage.getItem(favoritesStorageKey);
+        return savedFavorites ? JSON.parse(savedFavorites) : [];
+    });
 
     useEffect(() => {
         const handleResize = () => {
@@ -26,6 +34,11 @@ const Sidebar = () => {
         handleResize();
         return () => window.removeEventListener('resize', handleResize);
     }, []);
+    
+    // Save favorites to localStorage when they change
+    useEffect(() => {
+        localStorage.setItem(favoritesStorageKey, JSON.stringify(favorites));
+    }, [favorites, favoritesStorageKey]);
 
     const toggleSidebar = () => setIsOpen(!isOpen);
     const toggleGroup = (group) => {
@@ -47,172 +60,235 @@ const Sidebar = () => {
             console.error('Logout failed:', error);
         }
     };
+    
+    // Favorite functions
+    const addToFavorites = (item) => {
+        if (!favorites.some(fav => fav.path === item.path)) {
+            setFavorites([...favorites, item]);
+        }
+    };
+    
+    const removeFromFavorites = (path) => {
+        setFavorites(favorites.filter(item => item.path !== path));
+    };
+    
+    const isFavorite = (path) => {
+        return favorites.some(item => item.path === path);
+    };
 
+    // Basic navigation for regular users
     const navigationGroups = [
         {
             id: 'bookings',
-            title: "Bookings & Calendar",
+            title: "Trips & Tours",
             icon: Calendar,
             items: [
-                {
-                    name: 'Add New Booking',
-                    icon: PlusCircle,
-                    path: '/add-booking',
-                    allowed: true
-                },
                 {
                     name: 'Upcoming Bookings',
                     icon: Calendar,
                     path: '/bookings',
                     allowed: true
-                }
-            ]
-        },
-        {
-            id: 'fleet',
-            title: "Boats",
-            icon: Ship,
-            items: [
+                },
                 {
-                    name: 'Boat Fleet',
+                    name: 'San Antonio Tours',
                     icon: Ship,
-                    path: '/boats',
+                    path: '/san-antonio-tours',
                     allowed: true
-                },
-                {
-                    name: 'Available Boats',
-                    icon: Ship,
-                    path: '/available-boats',
-                    allowed: true
-                },
-            ]
-        },
-        {
-            id: 'customers',
-            title: "Customer Relations",
-            icon: Users,
-            items: [
-                {
-                    name: 'Client Directory',
-                    icon: Users,
-                    path: '/clients',
-                    allowed: true
-                },
-                {
-                    name: 'Manage Partners',
-                    icon: Building,
-                    path: '/manage-partners',
-                    allowed: isAdmin()
-                }
-            ]
-        },
-        {
-            id: 'support',
-            title: "Customer Support",
-            icon: MessageSquare,
-            items: [
-                {
-                    name: 'Inquiries & Leads',
-                    icon: MessageSquare,
-                    path: '/inquiries',
-                    allowed: true
-                },
-                {
-                    name: 'Chatbot Conversations',
-                    icon: MessageSquare,
-                    path: '/chatbot-settings',
-                    allowed: isAdmin()
-                }
-            ]
-        },
-        {
-            id: 'catering',
-            title: "Food & Beverages",
-            icon: Utensils,
-            items: [
-                {
-                    name: 'Add Product',
-                    icon: PlusCircle,
-                    path: '/add-product',
-                    allowed: isAdmin()
-                },
-                {
-                    name: 'Products List',
-                    icon: Package,
-                    path: '/products',
-                    allowed: isAdmin()
-                },
-                {
-                    name: 'Packages',
-                    icon: Box,
-                    path: '/packages',
-                    allowed: isAdmin()
-                },
-                {
-                    name: 'Orders',
-                    icon: ShoppingCart,
-                    path: '/catering-orders',
-                    allowed: true
-                }
-            ]
-        },
-        {
-            id: 'financial',
-            title: "Finance & Payments",
-            icon: Euro,
-            items: [
-                {
-                    name: 'Payment Tracking',
-                    icon: CreditCard,
-                    path: '/payment-tracking',
-                    allowed: true
-                },
-                {
-                    name: 'Invoice',
-                    icon: FileText, 
-                    path: '/invoice-generator',
-                    allowed: true
-                },
-                {
-                    name: 'Add Expense',
-                    icon: Wallet,
-                    path: '/add-expense',
-                    allowed: true
-                },
-                {
-                    name: 'Expenses Overview',
-                    icon: Euro,
-                    path: '/expenses',
-                    allowed: true
-                }
-            ]
-        },
-        {
-            id: 'admin',
-            title: "Administration",
-            icon: Settings,
-            items: [
-                {
-                    name: 'Analytics Dashboard',
-                    icon: BarChart3,
-                    path: '/analytics',
-                    allowed: isAdmin()
-                },
-                {
-                    name: 'User Management',
-                    icon: User,
-                    path: '/user-management',
-                    allowed: isAdmin()
-                },
-                {
-                    name: 'System Settings',
-                    icon: Settings,
-                    path: '/settings',
-                    allowed: isAdmin()
                 }
             ]
         }
     ];
+    
+    // Add full navigation for admin users
+    if (isAdmin()) {
+        navigationGroups.length = 0; // Clear basic navigation
+        
+        // Full navigation structure for admins
+        navigationGroups.push(
+            {
+                id: 'bookings',
+                title: "Bookings & Calendar",
+                icon: Calendar,
+                items: [
+                    {
+                        name: 'Add New Booking',
+                        icon: PlusCircle,
+                        path: '/add-booking',
+                        allowed: true
+                    },
+                    {
+                        name: 'Upcoming Bookings',
+                        icon: Calendar,
+                        path: '/bookings',
+                        allowed: true
+                    },
+                    {
+                        name: 'San Antonio Tours',
+                        icon: Ship,
+                        path: '/san-antonio-tours',
+                        allowed: true
+                    }
+                ]
+            },
+            {
+                id: 'fleet',
+                title: "Boats",
+                icon: Ship,
+                items: [
+                    {
+                        name: 'Boat Fleet',
+                        icon: Ship,
+                        path: '/boats',
+                        allowed: true
+                    },
+                    {
+                        name: 'Available Boats',
+                        icon: Ship,
+                        path: '/available-boats',
+                        allowed: true
+                    },
+                ]
+            },
+            {
+                id: 'customers',
+                title: "Customer Relations",
+                icon: Users,
+                items: [
+                    {
+                        name: 'Client Directory',
+                        icon: Users,
+                        path: '/clients',
+                        allowed: true
+                    },
+                    {
+                        name: 'Manage Partners',
+                        icon: Building,
+                        path: '/manage-partners',
+                        allowed: true
+                    }
+                ]
+            },
+            {
+                id: 'support',
+                title: "Customer Support",
+                icon: MessageSquare,
+                items: [
+                    {
+                        name: 'Inquiries & Leads',
+                        icon: MessageSquare,
+                        path: '/inquiries',
+                        allowed: true
+                    },
+                    {
+                        name: 'Chatbot Conversations',
+                        icon: MessageSquare,
+                        path: '/chatbot-settings',
+                        allowed: true
+                    }
+                ]
+            },
+            {
+                id: 'catering',
+                title: "Food & Beverages",
+                icon: Utensils,
+                items: [
+                    {
+                        name: 'Add Product',
+                        icon: PlusCircle,
+                        path: '/add-product',
+                        allowed: true
+                    },
+                    {
+                        name: 'Products List',
+                        icon: Package,
+                        path: '/products',
+                        allowed: true
+                    },
+                    {
+                        name: 'Packages',
+                        icon: Box,
+                        path: '/packages',
+                        allowed: true
+                    },
+                    {
+                        name: 'Orders',
+                        icon: ShoppingCart,
+                        path: '/catering-orders',
+                        allowed: true
+                    }
+                ]
+            },
+            {
+                id: 'financial',
+                title: "Finance & Payments",
+                icon: Euro,
+                items: [
+                    {
+                        name: 'Payment Tracking',
+                        icon: CreditCard,
+                        path: '/payment-tracking',
+                        allowed: true
+                    },
+                    {
+                        name: 'Invoice',
+                        icon: FileText, 
+                        path: '/invoice-generator',
+                        allowed: true
+                    },
+                    {
+                        name: 'Add Expense',
+                        icon: Wallet,
+                        path: '/add-expense',
+                        allowed: true
+                    },
+                    {
+                        name: 'Expenses Overview',
+                        icon: Euro,
+                        path: '/expenses',
+                        allowed: true
+                    }
+                ]
+            },
+            {
+                id: 'admin',
+                title: "Administration",
+                icon: Settings,
+                items: [
+                    {
+                        name: 'Analytics Dashboard',
+                        icon: BarChart3,
+                        path: '/analytics',
+                        allowed: true
+                    },
+                    {
+                        name: 'User Management',
+                        icon: User,
+                        path: '/user-management',
+                        allowed: true
+                    },
+                    {
+                        name: 'System Settings',
+                        icon: Settings,
+                        path: '/settings',
+                        allowed: true
+                    }
+                ]
+            }
+        );
+    }
+    
+
+    // Function to get the icon component for a given path
+    const getIconForPath = (path) => {
+        for (const group of navigationGroups) {
+            for (const item of group.items) {
+                if (item.path === path) {
+                    return item.icon;
+                }
+            }
+        }
+        return Star; // Default icon
+    };
 
     return (
         <React.Fragment>
@@ -235,7 +311,7 @@ const Sidebar = () => {
 
             {/* Sidebar */}
             <aside
-                className={`fixed top-0 left-0 h-full bg-gray-900 text-gray-100 z-30 transform transition-transform duration-300 ease-in-out w-64
+                className={`fixed top-0 left-0 h-full bg-gray-900 text-gray-100 z-30 transform transition-transform duration-300 ease-in-out w-64 overflow-hidden
                     ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
             >
                 <div className="flex flex-col h-full">
@@ -262,7 +338,49 @@ const Sidebar = () => {
                     </div>
 
                     {/* Navigation */}
-                    <nav className="flex-1 overflow-y-auto py-4">
+                    <nav className="flex-1 overflow-y-auto">
+                        {/* Favorites Section */}
+                        <div className="mb-2 mt-2">
+                            <div className="px-4 py-2 flex items-center justify-between text-gray-300">
+                                <div className="flex items-center">
+                                    <Star size={20} className="mr-2 text-yellow-400" />
+                                    <span className="font-medium">My Favorites</span>
+                                </div>
+                            </div>
+                            <div className="py-2 bg-gray-800">
+                                {favorites.length === 0 ? (
+                                    <p className="text-xs text-gray-500 px-6 py-2">Add favorites by clicking the star icon next to menu items</p>
+                                ) : (
+                                    favorites.map((item) => {
+                                        const IconComponent = getIconForPath(item.path);
+                                        return (
+                                            <div key={item.path} className="flex items-center px-6 py-2">
+                                                <button
+                                                    onClick={() => handleNavClick(item.path)}
+                                                    className={`flex-1 flex items-center text-sm text-left transition-colors
+                                                        ${location.pathname === item.path
+                                                            ? 'text-blue-400'
+                                                            : 'text-gray-300 hover:text-gray-100'
+                                                        }`}
+                                                >
+                                                    <IconComponent size={16} className="mr-2" />
+                                                    {item.name}
+                                                </button>
+                                                <button
+                                                    onClick={() => removeFromFavorites(item.path)}
+                                                    className="text-gray-400 hover:text-red-400 p-1"
+                                                    aria-label="Remove from favorites"
+                                                >
+                                                    <StarOff size={14} />
+                                                </button>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                        
+                        {/* Regular Navigation Groups */}
                         {navigationGroups.map((group) => {
                             const allowedItems = group.items.filter(item => item.allowed);
                             if (allowedItems.length === 0) return null;
@@ -286,18 +404,33 @@ const Sidebar = () => {
                                     {expandedGroup === group.id && (
                                         <div className="py-2 bg-gray-800">
                                             {allowedItems.map((item) => (
-                                                <button
-                                                    key={item.path}
-                                                    onClick={() => handleNavClick(item.path)}
-                                                    className={`flex items-center w-full px-6 py-2 text-sm transition-colors
-                                                        ${location.pathname === item.path
-                                                            ? 'bg-blue-600 text-white'
-                                                            : 'text-gray-300 hover:bg-gray-700'
+                                                <div key={item.path} className="flex items-center">
+                                                    <button
+                                                        onClick={() => handleNavClick(item.path)}
+                                                        className={`flex items-center w-full px-6 py-2 text-sm transition-colors
+                                                            ${location.pathname === item.path
+                                                                ? 'bg-blue-600 text-white'
+                                                                : 'text-gray-300 hover:bg-gray-700'
+                                                            }`}
+                                                    >
+                                                        <item.icon size={16} className="mr-2" />
+                                                        {item.name}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => isFavorite(item.path) 
+                                                            ? removeFromFavorites(item.path) 
+                                                            : addToFavorites(item)
+                                                        }
+                                                        className={`absolute right-3 text-gray-400 hover:text-yellow-400 ${
+                                                            isFavorite(item.path) ? 'text-yellow-400' : ''
                                                         }`}
-                                                >
-                                                    <item.icon size={16} className="mr-2" />
-                                                    {item.name}
-                                                </button>
+                                                    >
+                                                        {isFavorite(item.path) 
+                                                            ? <Star size={14} />
+                                                            : <Star size={14} />
+                                                        }
+                                                    </button>
+                                                </div>
                                             ))}
                                         </div>
                                     )}
