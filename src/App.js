@@ -26,6 +26,7 @@ import BoatFinder from './components/BoatFinder';
 import LeadManagement from './components/LeadManagement';
 import NotificationsCenter from './components/notifications/NotificationsCenter';
 import InvoiceGenerator from './components/InvoiceGenerator';
+import SanAntonioBookingsAdmin from './components/SanAntonioBookingsAdmin';
 
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -76,7 +77,10 @@ function ErrorFallback({ error }) {
 }
 
 const ProtectedRoute = ({ children }) => {
-    const { user, loading } = useAuth();
+    const { user, loading, isAdmin } = useAuth();
+    
+    // List of paths regular users are allowed to access
+    const regularUserPaths = ['/bookings', '/san-antonio-tours'];
 
     if (loading) {
         return (
@@ -88,6 +92,16 @@ const ProtectedRoute = ({ children }) => {
 
     if (!user) {
         return <Navigate to="/login" />;
+    }
+    
+    // Get the current path
+    const currentPath = window.location.pathname;
+    
+    // If user is not admin and tries to access a restricted path
+    if (!isAdmin() && !regularUserPaths.includes(currentPath) && 
+        !currentPath.startsWith('/bookings/')) { // Allow viewing specific bookings
+        console.log("Access denied: Redirecting to bookings");
+        return <Navigate to="/bookings" />;
     }
 
     return children;
@@ -101,7 +115,7 @@ function ProtectedLayout({ children }) {
                 <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center">
                     <div></div>
                     <div className="flex items-center gap-4">
-                        <NotificationsCenter />  {/* Add this line */}
+                        <NotificationsCenter />
                         <h1 className="text-xl font-semibold">
                             Just Enjoy Bookings
                         </h1>
@@ -165,6 +179,18 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
+                            
+                            {/* San Antonio Tours */}
+                            <Route
+                                path="/san-antonio-tours"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <SanAntonioBookingsAdmin />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
 
                             {/* Financial Routes */}
                             <Route
@@ -211,7 +237,7 @@ function App() {
                             <Route
                                 path="/products"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <ProductManagement />
                                         </ProtectedLayout>
@@ -221,7 +247,7 @@ function App() {
                             <Route
                                 path="/add-product"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <AddEditProduct />
                                         </ProtectedLayout>
@@ -231,7 +257,7 @@ function App() {
                             <Route
                                 path="/edit-product/:id"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <AddEditProduct />
                                         </ProtectedLayout>
@@ -305,7 +331,7 @@ function App() {
                             <Route
                                 path="/manage-partners"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <ManagePartners />
                                         </ProtectedLayout>
@@ -317,7 +343,7 @@ function App() {
                             <Route
                                 path="/analytics"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <Analytics />
                                         </ProtectedLayout>
@@ -327,7 +353,7 @@ function App() {
                             <Route
                                 path="/user-management"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <UserManagement />
                                         </ProtectedLayout>
@@ -349,7 +375,7 @@ function App() {
                             <Route
                                 path="/chatbot-settings"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <ChatbotSettings />
                                         </ProtectedLayout>
@@ -359,7 +385,7 @@ function App() {
                             <Route
                                 path="/settings"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <SystemSettings />
                                         </ProtectedLayout>

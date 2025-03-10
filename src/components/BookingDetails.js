@@ -5,16 +5,20 @@ import { collection, query, where, onSnapshot, doc, updateDoc, getDoc } from 'fi
 import { format } from "date-fns";
 import { db } from "../firebase/firebaseConfig";
 import PaymentDetails from "./PaymentDetails.js";
+import { useNavigate } from 'react-router-dom';
 
 const BookingDetails = ({ booking, onClose, onDelete }) => {
+  const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
   const modalRef = useRef(null);  
   const [linkedExpenses, setLinkedExpenses] = useState([]);
   const [editedBooking, setEditedBooking] = useState(() => {
     console.log("Raw booking data:", booking);
-  
-    const payments = booking?.payments || [];
-  
+    
+    // Only change is here - ensure payments is always an array
+    const payments = Array.isArray(booking?.payments) ? booking.payments : 
+                     Array.isArray(booking?.pricing?.payments) ? booking.pricing.payments : [];
+    
     const firstPayment = payments.find(p => p.type === 'first') || {
       amount: 0,
       method: 'cash',
@@ -22,7 +26,7 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
       date: '',
       type: 'first',
     };
-  
+    
     const secondPayment = payments.find(p => p.type === 'second') || {
       amount: 0,
       method: 'pos',
@@ -30,10 +34,10 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
       date: '',
       type: 'second',
     };
-  
+    
     console.log("First payment:", firstPayment);
     console.log("Second payment:", secondPayment);
-  
+    
     return {
       ...booking,
       payments,
@@ -43,7 +47,12 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
       paymentStatus: booking?.pricing?.paymentStatus || 'No Payment',
     };
   });
-  
+  const handleEditInSanAntonio = () => {
+    onClose(); // Close the modal first
+    navigate('/san-antonio-tours', { state: { editBookingId: booking.id } });
+  };
+
+  const isSanAntonioBooking = booking?.location === 'San Antonio';
   const handleExpensePaymentStatusChange = async (expenseId, newStatus) => {
     console.log("Changing expense:", expenseId, "to", newStatus);
     try {
@@ -247,12 +256,10 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
      */
     useEffect(() => {
       if (!booking) return;
-    
       console.log("Raw booking data:", booking);
-    
-      // Extract payments array
-      const payments = booking?.payments || [];
-    
+      // Extract payments array - ONLY THIS LINE CHANGES
+      const payments = Array.isArray(booking?.payments) ? booking.payments : 
+                       Array.isArray(booking?.pricing?.payments) ? booking.pricing.payments : [];
       // Get first and second payments
       const firstPayment = payments.find((p) => p.type === "first") || {
         amount: 0,
@@ -261,7 +268,6 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
         date: "",
         type: "first",
       };
-    
       const secondPayment = payments.find((p) => p.type === "second") || {
         amount: 0,
         method: "pos",
@@ -269,11 +275,9 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
         date: "",
         type: "second",
       };
-    
       // Debug payments
       console.log("First payment:", firstPayment);
       console.log("Second payment:", secondPayment);
-    
       // Set edited booking state
       setEditedBooking({
         ...booking,
@@ -282,32 +286,25 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
         finalPrice: booking?.pricing?.agreedPrice || 0,
         paymentStatus: booking?.pricing?.paymentStatus || "No Payment",
       });
-    
       // Firestore collection and query setup for expenses
       const expensesRef = collection(db, "expenses");
       const q = query(expensesRef, where("bookingId", "==", booking.id));
-    
       // Real-time listener for expenses
       const unsubscribe = onSnapshot(q, (querySnapshot) => {
         const allExpenses = querySnapshot.docs.map((docSnap) => ({
           id: docSnap.id,
           ...docSnap.data(),
         }));
-    
         console.log("Fetched Expenses:", allExpenses);
-    
         // Process and set linked expenses
         const parentExpenses = allExpenses.filter((exp) => !exp.parentId);
         const childExpenses = allExpenses.filter((exp) => exp.parentId);
-    
         const combinedExpenses = parentExpenses.map((parent) => ({
           ...parent,
           subExpenses: childExpenses.filter((child) => child.parentId === parent.id),
         }));
-    
         setLinkedExpenses(combinedExpenses);
       });
-    
       return () => unsubscribe(); // Clean up listener on unmount
     }, [booking]);
     
@@ -524,28 +521,28 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   )}
                 </div>
                 <div className="mb-4">
-  <label className="block text-sm font-medium text-gray-700">
-    Address:
-  </label>
-  {isEditing ? (
-    <textarea
-      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-      value={editedBooking.clientDetails?.address || editedBooking.address || ""}
-      onChange={(e) =>
-        handleInputChange("address", e.target.value)
-      }
-      rows="3"
-      placeholder="Enter client's address"
-    />
-  ) : (
-    <p className="mt-1 whitespace-pre-line">
-      {editedBooking.clientDetails?.address || editedBooking.address || "N/A"}
-    </p>
-  )}
-</div>
+              <label className="block text-sm font-medium text-gray-700">
+                Address:
+              </label>
+              {isEditing ? (
+                <textarea
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  value={editedBooking.clientDetails?.address || editedBooking.address || ""}
+                  onChange={(e) =>
+                    handleInputChange("address", e.target.value)
+                  }
+                  rows="3"
+                  placeholder="Enter client's address"
+                />
+              ) : (
+                <p className="mt-1 whitespace-pre-line">
+                  {editedBooking.clientDetails?.address || editedBooking.address || "N/A"}
+                </p>
+              )}
+            </div>
               </div>
             </div>
-
+              
             <div>
               <div className="p-4 border rounded-lg mb-4">
                 <h4 className="text-lg font-bold mb-3">Booking Details</h4>
@@ -817,6 +814,19 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
               >
                 Save
               </button>
+              
+    
+    
+    {isSanAntonioBooking && (
+      <button
+        onClick={handleEditInSanAntonio}
+        className="px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-300 mr-auto"
+        aria-label="Edit in San Antonio Tours"
+      >
+        Edit in San Antonio Tours
+      </button>
+    )}
+  
               <button
                 onClick={() => setIsEditing(false)}
                 className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
