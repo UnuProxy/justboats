@@ -20,6 +20,7 @@ const testApiEndpoint = async () => {
     return false;
   }
 };
+
 // CORS proxies for calendar fetching
 const CORS_PROXIES = [
   'https://api.allorigins.win/raw?url=',
@@ -225,33 +226,76 @@ const saveToCache = (key, data) => {
   }
 };
 
-// Extract calendar ID from URL
+// Detect calendar URL type
+const detectCalendarUrlType = (url) => {
+  if (!url) return 'unknown';
+  
+  if (url.includes('calendar.google.com') || 
+      url.includes('calendar/ical/') || 
+      url.includes('/calendars/') ||
+      (url.includes('@') && !url.includes('/'))) {
+    return 'google';
+  }
+  
+  if (url.includes('yachtchartermanager.com') || 
+      (url.includes('boating') && url.includes('view=ical')) ||
+      url.includes('st=d652496bf541b60705e2a37cc9706e840b2f3812404a1a77e5bb2f5e4d6491d4')) {
+    return 'yachtchartermanager';
+  }
+  
+  return 'generic';
+};
+
+// Extract calendar ID from URL and detect type
 const extractCalendarId = (url) => {
-  if (!url) return null;
+  if (!url) return { id: null, type: 'unknown' };
+  
+  // Detect URL type
+  const urlType = detectCalendarUrlType(url);
   
   // Google Calendar format: calendar/ical/email@example.com/public/basic.ics
-  if (url.includes('calendar/ical/')) {
+  if (urlType === 'google' && url.includes('calendar/ical/')) {
     const match = url.match(/calendar\/ical\/([^/]+)/);
     if (match && match[1]) {
-      return decodeURIComponent(match[1]);
+      return { 
+        id: decodeURIComponent(match[1]), 
+        type: 'google' 
+      };
     }
   }
   
   // Alternative Google format: /calendars/email@example.com/events
-  if (url.includes('/calendars/')) {
+  if (urlType === 'google' && url.includes('/calendars/')) {
     const match = url.match(/\/calendars\/([^/]+)/);
     if (match && match[1]) {
-      return decodeURIComponent(match[1]);
+      return { 
+        id: decodeURIComponent(match[1]), 
+        type: 'google' 
+      };
     }
   }
   
-  // Direct email input
-  if (url.includes('@') && !url.includes('/')) {
-    return url;
+  // Direct email input for Google Calendar
+  if (urlType === 'google' && url.includes('@') && !url.includes('/')) {
+    return { 
+      id: url, 
+      type: 'google' 
+    };
   }
   
-  // For any other URL format, return the entire URL
-  return url;
+  // YachtCharterManager format
+  if (urlType === 'yachtchartermanager') {
+    return { 
+      id: url, 
+      type: 'yachtchartermanager' 
+    };
+  }
+  
+  // For any other URL format, return the entire URL as generic
+  return { 
+    id: url, 
+    type: 'generic' 
+  };
 };
 
 // Availability check function
@@ -368,6 +412,98 @@ const BoatFinder = () => {
   const [currentProxyIndex, setCurrentProxyIndex] = useState(0);
   const [forceRefresh, setForceRefresh] = useState(false);
 
+  // Test function specifically for YachtCharterManager URLs
+  const testYachtManagerUrl = async () => {
+    const url = 'https://boating.yachtchartermanager.com/index.php?option=com_boating&view=ical&st=d652496bf541b60705e2a37cc9706e840b2f3812404a1a77e5bb2f5e4d6491d4';
+    
+    console.log('Testing direct access to YachtCharterManager URL...');
+    
+    // Try each proxy
+    for (const proxy of CORS_PROXIES) {
+      try {
+        // Don't double-encode the URL
+        const proxyUrl = `${proxy}${url}`;
+        console.log(`Trying proxy: ${proxyUrl}`);
+        
+        const response = await fetch(proxyUrl, {
+          method: 'GET',
+          mode: 'cors',
+          cache: 'no-store',
+          headers: {
+            'Accept': 'text/calendar, text/plain, */*'
+          }
+        });
+        
+        if (!response.ok) {
+          console.log(`Proxy ${proxy} returned status: ${response.status}`);
+          continue;
+        }
+        
+        const data = await response.text();
+        console.log(`Received ${data.length} characters of data`);
+        
+        if (data.includes('BEGIN:VCALENDAR')) {
+          console.log('SUCCESS: Valid iCal data received');
+          console.log('First 100 chars:', data.substring(0, 100));
+          return true;
+        } else {
+          console.log('Data does not appear to be iCal format');
+          console.log('First 100 chars:', data.substring(0, 100));
+        }
+      } catch (error) {
+        console.error(`Error with ${proxy}:`, error.message);
+      }
+    }
+    
+    console.log('All proxies failed for YachtCharterManager URL');
+    return false;
+  };
+
+  // Special handler for YachtCharterManager URLs
+  const fetchYachtManagerCalendar = async (url) => {
+    console.log('Using specialized handler for YachtCharterManager URL');
+    
+    // Try each proxy with special handling for this URL type
+    for (const proxy of CORS_PROXIES) {
+      try {
+        // IMPORTANT: For YachtCharterManager, use the raw URL without encoding
+        // The URL needs to be passed directly to the proxy
+        const proxyUrl = `${proxy}${url}`;
+        console.log(`Direct YachtCharterManager proxy URL: ${proxyUrl}`);
+        
+        const response = await fetch(proxyUrl, {
+          method: 'GET',
+          mode: 'cors',
+          cache: 'no-store',
+          headers: {
+            'Accept': 'text/calendar, text/plain, */*'
+          }
+        });
+        
+        if (!response.ok) {
+          console.log(`Proxy ${proxy} returned status: ${response.status}`);
+          continue;
+        }
+        
+        const data = await response.text();
+        console.log(`Received ${data.length} characters of data from ${proxy}`);
+        
+        if (data.includes('BEGIN:VCALENDAR')) {
+          console.log('SUCCESS: Valid iCal data received from YachtCharterManager');
+          console.log('Calendar data sample:', data.substring(0, 200));
+          return data;
+        } else {
+          console.log('Data does not appear to be iCal format');
+          console.log('First 100 chars:', data.substring(0, 100));
+        }
+      } catch (error) {
+        console.error(`Error with ${proxy} for YachtCharterManager:`, error.message);
+      }
+    }
+    
+    throw new Error('Failed to fetch YachtCharterManager calendar with all proxies');
+  };
+
   const fetchBoatAvailability = async (boat) => {
     if (!boat.icalUrl) {
       return;
@@ -376,8 +512,8 @@ const BoatFinder = () => {
     try {
       setCalendarLoading(prev => ({ ...prev, [boat.id]: true }));
       
-      // Extract calendar ID/URL
-      const calendarId = extractCalendarId(boat.icalUrl);
+      // Extract calendar ID/URL and type
+      const { id: calendarId, type: calendarType } = extractCalendarId(boat.icalUrl);
       if (!calendarId) {
         throw new Error(`Could not extract valid calendar ID from URL: ${boat.icalUrl}`);
       }
@@ -398,15 +534,30 @@ const BoatFinder = () => {
       }
   
       // Log which boat we're fetching
-      console.log(`Fetching calendar for ${boat.name} (${boat.id})`);
+      console.log(`Fetching calendar for ${boat.name} (${boat.id}), type: ${calendarType}`);
       
       const origin = window.location.origin;
       let success = false;
       let icalData = null;
       
+      // Special handling for YachtCharterManager URLs
+      if (calendarType === 'yachtchartermanager') {
+        try {
+          icalData = await fetchYachtManagerCalendar(calendarId);
+          if (icalData && icalData.includes('BEGIN:VCALENDAR')) {
+            success = true;
+            console.log('Successfully fetched YachtCharterManager calendar');
+          }
+        } catch (ymError) {
+          console.error('YachtCharterManager specialized handler failed:', ymError.message);
+          // Continue to standard methods if specialized handler fails
+        }
+      }
+      
       // Try approach 1: Use the new minimal calendar-proxy endpoint
       if (!success) {
         try {
+          // Remove calendarType parameter until backend supports it
           const proxyUrl = `${origin}/api/calendar-proxy?calendarId=${encodeURIComponent(calendarId)}&nocache=${Date.now()}`;
           console.log('Trying calendar-proxy endpoint:', proxyUrl);
           
@@ -416,16 +567,34 @@ const BoatFinder = () => {
             throw new Error(`API returned status ${response.status}`);
           }
           
-          const data = await response.json();
+          // Clone the response so we can try multiple ways to parse it
+          const responseClone = response.clone();
           
-          if (data.error) {
-            throw new Error(data.error);
-          }
-          
-          if (data.data && data.data.includes('BEGIN:VCALENDAR')) {
-            console.log('Successfully fetched calendar data via calendar-proxy');
-            icalData = data.data;
-            success = true;
+          // Try parsing as JSON first
+          try {
+            const data = await response.json();
+            
+            if (data.error) {
+              throw new Error(data.error);
+            }
+            
+            if (data.data && data.data.includes('BEGIN:VCALENDAR')) {
+              console.log('Successfully fetched calendar data via calendar-proxy');
+              icalData = data.data;
+              success = true;
+            }
+          } catch (jsonError) {
+            console.log('Response is not JSON, trying as text');
+            // Use the cloned response to try as text
+            const textData = await responseClone.text();
+            
+            if (textData.includes('BEGIN:VCALENDAR')) {
+              console.log('Successfully fetched calendar data as text via calendar-proxy');
+              icalData = textData;
+              success = true;
+            } else {
+              console.log('Response does not contain valid calendar data');
+            }
           }
         } catch (error) {
           console.error('calendar-proxy attempt failed:', error.message);
@@ -435,6 +604,7 @@ const BoatFinder = () => {
       // Try approach 2: Use the original API endpoint (as a fallback)
       if (!success) {
         try {
+          // Remove calendarType parameter until backend supports it
           const apiUrl = `${origin}/api/calendar?calendarId=${encodeURIComponent(calendarId)}&nocache=${Date.now()}`;
           console.log('Trying original calendar endpoint:', apiUrl);
           
@@ -444,16 +614,34 @@ const BoatFinder = () => {
             throw new Error(`API returned status ${response.status}`);
           }
           
-          const data = await response.json();
+          // Clone the response so we can try multiple ways to parse it
+          const responseClone = response.clone();
           
-          if (data.error) {
-            throw new Error(data.error);
-          }
-          
-          if (data.data && data.data.includes('BEGIN:VCALENDAR')) {
-            console.log('Successfully fetched calendar data via original API');
-            icalData = data.data;
-            success = true;
+          // Try parsing as JSON first
+          try {
+            const data = await response.json();
+            
+            if (data.error) {
+              throw new Error(data.error);
+            }
+            
+            if (data.data && data.data.includes('BEGIN:VCALENDAR')) {
+              console.log('Successfully fetched calendar data via original API');
+              icalData = data.data;
+              success = true;
+            }
+          } catch (jsonError) {
+            console.log('Response is not JSON, trying as text');
+            // Use the cloned response to try as text
+            const textData = await responseClone.text();
+            
+            if (textData.includes('BEGIN:VCALENDAR')) {
+              console.log('Successfully fetched calendar data as text via original API');
+              icalData = textData;
+              success = true;
+            } else {
+              console.log('Response does not contain valid calendar data');
+            }
           }
         } catch (error) {
           console.error('Original API attempt failed:', error.message);
@@ -469,34 +657,65 @@ const BoatFinder = () => {
           try {
             console.log(`Trying external proxy ${proxy} for boat ${boat.name}`);
             
-            // Format Google Calendar URL properly
-            const googleCalendarUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
-            const proxyUrl = `${proxy}${encodeURIComponent(googleCalendarUrl)}?nocache=${Date.now()}`;
+            // Format URL properly based on type
+            let targetUrl;
             
-            const response = await fetch(proxyUrl, {
-              method: 'GET',
-              mode: 'cors',
-              cache: 'no-store',
-              headers: {
-                'Accept': 'text/calendar, text/plain, */*'
+            if (calendarType === 'google') {
+              // Format Google Calendar URL properly
+              targetUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
+            } else if (calendarType === 'yachtchartermanager') {
+              // For YachtCharterManager, use the full URL directly
+              targetUrl = calendarId;
+              console.log(`Using YachtCharterManager URL: ${targetUrl}`);
+            } else {
+              // For other types, use the direct URL
+              targetUrl = calendarId;
+            }
+            
+            // For YachtCharterManager URLs, we might need to handle special characters differently
+            const encodedUrl = calendarType === 'yachtchartermanager' ? 
+              encodeURIComponent(targetUrl.replace(/&amp;/g, '&')) : 
+              encodeURIComponent(targetUrl);
+              
+            const proxyUrl = `${proxy}${encodedUrl}?nocache=${Date.now()}`;
+            console.log(`Full proxy URL: ${proxyUrl}`);
+            
+            try {
+              const response = await fetch(proxyUrl, {
+                method: 'GET',
+                mode: 'cors',
+                cache: 'no-store',
+                headers: {
+                  'Accept': 'text/calendar, text/plain, */*'
+                }
+              });
+              
+              if (!response.ok) {
+                console.log(`Proxy ${proxy} returned status ${response.status}`);
+                continue;
               }
-            });
-            
-            if (!response.ok) {
+              
+              const data = await response.text();
+              
+              // Basic validation
+              if (data.includes('BEGIN:VCALENDAR')) {
+                console.log(`Successfully fetched via ${proxy}`);
+                icalData = data;
+                success = true;
+                break;
+              } else {
+                console.log(`Data from ${proxy} does not contain valid calendar data`);
+                // Log a sample of what was returned
+                console.log(`Sample of returned data: ${data.substring(0, 100)}...`);
+              }
+            } catch (proxyError) {
+              console.error(`Proxy ${proxy} failed:`, proxyError.message);
+              // Continue to the next proxy even if this one failed
               continue;
             }
-            
-            const data = await response.text();
-            
-            // Basic validation
-            if (data.includes('BEGIN:VCALENDAR')) {
-              console.log(`Successfully fetched via ${proxy}`);
-              icalData = data;
-              success = true;
-              break;
-            }
-          } catch (proxyError) {
-            console.error(`Proxy ${proxy} failed:`, proxyError.message);
+          } catch (error) {
+            console.error(`Error with proxy ${proxy}:`, error.message);
+            // Continue to the next proxy
           }
         }
       }
@@ -639,6 +858,21 @@ const BoatFinder = () => {
     alert('Calendar cache cleared. Click Refresh Calendars to fetch new data.');
   };
   
+  // Add a test button handler
+  const handleTestYachtManagerUrl = async () => {
+    setError(null);
+    try {
+      const result = await testYachtManagerUrl();
+      if (result) {
+        alert('YachtCharterManager URL test successful! The calendar data was retrieved correctly.');
+      } else {
+        alert('YachtCharterManager URL test failed. Check console for details.');
+      }
+    } catch (err) {
+      setError(`Test failed: ${err.message}`);
+    }
+  };
+  
   useEffect(() => {
     const fetchBoats = async () => {
       try {
@@ -691,29 +925,50 @@ const BoatFinder = () => {
   };
 
   const filteredBoats = activeSearch ? boats.filter(boat => {
+    // Debug logging to see why boats are being filtered out
+    const isIcalType = boat.availabilityType === 'ical';
+    const hasIcalUrl = Boolean(boat.icalUrl);
+    const availData = availabilityData[boat.id];
+    const isAvailableOnDate = isAvailable(selectedDate, availData);
+    
+    const lengthFilter = !filters.length || 
+      (boat.detailedSpecs?.Length?.toString().includes(filters.length));
+      
+    const price = boat.price || boat.seasonalPrices?.Standard || 0;
+    const priceFilter =
+      (!filters.minPrice || price >= Number(filters.minPrice)) &&
+      (!filters.maxPrice || price <= Number(filters.maxPrice));
+    
+    // Log info for YachtCharterManager boats
+    if (boat.icalUrl && boat.icalUrl.includes('yachtchartermanager')) {
+      console.log(`Filtering YachtCharterManager boat: ${boat.name}`, {
+        isIcalType,
+        hasIcalUrl,
+        hasAvailData: Boolean(availData),
+        eventsCount: availData ? availData.length : 0,
+        isAvailableOnDate,
+        lengthFilter,
+        priceFilter,
+        selectedDate,
+        boatDetails: {
+          length: boat.detailedSpecs?.Length,
+          price
+        }
+      });
+    }
+    
     // Check boat type
-    if (boat.availabilityType !== 'ical' || !boat.icalUrl) {
+    if (!isIcalType || !hasIcalUrl) {
       return false;
     }
     
     // Check if the boat is available on the selected date
-    const available = isAvailable(selectedDate, availabilityData[boat.id]);
-    
-    // If the boat is busy, we should NOT show it in results
-    if (!available) {
+    if (!isAvailableOnDate) {
       return false;
     }
     
     // Apply additional filters
-    const matchesLength = !filters.length || 
-      (boat.detailedSpecs?.Length?.toString().includes(filters.length));
-      
-    const price = boat.price || boat.seasonalPrices?.Standard || 0;
-    const matchesPrice =
-      (!filters.minPrice || price >= Number(filters.minPrice)) &&
-      (!filters.maxPrice || price <= Number(filters.maxPrice));
-    
-    return matchesLength && matchesPrice;
+    return lengthFilter && priceFilter;
   }) : [];
 
   if (loading) {
@@ -747,6 +1002,12 @@ const BoatFinder = () => {
             className="bg-red-100 text-red-800 px-3 py-1 rounded-md flex items-center gap-1"
           >
             Force Reload
+          </button>
+          <button 
+            onClick={handleTestYachtManagerUrl} 
+            className="bg-green-100 text-green-800 px-3 py-1 rounded-md flex items-center gap-1"
+          >
+            Test YCM URL
           </button>
         </div>
       </div>

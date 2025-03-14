@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect, useCallback } from "react";
 import { collection, query, where, addDoc, getDocs } from "firebase/firestore";
 import { db } from '../firebase/firebaseConfig';
-import { Users, Ship, Euro, MapPin } from "lucide-react";
+import { Users, Ship, Euro, MapPin} from "lucide-react";
 import { getAuth } from 'firebase/auth';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import ClientPaymentForm from './ClientPaymentForm';
@@ -10,29 +9,53 @@ import { createBookingNotification, createPaymentNotification, createClientUpdat
 import { increment } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../firebase/firebaseConfig';
+import MultiBoatBooking from './MultiBoatBooking';
 
-const sendBookingConfirmationEmail = async (bookingData) => {
+// Updated email function that supports both single and multi-boat bookings
+const sendBookingConfirmationEmail = async (bookingData, isMultiBoat = false, allBoats = []) => {
   try {
     console.log('Starting email send process with data:', {
       client: bookingData.clientDetails?.name,
       email: bookingData.clientDetails?.email,
-      boat: bookingData.bookingDetails?.boatName,
-      date: bookingData.bookingDetails?.date
+      isMultiBoat: isMultiBoat,
+      boatCount: isMultiBoat ? allBoats.length : 1
     });
     
-    // Ensure all required fields are present with proper values
-    const emailPayload = {
-      clientName: bookingData.clientDetails?.name || '',
-      clientEmail: bookingData.clientDetails?.email || '',
-      bookingDetails: {
-        boatName: bookingData.bookingDetails?.boatName || '',
-        date: bookingData.bookingDetails?.date || '',
-        startTime: bookingData.bookingDetails?.startTime || '',
-        endTime: bookingData.bookingDetails?.endTime || '',
-        passengers: bookingData.bookingDetails?.passengers?.toString() || '',
-        price: bookingData.pricing?.agreedPrice?.toString() || '0'
-      }
-    };
+    // Prepare email payload based on booking type
+    let emailPayload;
+    
+    if (isMultiBoat) {
+      // Multi-boat booking payload
+      emailPayload = {
+        clientName: bookingData.clientDetails?.name || '',
+        clientEmail: bookingData.clientDetails?.email || '',
+        multiBoat: true,
+        boats: allBoats.map(boat => ({
+          boatName: boat.boatName || '',
+          date: boat.date || '',
+          startTime: boat.startTime || '',
+          endTime: boat.endTime || '',
+          passengers: boat.passengers?.toString() || '',
+          pricing: {
+            agreedPrice: boat.pricing?.agreedPrice?.toString() || '0'
+          }
+        }))
+      };
+    } else {
+      // Single boat booking payload
+      emailPayload = {
+        clientName: bookingData.clientDetails?.name || '',
+        clientEmail: bookingData.clientDetails?.email || '',
+        bookingDetails: {
+          boatName: bookingData.bookingDetails?.boatName || '',
+          date: bookingData.bookingDetails?.date || '',
+          startTime: bookingData.bookingDetails?.startTime || '',
+          endTime: bookingData.bookingDetails?.endTime || '',
+          passengers: bookingData.bookingDetails?.passengers?.toString() || '',
+          price: bookingData.pricing?.agreedPrice?.toString() || '0'
+        }
+      };
+    }
 
     // Validate required fields before sending
     if (!emailPayload.clientName || !emailPayload.clientEmail) {
@@ -95,11 +118,6 @@ const sendBookingConfirmationEmail = async (bookingData) => {
   }
 };
 
-
-   
-
-
-
 function AddBooking() {
   const [activeStep, setActiveStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -132,14 +150,14 @@ function AddBooking() {
         method: "cash",
         received: false,
         date: "",
-        excludeVAT: false  // Add this
+        excludeVAT: false
       },
       secondPayment: {
         amount: "",
         method: "pos",
         received: false,
         date: "",
-        excludeVAT: false  // Add this
+        excludeVAT: false
       },
       paymentStatus: "No Payment",
       totalPaid: 0,
@@ -158,6 +176,10 @@ function AddBooking() {
     notes: "",
   });
 
+  // Add these two state variables for multi-boat support
+  const [multiBoatMode, setMultiBoatMode] = useState(false);
+  const [boats, setBoats] = useState([]);
+  
   const [partners, setPartners] = useState([]);
   const [existingClients, setExistingClients] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -226,8 +248,6 @@ function AddBooking() {
     return () => clearTimeout(debounce);
   }, [searchTerm]);
 
- 
-
   const handleClientTypeSelect = (type) => {
     setFormData((prev) => ({
       ...prev,
@@ -263,15 +283,20 @@ function AddBooking() {
     }));
   };
 
+  // Add this function to handle boats data from MultiBoatBooking component
+  const handleBoatsChange = (boatsData) => {
+    setBoats(boatsData);
+  };
+
   const handleInputChange = (section, field, value) => {
     setFormData((prev) => {
       
       let processedValue = value;
-if (typeof value === 'string' && 
-    !(section === 'bookingDetails' && (field === 'boatName' || field === 'boatCompany')) &&
-    !(section === 'clientDetails' && field === 'name')) {
-  processedValue = value.trim();
-}
+      if (typeof value === 'string' && 
+          !(section === 'bookingDetails' && (field === 'boatName' || field === 'boatCompany')) &&
+          !(section === 'clientDetails' && field === 'name')) {
+        processedValue = value.trim();
+      }
       if (section === 'bookingDetails' && field === 'startTime') {
         const startHour = parseInt(value.split(':')[0]);
         const startMinutes = value.split(':')[1];
@@ -380,6 +405,7 @@ if (typeof value === 'string' &&
       };
     });
   };
+  
   const handlePricingChange = useCallback(async (pricingData) => {
     // Calculate actual monetary values for first payment
     const firstPaymentAmount = pricingData.pricingType === 'standard' && !pricingData.firstPayment.useCustomAmount 
@@ -532,120 +558,177 @@ if (typeof value === 'string' &&
         </div>
       )}
 
-<div className="mt-6 space-y-4">
-  <h4 className="font-medium">Client Details</h4>
-  {["name", "phone", "email", "passportNumber", "address"].map((field) => (
-    <div key={field}>
-      <label className="block text-sm font-medium text-gray-700">
-        {field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, " $1")}
-      </label>
-      {field === "address" ? (
-        <textarea
-          className="mt-1 w-full p-2 border rounded"
-          rows="2"
-          value={formData.clientDetails[field]}
-          onChange={(e) =>
-            handleInputChange("clientDetails", field, e.target.value)
-          }
-          placeholder="Enter client's address"
-        />
-      ) : (
-        <input
-          type={field === "email" ? "email" : "text"}
-          className="mt-1 w-full p-2 border rounded"
-          value={formData.clientDetails[field]}
-          onChange={(e) =>
-            handleInputChange("clientDetails", field, e.target.value)
-          }
-        />
-      )}
-    </div>
-  ))}
-</div>
+      <div className="mt-6 space-y-4">
+        <h4 className="font-medium">Client Details</h4>
+        {["name", "phone", "email", "passportNumber", "address"].map((field) => (
+          <div key={field}>
+            <label className="block text-sm font-medium text-gray-700">
+              {field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, " $1")}
+            </label>
+            {field === "address" ? (
+              <textarea
+                className="mt-1 w-full p-2 border rounded"
+                rows="2"
+                value={formData.clientDetails[field]}
+                onChange={(e) =>
+                  handleInputChange("clientDetails", field, e.target.value)
+                }
+                placeholder="Enter client's address"
+              />
+            ) : (
+              <input
+                type={field === "email" ? "email" : "text"}
+                className="mt-1 w-full p-2 border rounded"
+                value={formData.clientDetails[field]}
+                onChange={(e) =>
+                  handleInputChange("clientDetails", field, e.target.value)
+                }
+              />
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
+
+  // Updated renderStep2 function with multi-boat mode toggle
   const renderStep2 = () => (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 mb-4">
-        <Ship className="w-5 h-5 text-gray-600" />
-        <h3 className="text-lg font-semibold">Boat Details</h3>
-      </div>
-  
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Boat Company</label>
-          <input
-            type="text"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.bookingDetails.boatCompany}
-            onChange={(e) =>
-              handleInputChange("bookingDetails", "boatCompany", e.target.value)
-            }
-          />
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Ship className="w-5 h-5 text-gray-600" />
+          <h3 className="text-lg font-semibold">Boat Details</h3>
         </div>
-  
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Boat Name</label>
-          <input
-            type="text"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.bookingDetails.boatName}
-            onChange={(e) =>
-              handleInputChange("bookingDetails", "boatName", e.target.value)
-            }
-          />
-        </div>
-  
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Number of Passengers</label>
-          <input
-            type="number"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.bookingDetails.passengers}
-            onChange={(e) =>
-              handleInputChange("bookingDetails", "passengers", e.target.value)
-            }
-          />
-        </div>
-  
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Date</label>
-          <input
-            type="date"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.bookingDetails.date}
-            onChange={(e) =>
-              handleInputChange("bookingDetails", "date", e.target.value)
-            }
-          />
-        </div>
-  
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Start Time</label>
-          <input
-            type="time"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.bookingDetails.startTime}
-            onChange={(e) =>
-              handleInputChange("bookingDetails", "startTime", e.target.value)
-            }
-          />
-        </div>
-  
-        <div>
-          <label className="block text-sm font-medium text-gray-700">End Time</label>
-          <input
-            type="time"
-            className="mt-1 w-full p-2 border rounded"
-            value={formData.bookingDetails.endTime}
-            onChange={(e) =>
-              handleInputChange("bookingDetails", "endTime", e.target.value)
-            }
-          />
+        
+        {/* Multi-boat toggle switch */}
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-700">Multiple Boats</label>
+          <div className="relative inline-block w-10 mr-2 align-middle select-none">
+            <input
+              type="checkbox"
+              name="multiBoatMode"
+              id="multiBoatMode"
+              checked={multiBoatMode}
+              onChange={() => setMultiBoatMode(!multiBoatMode)}
+              className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer"
+              style={{ 
+                top: "0", 
+                right: multiBoatMode ? "0" : "auto", 
+                left: multiBoatMode ? "auto" : "0",
+                transition: "all 0.3s"
+              }}
+            />
+            <label
+              htmlFor="multiBoatMode"
+              className={`toggle-label block overflow-hidden h-6 rounded-full cursor-pointer ${
+                multiBoatMode ? 'bg-blue-500' : 'bg-gray-300'
+              }`}
+              style={{ width: "100%" }}
+            ></label>
+          </div>
         </div>
       </div>
+    
+      {multiBoatMode ? (
+        <MultiBoatBooking 
+          onBoatsChange={handleBoatsChange}
+          initialBoats={boats.length ? boats : [{
+            boatCompany: formData.bookingDetails.boatCompany,
+            boatName: formData.bookingDetails.boatName,
+            passengers: formData.bookingDetails.passengers,
+            date: formData.bookingDetails.date,
+            startTime: formData.bookingDetails.startTime,
+            endTime: formData.bookingDetails.endTime,
+            pricing: {
+              agreedPrice: formData.pricing.agreedPrice,
+              pricingType: formData.pricing.pricingType,
+              firstPayment: {...formData.pricing.firstPayment},
+              secondPayment: {...formData.pricing.secondPayment},
+              paymentStatus: formData.pricing.paymentStatus,
+              totalPaid: formData.pricing.totalPaid
+            }
+          }]}
+        />
+      ) : (
+        // Original single boat form
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Boat Company</label>
+            <input
+              type="text"
+              className="mt-1 w-full p-2 border rounded"
+              value={formData.bookingDetails.boatCompany}
+              onChange={(e) =>
+                handleInputChange("bookingDetails", "boatCompany", e.target.value)
+              }
+            />
+          </div>
+    
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Boat Name</label>
+            <input
+              type="text"
+              className="mt-1 w-full p-2 border rounded"
+              value={formData.bookingDetails.boatName}
+              onChange={(e) =>
+                handleInputChange("bookingDetails", "boatName", e.target.value)
+              }
+            />
+          </div>
+    
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Number of Passengers</label>
+            <input
+              type="number"
+              className="mt-1 w-full p-2 border rounded"
+              value={formData.bookingDetails.passengers}
+              onChange={(e) =>
+                handleInputChange("bookingDetails", "passengers", e.target.value)
+              }
+            />
+          </div>
+    
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Date</label>
+            <input
+              type="date"
+              className="mt-1 w-full p-2 border rounded"
+              value={formData.bookingDetails.date}
+              onChange={(e) =>
+                handleInputChange("bookingDetails", "date", e.target.value)
+              }
+            />
+          </div>
+    
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Start Time</label>
+            <input
+              type="time"
+              className="mt-1 w-full p-2 border rounded"
+              value={formData.bookingDetails.startTime}
+              onChange={(e) =>
+                handleInputChange("bookingDetails", "startTime", e.target.value)
+              }
+            />
+          </div>
+    
+          <div>
+            <label className="block text-sm font-medium text-gray-700">End Time</label>
+            <input
+              type="time"
+              className="mt-1 w-full p-2 border rounded"
+              value={formData.bookingDetails.endTime}
+              onChange={(e) =>
+                handleInputChange("bookingDetails", "endTime", e.target.value)
+              }
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
+
+  // Add multi-boat summary to step 3 when multiBoatMode is active
   const renderStep3 = () => (
     <div className="space-y-6">
       <div className="flex items-center gap-2 mb-4">
@@ -653,12 +736,46 @@ if (typeof value === 'string' &&
         <h3 className="text-lg font-semibold">Pricing Details</h3>
       </div>
       
-      <ClientPaymentForm 
-        onPricingChange={handlePricingChange}
-        initialData={formData.pricing}
-      />
+      {multiBoatMode ? (
+        <div className="space-y-4">
+          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+            <h4 className="font-medium text-blue-800 mb-2">Multi-Boat Booking Summary</h4>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left pb-2">Boat</th>
+                  <th className="text-right pb-2">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {boats.map((boat, index) => (
+                  <tr key={index} className="border-b border-blue-100">
+                    <td className="py-2">{boat.boatName || `Boat ${index + 1}`}</td>
+                    <td className="text-right py-2">€{boat.pricing.agreedPrice || "0"}</td>
+                  </tr>
+                ))}
+                <tr className="font-medium text-blue-900">
+                  <td className="pt-2">Total</td>
+                  <td className="text-right pt-2">
+                    €{boats.reduce((sum, boat) => sum + parseFloat(boat.pricing.agreedPrice || 0), 0).toFixed(2)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="text-xs text-blue-600 mt-3">
+              * Payment details can be adjusted individually for each boat in the Boat Details section
+            </p>
+          </div>
+        </div>
+      ) : (
+        <ClientPaymentForm 
+          onPricingChange={handlePricingChange}
+          initialData={formData.pricing}
+        />
+      )}
     </div>
   );
+  
   const renderStep4 = () => (
     <div className="space-y-4">
       <div className="flex items-center gap-2 mb-4">
@@ -667,21 +784,31 @@ if (typeof value === 'string' &&
       </div>
   
       <div className="space-y-4">
-      <div>
-  <label className="block text-sm font-medium text-gray-700">
-    Transfer Required
-  </label>
-  <select
-  className="mt-1 w-full p-2 border rounded"
-  value={formData.transfer.required ? "true" : "false"}
-  onChange={(e) =>
-    handleInputChange("transfer", "required", e.target.value === "true")
-  }
-  >
-    <option value="false">No</option>
-    <option value="true">Yes</option>
-  </select>
-  </div>
+        {multiBoatMode && (
+          <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200 mb-4">
+            <h4 className="font-medium text-yellow-800 mb-2">Multi-Boat Booking</h4>
+            <p className="text-sm">
+              You are creating bookings for {boats.length} boats for this client. 
+              All boats will share the same transfer and additional details.
+            </p>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700">
+            Transfer Required
+          </label>
+          <select
+            className="mt-1 w-full p-2 border rounded"
+            value={formData.transfer.required ? "true" : "false"}
+            onChange={(e) =>
+              handleInputChange("transfer", "required", e.target.value === "true")
+            }
+          >
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </div>
   
         {formData.transfer.required && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -839,6 +966,8 @@ if (typeof value === 'string' &&
       </div>
     </div>
   );
+  
+  // Update validateForm to handle multi-boat mode
   const validateForm = () => {
     switch (activeStep) {
       case 1:
@@ -861,73 +990,104 @@ if (typeof value === 'string' &&
         break;
 
       case 2:
-        if (!formData.bookingDetails.boatCompany) {
-          alert("Please enter the boat company");
-          return false;
-        }
-        if (!formData.bookingDetails.boatName) {
-          alert("Please enter the boat name");
-          return false;
-        }
-        if (!formData.bookingDetails.passengers) {
-          alert("Please enter the number of passengers");
-          return false;
-        }
-        if (!formData.bookingDetails.date) {
-          alert("Please select a date");
-          return false;
+        if (multiBoatMode) {
+          // Validate all boats in multi-boat mode
+          for (let i = 0; i < boats.length; i++) {
+            const boat = boats[i];
+            if (!boat.boatCompany) {
+              alert(`Please enter the boat company for Boat ${i + 1}`);
+              return false;
+            }
+            if (!boat.boatName) {
+              alert(`Please enter the boat name for Boat ${i + 1}`);
+              return false;
+            }
+            if (!boat.passengers) {
+              alert(`Please enter the number of passengers for Boat ${i + 1}`);
+              return false;
+            }
+            if (!boat.date) {
+              alert(`Please select a date for Boat ${i + 1}`);
+              return false;
+            }
+            if (!boat.pricing.agreedPrice) {
+              alert(`Please enter a price for Boat ${i + 1}`);
+              return false;
+            }
+          }
+        } else {
+          // Original validation for single boat
+          if (!formData.bookingDetails.boatCompany) {
+            alert("Please enter the boat company");
+            return false;
+          }
+          if (!formData.bookingDetails.boatName) {
+            alert("Please enter the boat name");
+            return false;
+          }
+          if (!formData.bookingDetails.passengers) {
+            alert("Please enter the number of passengers");
+            return false;
+          }
+          if (!formData.bookingDetails.date) {
+            alert("Please select a date");
+            return false;
+          }
         }
         break;
 
-        case 3:
-      if (formData.pricing.pricingType !== 'custom' && 
-          (!formData.pricing.agreedPrice || parseFloat(formData.pricing.agreedPrice) <= 0)) {
-        alert("Please enter a valid agreed price");
-        return false;
-      }
-      // For custom type, check if at least one payment is entered
-      if (formData.pricing.pricingType === 'custom') {
-        const firstPayment = parseFloat(formData.pricing.firstPayment.amount) || 0;
-        const secondPayment = parseFloat(formData.pricing.secondPayment.amount) || 0;
-        if (firstPayment === 0 && secondPayment === 0) {
-          alert("Please enter at least one payment amount");
-          return false;
+      case 3:
+        if (!multiBoatMode) {
+          // Only validate the pricing for single boat mode
+          // (Multi-boat pricing is validated in step 2)
+          if (formData.pricing.pricingType !== 'custom' && 
+              (!formData.pricing.agreedPrice || parseFloat(formData.pricing.agreedPrice) <= 0)) {
+            alert("Please enter a valid agreed price");
+            return false;
+          }
+          // For custom type, check if at least one payment is entered
+          if (formData.pricing.pricingType === 'custom') {
+            const firstPayment = parseFloat(formData.pricing.firstPayment.amount) || 0;
+            const secondPayment = parseFloat(formData.pricing.secondPayment.amount) || 0;
+            if (firstPayment === 0 && secondPayment === 0) {
+              alert("Please enter at least one payment amount");
+              return false;
+            }
+          }
         }
-      }
-      break;
+        break;
 
       case 4:
-  if (formData.transfer.required) {
-    // Validate Pickup Details
-    if (!formData.transfer.pickup.location) {
-      alert("Please select a pickup location type");
-      return false;
-    }
-    if (
-      (formData.transfer.pickup.location === "Hotel" || formData.transfer.pickup.location === "Other") &&
-      !formData.transfer.pickup.locationDetail
-    ) {
-      alert("Please provide pickup location details");
-      return false;
-    }
+        if (formData.transfer.required) {
+          // Validate Pickup Details
+          if (!formData.transfer.pickup.location) {
+            alert("Please select a pickup location type");
+            return false;
+          }
+          if (
+            (formData.transfer.pickup.location === "Hotel" || formData.transfer.pickup.location === "Other") &&
+            !formData.transfer.pickup.locationDetail
+          ) {
+            alert("Please provide pickup location details");
+            return false;
+          }
 
-    // Validate Drop-off Details
-    if (!formData.transfer.dropoff.location) {
-      alert("Please select a drop-off location type");
-      return false;
-    }
-    if (
-      (formData.transfer.dropoff.location === "Hotel" ||
-        formData.transfer.dropoff.location === "Other" ||
-        formData.transfer.dropoff.location === "Marina") &&
-      !formData.transfer.dropoff.locationDetail
-    ) {
-      alert("Please provide drop-off location details");
-      return false;
-    }
-  }
-  break;
-
+          // Validate Drop-off Details
+          if (!formData.transfer.dropoff.location) {
+            alert("Please select a drop-off location type");
+            return false;
+          }
+          if (
+            (formData.transfer.dropoff.location === "Hotel" ||
+              formData.transfer.dropoff.location === "Other" ||
+              formData.transfer.dropoff.location === "Marina") &&
+            !formData.transfer.dropoff.locationDetail
+          ) {
+            alert("Please provide drop-off location details");
+            return false;
+          }
+        }
+        break;
 
       default:
         alert("Invalid step");
@@ -936,6 +1096,7 @@ if (typeof value === 'string' &&
     return true;
   };
 
+  // Update handleSubmit to handle multi-boat mode
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (activeStep !== 4 || !validateForm()) return;
@@ -953,69 +1114,7 @@ if (typeof value === 'string' &&
     try {
         setLoading(true);
 
-        const bookingData = {
-          clientType: formData.clientType || "",
-          selectedPartner: formData.selectedPartner || "",
-          clientSource: formData.clientSource || "",
-          clientDetails: {
-              name: formData.clientDetails.name || "",
-              phone: formData.clientDetails.phone || "",
-              email: formData.clientDetails.email || "",
-              passportNumber: formData.clientDetails.passportNumber || "",
-              address: formData.clientDetails.address || "",
-          },
-          clientName: formData.clientDetails.name || "",
-          bookingDate: formData.bookingDetails.date || "",
-          bookingDetails: {
-              boatCompany: formData.bookingDetails.boatCompany || "",
-              boatName: formData.bookingDetails.boatName || "",
-              passengers: formData.bookingDetails.passengers || "",
-              date: formData.bookingDetails.date || "",
-              startTime: formData.bookingDetails.startTime || "",
-              endTime: formData.bookingDetails.endTime || "",
-              transferAddress: formData.transfer.required
-                  ? {
-                        pickup: formData.transfer.pickup || {},
-                        dropoff: formData.transfer.dropoff || {},
-                    }
-                  : null,
-          },
-          pricing: {
-            agreedPrice: parseFloat(formData.pricing.agreedPrice) || 0,
-            pricingType: formData.pricing.pricingType,
-            totalPaid: parseFloat(formData.pricing.totalPaid) || 0,
-            paymentStatus: formData.pricing.paymentStatus || "No Payment",
-            payments: [
-              {
-                type: 'first',
-                amount: parseFloat(formData.pricing.firstPayment.amount) || 0,
-                percentage: parseFloat(formData.pricing.firstPayment.percentage),
-                method: formData.pricing.firstPayment.method || '',
-                received: formData.pricing.firstPayment.received || false,
-                date: formData.pricing.firstPayment.date || '',
-                excludeVAT: formData.pricing.firstPayment.excludeVAT || false,
-                recordedAt: new Date().toISOString()
-              },
-              {
-                type: 'second',
-                amount: parseFloat(formData.pricing.secondPayment.amount) || 0,
-                method: formData.pricing.secondPayment.method || '',
-                received: formData.pricing.secondPayment.received || false,
-                date: formData.pricing.secondPayment.date || '',
-                excludeVAT: formData.pricing.secondPayment.excludeVAT || false,
-                recordedAt: new Date().toISOString()
-              }
-            ]
-          },
-          transfer: formData.transfer || {},
-          notes: formData.notes || "",
-          createdAt: new Date().toISOString(),
-          lastUpdated: new Date().toISOString(),
-          status: "active",
-          createdBy: createdByInfo,
-          restaurantName: restaurantName || "",
-        };
-
+        // Process client information (same for both modes)
         let clientId = null;
         if (formData.clientType) {
             const clientsRef = collection(db, "clients");
@@ -1041,17 +1140,26 @@ if (typeof value === 'string' &&
                     formData.clientDetails.name,
                     'updated'
                 );
+                
+                // For multi-boat, calculate total spent differently
+                const totalSpent = multiBoatMode 
+                  ? boats.reduce((sum, boat) => sum + parseFloat(boat.pricing.agreedPrice || 0), 0)
+                  : parseFloat(formData.pricing.agreedPrice) || 0;
+                
+                // For multi-boat, increment bookings by number of boats
+                const bookingIncrement = multiBoatMode ? boats.length : 1;
+                
                 await updateDoc(doc(db, "clients", clientId), {
                     name: formData.clientDetails.name,
                     email: formData.clientDetails.email,
                     phone: formData.clientDetails.phone,
                     passportNumber: formData.clientDetails.passportNumber,
-                   address: formData.clientDetails.address || '',
+                    address: formData.clientDetails.address || '',
                     clientType: formData.clientType,
                     source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
                     lastUpdated: new Date().toISOString(),
-                    totalBookings: increment(1),
-                    totalSpent: increment(parseFloat(formData.pricing.agreedPrice) || 0)
+                    totalBookings: increment(bookingIncrement),
+                    totalSpent: increment(totalSpent)
                 });
             } else {
                 // Create new client
@@ -1060,15 +1168,17 @@ if (typeof value === 'string' &&
                   email: formData.clientDetails.email || "",
                   phone: formData.clientDetails.phone || "",
                   passportNumber: formData.clientDetails.passportNumber || "",
-                  address: formData.clientDetails.address || "",  // Added fallback
+                  address: formData.clientDetails.address || "",
                   clientType: formData.clientType,
                   source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType,
                   createdAt: new Date().toISOString(),
                   lastUpdated: new Date().toISOString(),
                   createdBy: createdByInfo,
                   bookings: [],
-                  totalBookings: 1,
-                  totalSpent: parseFloat(formData.pricing.agreedPrice) || 0,
+                  totalBookings: multiBoatMode ? boats.length : 1,
+                  totalSpent: multiBoatMode 
+                    ? boats.reduce((sum, boat) => sum + parseFloat(boat.pricing.agreedPrice || 0), 0)
+                    : parseFloat(formData.pricing.agreedPrice) || 0,
                   notes: formData.notes || "",
                   dob: ""
                 };
@@ -1080,73 +1190,336 @@ if (typeof value === 'string' &&
                 );
                 clientId = clientDoc.id;
             }
-            bookingData.clientId = clientId;
         }
 
-        // Create booking document
-        const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
-        console.log('About to send email with data:', bookingData);  // Add this line
-        await sendBookingConfirmationEmail(bookingData);
-        // Add booking notification
-        await createBookingNotification(
-            formData.clientDetails.name,
-            formData.bookingDetails.boatName,
-            new Date(formData.bookingDetails.date).toLocaleDateString(),
-            bookingRef.id
-        );
+        // This function should replace the multiBoatMode section in your handleSubmit function
+// It ensures payment data is processed correctly for each boat
 
-        if (formData.transfer.required) {
-            const pickupTime = new Date(`${formData.bookingDetails.date} ${formData.bookingDetails.startTime}`);
-            await createTransferNotification(
-                bookingRef.id,
-                formData.clientDetails.name,
-                pickupTime.toLocaleTimeString()
-            );
-        }
+if (multiBoatMode) {
+  // Process multiple boats
+  const bookingIds = [];
+  const multiBoatGroupId = `group-${new Date().getTime()}`;
+  
+  // Create bookings for each boat
+  for (const boat of boats) {
+    // Calculate payment values to ensure accuracy
+    const firstPaymentAmount = boat.pricing.pricingType === 'standard' && !boat.pricing.firstPayment.useCustomAmount 
+      ? parseFloat(boat.pricing.agreedPrice) * (parseFloat(boat.pricing.firstPayment.percentage) / 100)
+      : parseFloat(boat.pricing.firstPayment.amount) || 0;
+    
+    const secondPaymentAmount = boat.pricing.pricingType === 'standard'
+      ? parseFloat(boat.pricing.agreedPrice) - firstPaymentAmount
+      : parseFloat(boat.pricing.secondPayment.amount) || 0;
+    
+    const totalPaid = 
+      (boat.pricing.firstPayment.received ? firstPaymentAmount : 0) +
+      (boat.pricing.secondPayment.received ? secondPaymentAmount : 0);
+    
+    // Determine payment status
+    let paymentStatus = "No Payment";
+    if (totalPaid > 0) {
+      paymentStatus = totalPaid >= parseFloat(boat.pricing.agreedPrice) ? "Completed" : "Partial";
+    }
+    
+    const bookingData = {
+      clientType: formData.clientType || "",
+      selectedPartner: formData.selectedPartner || "",
+      clientSource: formData.clientSource || "",
+      clientDetails: {
+        name: formData.clientDetails.name || "",
+        phone: formData.clientDetails.phone || "",
+        email: formData.clientDetails.email || "",
+        passportNumber: formData.clientDetails.passportNumber || "",
+        address: formData.clientDetails.address || "",
+      },
+      clientName: formData.clientDetails.name || "",
+      clientId: clientId,
+      bookingDate: boat.date || "",
+      bookingDetails: {
+        boatCompany: boat.boatCompany || "",
+        boatName: boat.boatName || "",
+        passengers: boat.passengers || "",
+        date: boat.date || "",
+        startTime: boat.startTime || "",
+        endTime: boat.endTime || "",
+        transferAddress: formData.transfer.required
+          ? {
+              pickup: formData.transfer.pickup || {},
+              dropoff: formData.transfer.dropoff || {},
+            }
+          : null,
+        multiBoatBooking: true
+      },
+      pricing: {
+        agreedPrice: parseFloat(boat.pricing.agreedPrice) || 0,
+        pricingType: boat.pricing.pricingType,
+        totalPaid: totalPaid,
+        paymentStatus: paymentStatus,
+        payments: [
+          {
+            type: 'first',
+            amount: firstPaymentAmount,
+            percentage: parseFloat(boat.pricing.firstPayment.percentage) || 30,
+            method: boat.pricing.firstPayment.method || 'cash',
+            received: boat.pricing.firstPayment.received || false,
+            date: boat.pricing.firstPayment.date || '',
+            excludeVAT: boat.pricing.firstPayment.excludeVAT || false,
+            recordedAt: new Date().toISOString()
+          },
+          {
+            type: 'second',
+            amount: secondPaymentAmount,
+            method: boat.pricing.secondPayment.method || 'pos',
+            received: boat.pricing.secondPayment.received || false,
+            date: boat.pricing.secondPayment.date || '',
+            excludeVAT: boat.pricing.secondPayment.excludeVAT || false,
+            recordedAt: new Date().toISOString()
+          }
+        ]
+      },
+      transfer: formData.transfer || {},
+      notes: formData.notes || "",
+      createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+      status: "active",
+      createdBy: createdByInfo,
+      restaurantName: restaurantName || "",
+      isPartOfMultiBoatBooking: true,
+      multiBoatGroupId: multiBoatGroupId
+    };
+    
+    // Create booking document
+    const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
+    bookingIds.push(bookingRef.id);
+    
+    // Set the ID in the document
+    await updateDoc(doc(db, "bookings", bookingRef.id), {
+      id: bookingRef.id
+    });
+    
+    // Add booking notification
+    await createBookingNotification(
+      formData.clientDetails.name,
+      boat.boatName,
+      new Date(boat.date).toLocaleDateString(),
+      bookingRef.id
+    );
+    
+    // Create payment notifications if payments are received
+    if (boat.pricing.firstPayment.received) {
+      await createPaymentNotification(
+        firstPaymentAmount.toFixed(2),
+        formData.clientDetails.name,
+        bookingRef.id
+      );
+    }
 
-        if (formData.pricing.firstPayment.received) {
-            await createPaymentNotification(
-                formData.pricing.firstPayment.amount,
-                formData.clientDetails.name,
-                bookingRef.id
-            );
-        }
+    if (boat.pricing.secondPayment.received) {
+      await createPaymentNotification(
+        secondPaymentAmount.toFixed(2),
+        formData.clientDetails.name,
+        bookingRef.id
+      );
+    }
+    
+    // Process payments for database records
+    const payments = bookingData.pricing.payments.filter(payment => payment.amount > 0);
+    if (payments.length > 0) {
+      const paymentRecords = payments.map(payment => ({
+        ...payment,
+        bookingId: bookingRef.id,
+        clientId: clientId,
+        createdBy: createdByInfo,
+        createdAt: new Date().toISOString()
+      }));
 
-        if (formData.pricing.secondPayment.received) {
-            await createPaymentNotification(
-                formData.pricing.secondPayment.amount,
-                formData.clientDetails.name,
-                bookingRef.id
-            );
-        }
+      await Promise.all(paymentRecords.map(record => 
+        addDoc(collection(db, "payments"), record)
+      ));
+    }
+    
+    // Update client's bookings array
+    if (clientId) {
+      await updateDoc(doc(db, "clients", clientId), {
+        bookings: arrayUnion(bookingRef.id),
+      });
+    }
+  }
+  
+  // Send a single email for all boats
+  const boatsForEmail = boats.map(boat => ({
+    boatName: boat.boatName,
+    date: boat.date,
+    startTime: boat.startTime,
+    endTime: boat.endTime,
+    passengers: boat.passengers,
+    pricing: {
+      agreedPrice: boat.pricing.agreedPrice
+    }
+  }));
+  
+  // Send one comprehensive email for all boats
+  await sendBookingConfirmationEmail(
+    {
+      clientDetails: {
+        name: formData.clientDetails.name,
+        email: formData.clientDetails.email
+      }
+    }, 
+    true, // isMultiBoat = true
+    boatsForEmail
+  );
+  
+  // Create a single transfer notification if needed
+  if (formData.transfer.required) {
+    const firstBoatDate = boats[0].date || "";
+    const firstBoatTime = boats[0].startTime || "";
+    const pickupTime = firstBoatDate && firstBoatTime 
+      ? new Date(`${firstBoatDate} ${firstBoatTime}`)
+      : new Date();
+    
+    await createTransferNotification(
+      bookingIds.join(','),  // Join all booking IDs
+      formData.clientDetails.name,
+      pickupTime.toLocaleTimeString()
+    );
+  }
+  
+  alert(`Successfully created ${bookingIds.length} bookings for ${formData.clientDetails.name}`);
 
-        await updateDoc(doc(db, "bookings", bookingRef.id), {
-            id: bookingRef.id
-        });
-
-        const payments = bookingData.pricing.payments.filter(payment => payment.amount > 0);
-        if (payments.length > 0) {
-            const paymentRecords = payments.map(payment => ({
-                ...payment,
-                bookingId: bookingRef.id,
-                clientId: bookingData.clientId,
+        } else {
+            // Original single boat booking flow
+            const bookingData = {
+                clientType: formData.clientType || "",
+                selectedPartner: formData.selectedPartner || "",
+                clientSource: formData.clientSource || "",
+                clientDetails: {
+                    name: formData.clientDetails.name || "",
+                    phone: formData.clientDetails.phone || "",
+                    email: formData.clientDetails.email || "",
+                    passportNumber: formData.clientDetails.passportNumber || "",
+                    address: formData.clientDetails.address || "",
+                },
+                clientName: formData.clientDetails.name || "",
+                clientId: clientId,
+                bookingDate: formData.bookingDetails.date || "",
+                bookingDetails: {
+                    boatCompany: formData.bookingDetails.boatCompany || "",
+                    boatName: formData.bookingDetails.boatName || "",
+                    passengers: formData.bookingDetails.passengers || "",
+                    date: formData.bookingDetails.date || "",
+                    startTime: formData.bookingDetails.startTime || "",
+                    endTime: formData.bookingDetails.endTime || "",
+                    transferAddress: formData.transfer.required
+                        ? {
+                              pickup: formData.transfer.pickup || {},
+                              dropoff: formData.transfer.dropoff || {},
+                          }
+                        : null,
+                },
+                pricing: {
+                  agreedPrice: parseFloat(formData.pricing.agreedPrice) || 0,
+                  pricingType: formData.pricing.pricingType,
+                  totalPaid: parseFloat(formData.pricing.totalPaid) || 0,
+                  paymentStatus: formData.pricing.paymentStatus || "No Payment",
+                  payments: [
+                    {
+                      type: 'first',
+                      amount: parseFloat(formData.pricing.firstPayment.amount) || 0,
+                      percentage: parseFloat(formData.pricing.firstPayment.percentage),
+                      method: formData.pricing.firstPayment.method || '',
+                      received: formData.pricing.firstPayment.received || false,
+                      date: formData.pricing.firstPayment.date || '',
+                      excludeVAT: formData.pricing.firstPayment.excludeVAT || false,
+                      recordedAt: new Date().toISOString()
+                    },
+                    {
+                      type: 'second',
+                      amount: parseFloat(formData.pricing.secondPayment.amount) || 0,
+                      method: formData.pricing.secondPayment.method || '',
+                      received: formData.pricing.secondPayment.received || false,
+                      date: formData.pricing.secondPayment.date || '',
+                      excludeVAT: formData.pricing.secondPayment.excludeVAT || false,
+                      recordedAt: new Date().toISOString()
+                    }
+                  ]
+                },
+                transfer: formData.transfer || {},
+                notes: formData.notes || "",
+                createdAt: new Date().toISOString(),
+                lastUpdated: new Date().toISOString(),
+                status: "active",
                 createdBy: createdByInfo,
-                createdAt: new Date().toISOString()
-            }));
+                restaurantName: restaurantName || "",
+            };
 
-            await Promise.all(paymentRecords.map(record => 
-                addDoc(collection(db, "payments"), record)
-            ));
-        }
+            // Create booking document
+            const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
+            await sendBookingConfirmationEmail(bookingData);
+            
+            // Add booking notification
+            await createBookingNotification(
+                formData.clientDetails.name,
+                formData.bookingDetails.boatName,
+                new Date(formData.bookingDetails.date).toLocaleDateString(),
+                bookingRef.id
+            );
 
-        // Update client's bookings array
-        if (clientId) {
-            await updateDoc(doc(db, "clients", clientId), {
-                bookings: arrayUnion(bookingRef.id),
+            if (formData.transfer.required) {
+                const pickupTime = new Date(`${formData.bookingDetails.date} ${formData.bookingDetails.startTime}`);
+                await createTransferNotification(
+                    bookingRef.id,
+                    formData.clientDetails.name,
+                    pickupTime.toLocaleTimeString()
+                );
+            }
+
+            if (formData.pricing.firstPayment.received) {
+                await createPaymentNotification(
+                    formData.pricing.firstPayment.amount,
+                    formData.clientDetails.name,
+                    bookingRef.id
+                );
+            }
+
+            if (formData.pricing.secondPayment.received) {
+                await createPaymentNotification(
+                    formData.pricing.secondPayment.amount,
+                    formData.clientDetails.name,
+                    bookingRef.id
+                );
+            }
+
+            await updateDoc(doc(db, "bookings", bookingRef.id), {
+                id: bookingRef.id
             });
+
+            const payments = bookingData.pricing.payments.filter(payment => payment.amount > 0);
+            if (payments.length > 0) {
+                const paymentRecords = payments.map(payment => ({
+                    ...payment,
+                    bookingId: bookingRef.id,
+                    clientId: bookingData.clientId,
+                    createdBy: createdByInfo,
+                    createdAt: new Date().toISOString()
+                }));
+
+                await Promise.all(paymentRecords.map(record => 
+                    addDoc(collection(db, "payments"), record)
+                ));
+            }
+
+            // Update client's bookings array
+            if (clientId) {
+                await updateDoc(doc(db, "clients", clientId), {
+                    bookings: arrayUnion(bookingRef.id),
+                });
+            }
+
+            alert("Booking saved successfully");
         }
 
-        alert("Booking saved successfully");
+        // Reset form and state
         setFormData({
             clientType: "",
             selectedPartner: "",
@@ -1195,6 +1568,8 @@ if (typeof value === 'string' &&
             },
             notes: "",
         });
+        setMultiBoatMode(false);
+        setBoats([]);
         setActiveStep(1);
         setRestaurantName("");
     } catch (error) {
@@ -1203,7 +1578,8 @@ if (typeof value === 'string' &&
     } finally {
         setLoading(false);
     }
-};
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-2 sm:p-6">
       <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-lg">
@@ -1326,9 +1702,6 @@ if (typeof value === 'string' &&
           </form>
         </div>
       </div>
-
-      {/* Mobile optimizations for inputs */}
-
     </div>
   );
 }
