@@ -11,7 +11,7 @@ import FirestoreTest from "./FirestoreTest";
 import Login from './components/Login';
 import Analytics from './components/Analytics';
 import ClientDirectory from './components/ClientDirectory';
-import AddExpense from './components/AddExpense';
+
 import PaymentTracking from './components/PaymentTracking';
 import ExpenseOverview from './components/ExpenseOverview';
 import BoatManagement from './components/BoatManagement';
@@ -214,16 +214,7 @@ function App() {
                                 }
                             />
                             {/* Catering Routes */}
-                            <Route
-                                path="/add-expense"
-                                element={
-                                    <ProtectedRoute>
-                                        <ProtectedLayout>
-                                            <AddExpense />
-                                        </ProtectedLayout>
-                                    </ProtectedRoute>
-                                }
-                            />
+                            
                             <Route
                                 path="/expenses"
                                 element={

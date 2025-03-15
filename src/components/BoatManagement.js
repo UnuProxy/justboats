@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, deleteDoc, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, storage } from "../firebase/firebaseConfig";
 import { useNavigate } from 'react-router-dom';
-import { PenSquare, Trash2, Download } from 'lucide-react';
+import { PenSquare, Trash2, Download, Eye, EyeOff } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { ref, getDownloadURL } from 'firebase/storage';
@@ -21,7 +21,9 @@ const BoatManagement = () => {
             const boatsSnapshot = await getDocs(boatsRef);
             const boatsList = boatsSnapshot.docs.map(doc => ({
                 id: doc.id,
-                ...doc.data()
+                ...doc.data(),
+                // Set default visibility to true if not specified
+                visible: doc.data().visible !== undefined ? doc.data().visible : true
             }));
             setBoats(boatsList);
         } catch (error) {
@@ -52,9 +54,26 @@ const BoatManagement = () => {
         navigate(`/edit-boat/${boatId}`);
     };
 
-   
+    const handleToggleVisibility = async (boatId, currentVisibility) => {
+        try {
+            // Update visibility in Firestore
+            const boatRef = doc(db, 'boats', boatId);
+            await updateDoc(boatRef, {
+                visible: !currentVisibility
+            });
+            
+            // Update local state
+            setBoats(boats.map(boat => 
+                boat.id === boatId 
+                    ? { ...boat, visible: !currentVisibility } 
+                    : boat
+            ));
+        } catch (error) {
+            console.error('Error updating boat visibility:', error);
+            alert('Error updating visibility');
+        }
+    };
 
-    
     const handleGeneratePdf = async (boatId) => {
       setPdfLoading(prev => ({ ...prev, [boatId]: true }));
     
@@ -441,14 +460,34 @@ dynamicFeatures.forEach((feature) => {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {boats.map((boat) => (
-                    <div key={boat.id} className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow">
+                    <div 
+                        key={boat.id} 
+                        className={`bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow ${!boat.visible ? 'border-2 border-dashed border-gray-300 opacity-75' : ''}`}
+                    >
                         <div className="relative w-full h-64">
                             <img
                                 src={boat.images?.[0] || boat.image}
                                 alt={boat.name}
                                 className="w-full h-full object-cover rounded-t-lg"
                             />
+                            {!boat.visible && (
+                                <div className="absolute inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center">
+                                    <span className="text-white text-lg font-semibold px-4 py-2 bg-gray-800 bg-opacity-75 rounded-md">
+                                        Hidden from Website
+                                    </span>
+                                </div>
+                            )}
                             <div className="absolute top-4 right-4 flex space-x-2">
+                                <button
+                                    onClick={() => handleToggleVisibility(boat.id, boat.visible)}
+                                    className={`p-2.5 bg-white rounded-full shadow-lg hover:bg-gray-100 transition-colors ${!boat.visible ? 'bg-gray-200' : ''}`}
+                                    title={boat.visible ? "Hide from website" : "Show on website"}
+                                >
+                                    {boat.visible ? 
+                                        <Eye size={20} className="text-green-600" /> : 
+                                        <EyeOff size={20} className="text-gray-600" />
+                                    }
+                                </button>
                                 <button
                                     onClick={() => handleEdit(boat.id)}
                                     className="p-2.5 bg-white rounded-full shadow-lg hover:bg-gray-100 transition-colors"
@@ -476,7 +515,14 @@ dynamicFeatures.forEach((feature) => {
                             </div>
                         </div>
                         <div className="p-6">
-                            <h2 className="text-2xl font-semibold mb-4">{boat.name}</h2>
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-2xl font-semibold">{boat.name}</h2>
+                                {!boat.visible && (
+                                    <span className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded-md">
+                                        Hidden
+                                    </span>
+                                )}
+                            </div>
                             <div className="space-y-2 text-gray-600">
                                 <p className="text-base">
                                     <span className="font-medium">Specs:</span> {boat.detailedSpecs?.Length}, {boat.detailedSpecs?.Guests} guests, {boat.detailedSpecs?.Crew} crew

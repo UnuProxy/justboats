@@ -86,58 +86,65 @@ const LeadManagement = () => {
     setupNotifications();
   }, []);
 
+ 
   // Fetch leads in real-time
-  useEffect(() => {
-    let unsubscribeLeads;
+useEffect(() => {
+  let unsubscribeLeads;
+  // Add this flag to track initial load
+  let isInitialLoad = true;
+  
+  try {
+    console.log('Setting up leads listener...');
     
-    try {
-      console.log('Setting up leads listener...');
-      
-      // Create a query for the inquiries collection
-      const inquiriesQuery = query(
-        collection(db, 'inquiries'),
-        orderBy('timestamp', 'desc')
-      );
+    // Create a query for the inquiries collection
+    const inquiriesQuery = query(
+      collection(db, 'inquiries'),
+      orderBy('timestamp', 'desc')
+    );
 
-      unsubscribeLeads = onSnapshot(inquiriesQuery, 
-        (snapshot) => {
-          console.log(`Received ${snapshot.docs.length} leads from Firestore`);
-          
-          const leadData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            status: doc.data().status || 'new'
-          }));
-          
-          setLeads(leadData);
-          setLoading(false);
-          
-          // Check for new leads since last update
-          const newLeads = snapshot.docChanges()
-            .filter(change => change.type === 'added');
-          
-          if (newLeads.length > 0) {
-            const latestLead = newLeads[0].doc.data();
-            const vesselName = latestLead.boatName || latestLead.yachtName || 'a yacht';
-            showNotification('New Lead', `${latestLead.name || 'Someone'} inquired about ${vesselName}`);
-          }
-        }, 
-        (error) => {
-          console.error("Error fetching inquiries:", error);
-          setLoading(false);
+    unsubscribeLeads = onSnapshot(inquiriesQuery, 
+      (snapshot) => {
+        console.log(`Received ${snapshot.docs.length} leads from Firestore`);
+        
+        const leadData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          status: doc.data().status || 'new'
+        }));
+        
+        setLeads(leadData);
+        setLoading(false);
+        
+        // Check for new leads since last update
+        const newLeads = snapshot.docChanges()
+          .filter(change => change.type === 'added');
+        
+        // Only show notifications if it's not the initial load
+        if (newLeads.length > 0 && !isInitialLoad) {
+          const latestLead = newLeads[0].doc.data();
+          const vesselName = latestLead.boatName || latestLead.yachtName || 'a yacht';
+          showNotification('New Lead', `${latestLead.name || 'Someone'} inquired about ${vesselName}`);
         }
-      );
-    } catch (error) {
-      console.error("Error setting up inquiries listener:", error);
-      setLoading(false);
-    }
-
-    return () => {
-      if (unsubscribeLeads) {
-        unsubscribeLeads();
+        
+        // Mark initial load as complete after first snapshot
+        isInitialLoad = false;
+      }, 
+      (error) => {
+        console.error("Error fetching inquiries:", error);
+        setLoading(false);
       }
-    };
-  }, [db]);
+    );
+  } catch (error) {
+    console.error("Error setting up inquiries listener:", error);
+    setLoading(false);
+  }
+
+  return () => {
+    if (unsubscribeLeads) {
+      unsubscribeLeads();
+    }
+  };
+}, [db]);
 
   // Fetch users
   useEffect(() => {

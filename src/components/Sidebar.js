@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
     Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3,
-    User, Wallet, CreditCard, Euro, Ship, MessageSquare,
+    User,  CreditCard, Euro, Ship, MessageSquare,
     Settings, Building, ChevronDown, ChevronUp, Utensils, Package, Box, ShoppingCart, FileText,
     Star, StarOff
 } from 'lucide-react';
@@ -235,12 +235,7 @@ const Sidebar = () => {
                         path: '/invoice-generator',
                         allowed: true
                     },
-                    {
-                        name: 'Add Expense',
-                        icon: Wallet,
-                        path: '/add-expense',
-                        allowed: true
-                    },
+                    
                     {
                         name: 'Expenses Overview',
                         icon: Euro,
