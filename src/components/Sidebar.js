@@ -7,6 +7,10 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { 
+    // ... existing imports
+    QrCode, MapPin  // Add these imports
+} from 'lucide-react';
 
 const Sidebar = () => {
     const navigate = useNavigate();
@@ -164,6 +168,19 @@ const Sidebar = () => {
                         name: 'Manage Partners',
                         icon: Building,
                         path: '/manage-partners',
+                        allowed: true
+                    }
+                ]
+            },
+            {
+                id: 'places',
+                title: "Places & QR Codes",
+                icon: MapPin,
+                items: [
+                    {
+                        name: 'Manage Places',
+                        icon: QrCode,
+                        path: '/places',
                         allowed: true
                     }
                 ]
