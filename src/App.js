@@ -11,7 +11,6 @@ import FirestoreTest from "./FirestoreTest";
 import Login from './components/Login';
 import Analytics from './components/Analytics';
 import ClientDirectory from './components/ClientDirectory';
-
 import PaymentTracking from './components/PaymentTracking';
 import ExpenseOverview from './components/ExpenseOverview';
 import BoatManagement from './components/BoatManagement';
@@ -27,6 +26,8 @@ import LeadManagement from './components/LeadManagement';
 import NotificationsCenter from './components/notifications/NotificationsCenter';
 import InvoiceGenerator from './components/InvoiceGenerator';
 import SanAntonioBookingsAdmin from './components/SanAntonioBookingsAdmin';
+import PlaceQRManager from './components/PlaceQRManager';
+import QRRedirect from './components/QRRedirect';
 
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -307,6 +308,22 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
+                            <Route
+    path="/places"
+    element={
+        <ProtectedRoute requiredPermission="admin">
+            <ProtectedLayout>
+                <PlaceQRManager />
+            </ProtectedLayout>
+        </ProtectedRoute>
+    }
+/>
+
+
+<Route
+    path="/scan/:id"
+    element={<QRRedirect />}
+/>
 
                             {/* Directory Routes */}
                             <Route
