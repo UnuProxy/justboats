@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter as Router, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { ErrorBoundary } from 'react-error-boundary';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Sidebar from './components/Sidebar';
@@ -109,6 +109,8 @@ const ProtectedRoute = ({ children }) => {
 };
 
 function ProtectedLayout({ children }) {
+    const navigate = useNavigate();
+
     return (
         <div className="relative bg-gray-100 min-h-screen">
             <Sidebar />
@@ -117,7 +119,10 @@ function ProtectedLayout({ children }) {
                     <div></div>
                     <div className="flex items-center gap-4">
                         <NotificationsCenter />
-                        <h1 className="text-xl font-semibold">
+                        <h1 
+                            className="text-xl font-semibold cursor-pointer hover:text-blue-500 transition-colors"
+                            onClick={() => navigate('/')}
+                        >
                             Just Enjoy Bookings
                         </h1>
                     </div>
@@ -309,21 +314,21 @@ function App() {
                                 }
                             />
                             <Route
-    path="/places"
-    element={
-        <ProtectedRoute requiredPermission="admin">
-            <ProtectedLayout>
-                <PlaceQRManager />
-            </ProtectedLayout>
-        </ProtectedRoute>
-    }
-/>
+                                path="/places"
+                                element={
+                                    <ProtectedRoute requiredPermission="admin">
+                                        <ProtectedLayout>
+                                            <PlaceQRManager />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
 
 
-<Route
-    path="/scan/:id"
-    element={<QRRedirect />}
-/>
+                            <Route
+                                path="/scan/:id"
+                                element={<QRRedirect />}
+                            />
 
                             {/* Directory Routes */}
                             <Route
