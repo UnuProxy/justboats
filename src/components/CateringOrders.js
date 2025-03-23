@@ -11,7 +11,8 @@ import {
   startAfter,
   getDocs,
 } from 'firebase/firestore';
-import { CheckCircle, XCircle, Search, X, Printer } from 'lucide-react';
+import { CheckCircle, XCircle, Search, X, Printer, Plus } from 'lucide-react';
+import ManualOrderEntry from './ManualEntryOrder';
 
 const ORDERS_PER_PAGE = 10;
 
@@ -23,6 +24,7 @@ const CateringOrders = () => {
   const [lastVisible, setLastVisible] = useState(null);
   const [hasMore, setHasMore] = useState(true);
   const [activeTab, setActiveTab] = useState('today-tomorrow');
+  const [showManualOrderForm, setShowManualOrderForm] = useState(false);
 
   useEffect(() => {
     loadInitialOrders();
@@ -76,6 +78,11 @@ const CateringOrders = () => {
     setOrders([...orders, ...newOrders]);
     setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
     setHasMore(snapshot.docs.length === ORDERS_PER_PAGE);
+  };
+
+  const handleManualOrderAdded = (newOrder) => {
+    // Refresh orders list or add the new order to the top
+    setOrders([newOrder, ...orders]);
   };
 
   const updateOrderStatus = async (orderId, newStatus) => {
@@ -156,6 +163,11 @@ const CateringOrders = () => {
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold">Order Receipt</h1>
           <p className="text-gray-600">Order #{order.orderId || order.id.slice(-6)}</p>
+          {order.isManualOrder && (
+            <div className="mt-1 text-sm font-medium px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full inline-block">
+              Manual Order via {order.orderSource}
+            </div>
+          )}
         </div>
         
         <div className="mb-6">
@@ -244,9 +256,16 @@ const CateringOrders = () => {
         <div className="bg-white rounded-lg shadow-md p-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3">
             <div className="w-full sm:w-auto mb-2 sm:mb-0">
-              <h3 className="text-lg font-semibold">
-                Order #{order.orderId || order.id.slice(-6)}
-              </h3>
+              <div className="flex items-center">
+                <h3 className="text-lg font-semibold">
+                  Order #{order.orderId || order.id.slice(-6)}
+                </h3>
+                {order.isManualOrder && (
+                  <span className="ml-2 px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded-full">
+                    {order.orderSource}
+                  </span>
+                )}
+              </div>
               <div className="text-sm text-gray-600 mt-1">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div><strong>Boat:</strong> {order.boatName}</div>
@@ -349,149 +368,172 @@ const CateringOrders = () => {
 
             {getOrderStatus(order).toLowerCase() === 'ready_for_pickup' && (
               <button
-              onClick={() => updateOrderStatus(order.id, 'delivered')}
-              className="flex items-center px-3 py-1.5 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
-            >
-              <CheckCircle className="w-4 h-4 mr-1" />
-              Mark as Picked Up
-            </button>
-          )}
+                onClick={() => updateOrderStatus(order.id, 'delivered')}
+                className="flex items-center px-3 py-1.5 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
+              >
+                <CheckCircle className="w-4 h-4 mr-1" />
+                Mark as Picked Up
+              </button>
+            )}
 
-          {getOrderStatus(order).toLowerCase() === 'dispatched' && (
-            <button
-              onClick={() => updateOrderStatus(order.id, 'delivered')}
-              className="flex items-center px-3 py-1.5 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
-            >
-              <CheckCircle className="w-4 h-4 mr-1" />
-              Deliver
-            </button>
-          )}
+            {getOrderStatus(order).toLowerCase() === 'dispatched' && (
+              <button
+                onClick={() => updateOrderStatus(order.id, 'delivered')}
+                className="flex items-center px-3 py-1.5 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
+              >
+                <CheckCircle className="w-4 h-4 mr-1" />
+                Deliver
+              </button>
+            )}
 
-          {getOrderStatus(order).toLowerCase() !== 'cancelled' &&
-           getOrderStatus(order).toLowerCase() !== 'delivered' && (
-            <button
-              onClick={() => updateOrderStatus(order.id, 'cancelled')}
-              className="flex items-center px-3 py-1.5 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
-            >
-              <XCircle className="w-4 h-4 mr-1" />
-              Cancel
-            </button>
-          )}
-        </div>
-      </div>
-      
-      {/* Hidden print template */}
-      <div className="hidden">
-        <div ref={printRef}>
-          <PrintOrder order={order} />
-        </div>
-      </div>
-    </>
-  );
-};
-
-if (loading) {
-  return (
-    <div className="flex justify-center items-center h-64">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500" />
-    </div>
-  );
-}
-
-const filteredOrders = filterOrders();
-
-return (
-  <div className="container mx-auto px-4 py-6">
-    {/* Header section with search and filters */}
-    <div className="space-y-4 mb-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h1 className="text-2xl font-bold">Orders Dashboard</h1>
-        
-        {/* Search bar */}
-        <div className="w-full sm:w-auto relative">
-          <input
-            type="text"
-            placeholder="Search order #, boat, client..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full sm:w-64 border rounded-lg px-4 py-2 pl-10 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-4">
-        {/* Status Filter */}
-        <select
-          value={selectedStatus}
-          onChange={(e) => setSelectedStatus(e.target.value)}
-          className="border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="all">All Statuses</option>
-          <option value="pending">Pending</option>
-          <option value="preparing">Preparing</option>
-          <option value="ready_for_pickup">Ready for Pickup</option>
-          <option value="dispatched">Dispatched</option>
-          <option value="delivered">Delivered</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-
-        {/* Date filter tabs */}
-        <div className="flex border rounded-lg overflow-hidden">
-          {['today-tomorrow', 'future', 'past'].map((tab) => (
-            <button
-              key={tab}
-              className={`px-4 py-2 text-sm font-medium ${
-                activeTab === tab
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab === 'today-tomorrow'
-                ? "Today & Tomorrow"
-                : tab === 'future'
-                ? "Future"
-                : "Past"}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-
-    {/* Orders List */}
-    {filteredOrders.length === 0 ? (
-      <div className="text-center py-12">
-        <p className="text-gray-500">No orders found</p>
-      </div>
-    ) : (
-      <div className="space-y-4">
-        {filteredOrders.map(order => (
-          <OrderCard key={order.id} order={order} />
-        ))}
-        
-        {hasMore && (
-          <div className="flex justify-center mt-6">
-            <button
-              onClick={loadMoreOrders}
-              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-            >
-              Load More Orders
-            </button>
+            {getOrderStatus(order).toLowerCase() !== 'cancelled' &&
+             getOrderStatus(order).toLowerCase() !== 'delivered' && (
+              <button
+                onClick={() => updateOrderStatus(order.id, 'cancelled')}
+                className="flex items-center px-3 py-1.5 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
+              >
+                <XCircle className="w-4 h-4 mr-1" />
+                Cancel
+              </button>
+            )}
           </div>
-        )}
+        </div>
+        
+        {/* Hidden print template */}
+        <div className="hidden">
+          <div ref={printRef}>
+            <PrintOrder order={order} />
+          </div>
+        </div>
+      </>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500" />
       </div>
-    )}
-  </div>
-);
+    );
+  }
+
+  const filteredOrders = filterOrders();
+
+  return (
+    <div className="container mx-auto px-4 py-6">
+      {/* Modal for manual order entry */}
+      {showManualOrderForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto">
+          <div className="max-w-4xl w-full mx-auto">
+            <ManualOrderEntry 
+              onClose={() => setShowManualOrderForm(false)} 
+              onOrderAdded={handleManualOrderAdded}
+            />
+          </div>
+        </div>
+      )}
+      
+      {/* Header section with search and filters */}
+      <div className="space-y-4 mb-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <h1 className="text-2xl font-bold">Orders Dashboard</h1>
+          
+          <div className="flex flex-col sm:flex-row gap-2">
+            {/* Add Manual Order Button */}
+            <button
+              onClick={() => setShowManualOrderForm(true)}
+              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            >
+              <Plus className="w-5 h-5 mr-1" />
+              Add Manual Order
+            </button>
+            
+            {/* Search bar */}
+            <div className="w-full sm:w-auto relative">
+              <input
+                type="text"
+                placeholder="Search order #, boat, client..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full sm:w-64 border rounded-lg px-4 py-2 pl-10 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-4">
+          {/* Status Filter */}
+          <select
+            value={selectedStatus}
+            onChange={(e) => setSelectedStatus(e.target.value)}
+            className="border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="preparing">Preparing</option>
+            <option value="ready_for_pickup">Ready for Pickup</option>
+            <option value="dispatched">Dispatched</option>
+            <option value="delivered">Delivered</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+
+          {/* Date filter tabs */}
+          <div className="flex border rounded-lg overflow-hidden">
+            {['today-tomorrow', 'future', 'past'].map((tab) => (
+              <button
+                key={tab}
+                className={`px-4 py-2 text-sm font-medium ${
+                  activeTab === tab
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab === 'today-tomorrow'
+                  ? "Today & Tomorrow"
+                  : tab === 'future'
+                  ? "Future"
+                  : "Past"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Orders List */}
+      {filteredOrders.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-gray-500">No orders found</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {filteredOrders.map(order => (
+            <OrderCard key={order.id} order={order} />
+          ))}
+          
+          {hasMore && (
+            <div className="flex justify-center mt-6">
+              <button
+                onClick={loadMoreOrders}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+              >
+                Load More Orders
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default CateringOrders;

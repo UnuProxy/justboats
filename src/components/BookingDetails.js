@@ -1,7 +1,17 @@
 import React, { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import { formatDateDDMMYYYY, formatDateTime } from "../utils/date.js";
-import { collection, query, where, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  doc, 
+  updateDoc, 
+  getDoc,
+  getDocs,
+  serverTimestamp
+} from 'firebase/firestore';
 import { format } from "date-fns";
 import { db } from "../firebase/firebaseConfig";
 import PaymentDetails from "./PaymentDetails.js";
@@ -88,6 +98,485 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
       console.error("Error updating payment status:", error);
       alert("Failed to update payment status. Please try again.");
     }
+  };
+
+  // LinkedOrdersSection Component
+
+
+  const LinkedOrdersSection = () => {
+    const [orders, setOrders] = useState([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isUpdating, setIsUpdating] = useState(false);
+    
+    useEffect(() => {
+      if (!booking?.id) return;
+      
+      fetchOrders();
+    }, [booking?.id]);
+    
+    const fetchOrders = async () => {
+      setIsLoading(true);
+      try {
+        // Track if we need to update the booking's linkedOrders array
+        let needsBookingUpdate = false;
+        let updatedLinkedOrders = [];
+        
+        // First, check if there are linked orders in the booking document
+        if (booking.linkedOrders && booking.linkedOrders.length > 0) {
+          // For each linked order, get the full order details from Firestore
+          const orderPromises = booking.linkedOrders.map(async (linkedOrder) => {
+            if (linkedOrder.orderDocId) {
+              try {
+                const orderDoc = await getDoc(doc(db, "orders", linkedOrder.orderDocId));
+                if (orderDoc.exists()) {
+                  // Order exists, add to updated list
+                  updatedLinkedOrders.push(linkedOrder);
+                  return {
+                    id: orderDoc.id,
+                    ...orderDoc.data(),
+                  };
+                } else {
+                  // Order doesn't exist anymore, mark for removal
+                  console.log(`Order ${linkedOrder.orderDocId} no longer exists`);
+                  needsBookingUpdate = true;
+                  return null;
+                }
+              } catch (err) {
+                console.error("Error fetching linked order:", err);
+                return null;
+              }
+            }
+            // Keep orders without orderDocId for backward compatibility
+            updatedLinkedOrders.push(linkedOrder);
+            return linkedOrder;
+          });
+          
+          const resolvedOrders = await Promise.all(orderPromises);
+          
+          // Update the booking document if we found deleted orders
+          if (needsBookingUpdate && booking.id) {
+            try {
+              console.log("Updating booking to remove deleted orders");
+              const bookingRef = doc(db, "bookings", booking.id);
+              await updateDoc(bookingRef, {
+                linkedOrders: updatedLinkedOrders,
+                lastUpdated: serverTimestamp()
+              });
+              console.log("Booking updated successfully");
+            } catch (updateErr) {
+              console.error("Error updating booking's linkedOrders:", updateErr);
+            }
+          }
+          
+          setOrders(resolvedOrders.filter(o => o)); // Remove any null results
+        } else {
+          // If no linked orders in the booking document, query the orders collection
+          const ordersRef = collection(db, "orders");
+          const q = query(
+            ordersRef,
+            where("booking_info.bookingId", "==", booking.id)
+          );
+          
+          const querySnapshot = await getDocs(q);
+          const orderData = querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setOrders(orderData);
+          
+          // If we found orders but the booking doesn't have linkedOrders,
+          // update the booking with these orders
+          if (orderData.length > 0 && booking.id) {
+            try {
+              const linkedOrdersToAdd = orderData.map(order => ({
+                orderDocId: order.id,
+                orderId: order.orderId,
+                status: order.status,
+                paymentStatus: order.paymentStatus,
+                deliveryStatus: order.deliveryStatus || order.status,
+                amount: order.amount_total || order.amount || 0
+              }));
+              
+              const bookingRef = doc(db, "bookings", booking.id);
+              await updateDoc(bookingRef, {
+                linkedOrders: linkedOrdersToAdd,
+                lastUpdated: serverTimestamp()
+              });
+              console.log("Added linkedOrders to booking");
+            } catch (updateErr) {
+              console.error("Error adding linkedOrders to booking:", updateErr);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching orders:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    const handleOrderStatusUpdate = async (order, field, newValue) => {
+      if (isUpdating) return; // Prevent multiple simultaneous updates
+      
+      const orderId = order.id || order.orderDocId;
+      if (!orderId) {
+        console.error("Cannot update order: missing ID");
+        return;
+      }
+      
+      setIsUpdating(true);
+      
+      try {
+        // First check if the order still exists
+        const orderRef = doc(db, "orders", orderId);
+        const orderDoc = await getDoc(orderRef);
+        
+        if (!orderDoc.exists()) {
+          console.log(`Order ${orderId} no longer exists, refreshing view`);
+          // If order doesn't exist, refresh the orders list to clean up
+          fetchOrders();
+          setIsUpdating(false);
+          return;
+        }
+        
+        // Calculate updated payment details when changing payment status
+        let orderUpdate = {
+          [field]: newValue,
+          updatedAt: serverTimestamp()
+        };
+        
+        if (field === 'paymentStatus') {
+          // If updating payment status to paid, update payment_details
+          const totalAmount = order.amount_total || order.amount || 0;
+          
+          if (newValue === 'paid') {
+            orderUpdate.payment_details = {
+              ...(order.payment_details || {}),
+              amountPaid: totalAmount,
+              amountDue: 0
+            };
+          } else if (newValue === 'partially_paid') {
+            // Handle partial payment - you might want to prompt for amount
+            const amountPaid = order.payment_details?.amountPaid || 0;
+            orderUpdate.payment_details = {
+              ...(order.payment_details || {}),
+              amountDue: totalAmount - amountPaid
+            };
+          } else {
+            // If unpaid, reset payment details
+            orderUpdate.payment_details = {
+              ...(order.payment_details || {}),
+              amountPaid: 0,
+              amountDue: totalAmount
+            };
+          }
+        }
+        
+        // If setting payment to paid and delivery to delivered, update overall status too
+        if (field === 'paymentStatus' && newValue === 'paid' && 
+            (order.deliveryStatus === 'delivered' || order.status === 'dispatched')) {
+          orderUpdate.status = 'completed';
+        } else if (field === 'deliveryStatus' && newValue === 'delivered' && 
+                  order.paymentStatus === 'paid') {
+          orderUpdate.status = 'completed';
+        }
+        
+        // Update the order document in Firestore
+        await updateDoc(orderRef, orderUpdate);
+        
+        console.log(`Updated order ${orderId} ${field} to ${newValue}`, orderUpdate);
+        
+        // Now update the booking document to reflect these changes
+        if (booking?.id) {
+          const bookingRef = doc(db, "bookings", booking.id);
+          const bookingDoc = await getDoc(bookingRef);
+          
+          if (bookingDoc.exists()) {
+            const bookingData = bookingDoc.data();
+            let linkedOrders = bookingData.linkedOrders || [];
+            
+            // Find and update the specific order in the linkedOrders array
+            const updatedLinkedOrders = linkedOrders.map(linkOrder => {
+              if (linkOrder.orderDocId === orderId || linkOrder.orderId === order.orderId) {
+                // Update the order info in the linkedOrders array
+                const updatedLinkOrder = { ...linkOrder, [field]: newValue };
+                
+                // Also update payment details if needed
+                if (field === 'paymentStatus') {
+                  const totalAmount = linkOrder.amount || order.amount_total || 0;
+                  
+                  if (newValue === 'paid') {
+                    updatedLinkOrder.amountPaid = totalAmount;
+                    updatedLinkOrder.amountDue = 0;
+                  } else if (newValue === 'unpaid') {
+                    updatedLinkOrder.amountPaid = 0;
+                    updatedLinkOrder.amountDue = totalAmount;
+                  }
+                }
+                
+                return updatedLinkOrder;
+              }
+              return linkOrder;
+            });
+            
+            // Determine overall order status for the booking
+            const allOrdersPaid = updatedLinkedOrders.every(o => o.paymentStatus === 'paid');
+            const allOrdersDelivered = updatedLinkedOrders.every(
+              o => o.deliveryStatus === 'delivered' || o.status === 'dispatched'
+            );
+            
+            let bookingOrderStatus = bookingData.orderStatus || 'pending';
+            if (allOrdersPaid && allOrdersDelivered) {
+              bookingOrderStatus = 'fulfilled';
+            } else if (allOrdersPaid) {
+              bookingOrderStatus = 'paid';
+            } else if (allOrdersDelivered) {
+              bookingOrderStatus = 'delivered';
+            }
+            
+            // Update the booking
+            await updateDoc(bookingRef, {
+              linkedOrders: updatedLinkedOrders,
+              orderStatus: bookingOrderStatus,
+              lastUpdated: serverTimestamp()
+            });
+            
+            console.log(`Updated booking ${booking.id} to reflect order changes`);
+          }
+        }
+        
+        // Refresh the order list after updating
+        fetchOrders();
+      } catch (error) {
+        console.error("Error updating order status:", error);
+        alert(`Failed to update order ${field}. Please try again.`);
+      } finally {
+        setIsUpdating(false);
+      }
+    };
+    
+    // Function to handle order deletion
+    const handleDeleteOrder = async (order) => {
+      if (isUpdating) return;
+      
+      const orderId = order.id || order.orderDocId;
+      if (!orderId) {
+        console.error("Cannot delete order: missing ID");
+        return;
+      }
+      
+      if (!window.confirm(`Are you sure you want to remove this order (${order.orderId || orderId}) from the booking?`)) {
+        return;
+      }
+      
+      setIsUpdating(true);
+      
+      try {
+        // Update the booking to remove the order from linkedOrders
+        if (booking?.id) {
+          const bookingRef = doc(db, "bookings", booking.id);
+          const bookingDoc = await getDoc(bookingRef);
+          
+          if (bookingDoc.exists()) {
+            const bookingData = bookingDoc.data();
+            let linkedOrders = bookingData.linkedOrders || [];
+            
+            // Filter out the order to be deleted
+            const updatedLinkedOrders = linkedOrders.filter(
+              linkOrder => linkOrder.orderDocId !== orderId && linkOrder.orderId !== order.orderId
+            );
+            
+            // Update the booking
+            await updateDoc(bookingRef, {
+              linkedOrders: updatedLinkedOrders,
+              lastUpdated: serverTimestamp()
+            });
+            
+            console.log(`Removed order ${orderId} from booking ${booking.id}`);
+            
+            // Refresh the orders list
+            fetchOrders();
+          }
+        }
+      } catch (error) {
+        console.error("Error removing order from booking:", error);
+        alert("Failed to remove order from booking. Please try again.");
+      } finally {
+        setIsUpdating(false);
+      }
+    };
+    
+    // Function to determine remaining amount
+    const getRemainingAmount = (order) => {
+      const totalAmount = order.amount_total || order.amount || 0;
+      const amountPaid = order.payment_details?.amountPaid || 0;
+      return Math.max(0, totalAmount - amountPaid).toFixed(2);
+    };
+    
+    // Function to open order details 
+    const handleViewOrder = (order) => {
+      if (!order || !order.id) {
+        alert("Cannot view order: missing ID");
+        return;
+      }
+      
+      // You might implement different navigation depending on your app
+      // For now, we'll just alert with the order details
+      const details = `
+        Order ID: ${order.orderId}
+        Status: ${order.status || 'N/A'}
+        Payment Status: ${order.paymentStatus || 'N/A'}
+        Total Amount: €${(order.amount_total || order.amount || 0).toFixed(2)}
+        Amount Paid: €${(order.payment_details?.amountPaid || 0).toFixed(2)}
+        Amount Due: €${getRemainingAmount(order)}
+      `;
+      
+      alert(`Order Details:\n${details}`);
+      
+      // Depending on your app navigation, you could navigate to the order instead:
+      // navigate(`/orders/${order.id}`);
+    };
+    
+    // Status badge color mapping
+    const getStatusColor = (status) => {
+      switch (status) {
+        case 'paid':
+        case 'delivered':
+        case 'dispatched':
+        case 'ready_for_pickup':
+        case 'completed':
+          return 'bg-green-100 text-green-800';
+        case 'partially_paid':
+        case 'preparing':
+        case 'pending':
+          return 'bg-yellow-100 text-yellow-800';
+        case 'cancelled':
+          return 'bg-red-100 text-red-800';
+        default:
+          return 'bg-gray-100 text-gray-800';
+      }
+    };
+    
+    return (
+      <div className="p-4 border rounded-lg">
+        <div className="flex justify-between items-center mb-4">
+          <h4 className="text-lg font-bold">Linked Orders</h4>
+          {isUpdating && (
+            <span className="text-sm text-blue-600">Updating...</span>
+          )}
+        </div>
+        
+        {isLoading ? (
+          <div className="text-center py-4">
+            <p>Loading orders...</p>
+          </div>
+        ) : orders?.length === 0 ? (
+          <p className="text-gray-500 text-center py-4">No orders linked to this booking</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order ID</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Paid/Due</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Payment</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Delivery</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {orders.map((order, index) => {
+                  const totalAmount = order.amount_total || order.amount || 0;
+                  const amountPaid = order.payment_details?.amountPaid || 0;
+                  const amountDue = Math.max(0, totalAmount - amountPaid);
+                  
+                  return (
+                    <tr key={order.id || order.orderDocId || index} className="hover:bg-gray-50">
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        {order.orderId}
+                      </td>
+                      <td className="px-4 py-2">
+                        {order.items ? (
+                          <ul className="list-disc list-inside">
+                            {order.items.map((item, idx) => (
+                              <li key={idx} className="text-sm">
+                                {item.quantity} x {item.name}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          "No items information"
+                        )}
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        €{totalAmount.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <div className="text-green-600">€{amountPaid.toFixed(2)} paid</div>
+                        {amountDue > 0 && (
+                          <div className="text-red-600">€{amountDue.toFixed(2)} due</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <button
+                          onClick={() => handleOrderStatusUpdate(
+                            order, 
+                            'paymentStatus', 
+                            order.paymentStatus === 'paid' ? 'unpaid' : 'paid'
+                          )}
+                          disabled={isUpdating}
+                          className={`
+                            px-2 py-1 rounded-full text-xs font-medium cursor-pointer
+                            ${getStatusColor(order.paymentStatus)}
+                            ${isUpdating ? 'opacity-50 cursor-not-allowed' : ''}
+                          `}
+                        >
+                          {order.paymentStatus || 'pending'}
+                        </button>
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <button
+                          onClick={() => handleOrderStatusUpdate(
+                            order, 
+                            'deliveryStatus', 
+                            order.deliveryStatus === 'delivered' ? 'pending' : 'delivered'
+                          )}
+                          disabled={isUpdating}
+                          className={`
+                            px-2 py-1 rounded-full text-xs font-medium cursor-pointer
+                            ${getStatusColor(order.deliveryStatus || order.status)}
+                            ${isUpdating ? 'opacity-50 cursor-not-allowed' : ''}
+                          `}
+                        >
+                          {order.deliveryStatus || order.status || 'pending'}
+                        </button>
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap flex space-x-2">
+                        <button
+                          className="text-blue-600 hover:text-blue-900 px-2 py-1 bg-blue-50 rounded"
+                          onClick={() => handleViewOrder(order)}
+                        >
+                          View
+                        </button>
+                        <button
+                          className="text-red-600 hover:text-red-900 px-2 py-1 bg-red-50 rounded"
+                          onClick={() => handleDeleteOrder(order)}
+                          disabled={isUpdating}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handlePaymentChange = (paymentIndex, updates) => {
@@ -724,24 +1213,27 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
     </div>
 
     <div className="col-span-full">
+      <PaymentDetails 
+        payments={editedBooking?.pricing?.payments || []}
+        pricingType={editedBooking?.pricing?.pricingType}
+        agreedPrice={editedBooking?.pricing?.agreedPrice}
+        totalPaid={editedBooking?.pricing?.totalPaid}
+        paymentStatus={editedBooking?.pricing?.paymentStatus}
+        isEditing={isEditing}
+        onPaymentChange={handlePaymentChange}
+      />
+    </div>
+    
+    {/* Linked Orders Section */}
+    <div className="col-span-full mt-6">
+      <LinkedOrdersSection />
+    </div>
    
-    <div className="col-span-full">
-    <PaymentDetails 
-      payments={editedBooking?.pricing?.payments || []}
-      pricingType={editedBooking?.pricing?.pricingType}
-      agreedPrice={editedBooking?.pricing?.agreedPrice}
-      totalPaid={editedBooking?.pricing?.totalPaid}
-      paymentStatus={editedBooking?.pricing?.paymentStatus}
-      isEditing={isEditing}
-      onPaymentChange={handlePaymentChange}
-    />
+    {/* Expenses Link */}
+    <div className="col-span-full mt-6">
+      <ExpensesSection />
     </div>
-    </div>
-   
-    { /*Expenses Link*/}
-    <div className="col-span-full">
-    <ExpensesSection />
-    </div>
+    
     {/*Additional Information*/}    
     <div className="col-span-full">
               <div className="p-4 border rounded-lg">
