@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
     Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3,
-    User,  CreditCard, Euro, Ship, MessageSquare,
+    User, CreditCard, Euro, Ship, MessageSquare,
     Settings, Building, ChevronDown, ChevronUp, Utensils, Package, Box, ShoppingCart, FileText,
-    Star, StarOff
+    Star, StarOff, LineChart
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -270,6 +270,12 @@ const Sidebar = () => {
                         name: 'Analytics Dashboard',
                         icon: BarChart3,
                         path: '/analytics',
+                        allowed: true
+                    },
+                    {
+                        name: 'Financial Dashboard',  // New item
+                        icon: LineChart,
+                        path: '/financial-dashboard',
                         allowed: true
                     },
                     {

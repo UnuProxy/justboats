@@ -28,6 +28,7 @@ import InvoiceGenerator from './components/InvoiceGenerator';
 import SanAntonioBookingsAdmin from './components/SanAntonioBookingsAdmin';
 import PlaceQRManager from './components/PlaceQRManager';
 import QRRedirect from './components/QRRedirect';
+import FinancialDashboard from './components/FinancialDashboard';
 
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -359,6 +360,16 @@ function App() {
                                     <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <Analytics />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/financial-dashboard"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <FinancialDashboard />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }
