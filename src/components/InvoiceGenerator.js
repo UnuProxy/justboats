@@ -388,14 +388,15 @@ const InvoiceGenerator = () => {
                 <th className="text-right py-3 px-2">Unit price</th>
                 <th className="text-right py-3 px-2">Discount</th>
                 <th className="text-right py-3 px-2">VAT (21%)</th>
-                <th className="text-right py-3 px-2">Amount EUR</th>
+                <th className="text-right py-3 px-2">Total Amount EUR</th>
                 <th className="text-center py-3 px-2 no-print">Action</th>
               </tr>
             </thead>
             <tbody>
               {items.map((item, index) => {
-                const itemAmount = item.unitPrice - (item.unitPrice * item.discount / 100);
-                const itemVat = itemAmount * 0.21;
+                const discountedPrice = item.unitPrice - (item.unitPrice * item.discount / 100);
+                const itemVat = discountedPrice * 0.21;
+                const totalAmount = discountedPrice + itemVat;
                 
                 return (
                   <tr key={item.id} className="border-b border-gray-200">
@@ -404,7 +405,7 @@ const InvoiceGenerator = () => {
                     <td className="py-3 px-2 text-right">€ {item.unitPrice.toFixed(2)}</td>
                     <td className="py-3 px-2 text-right">{item.discount > 0 ? `${item.discount}%` : '-'}</td>
                     <td className="py-3 px-2 text-right">€ {itemVat.toFixed(2)}</td>
-                    <td className="py-3 px-2 text-right">€ {itemAmount.toFixed(2)}</td>
+                    <td className="py-3 px-2 text-right">€ {totalAmount.toFixed(2)}</td>
                     <td className="py-3 px-2 text-center no-print">
                       <button onClick={() => removeItem(item.id)} className="text-red-500">
                         Remove
