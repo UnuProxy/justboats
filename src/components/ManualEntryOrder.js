@@ -314,7 +314,7 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
     try {
       const date = new Date(dateString);
       return date.toLocaleDateString();
-    } catch (e) {
+    } catch {
       return 'Invalid Date';
     }
   };
