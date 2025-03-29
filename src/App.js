@@ -29,6 +29,7 @@ import SanAntonioBookingsAdmin from './components/SanAntonioBookingsAdmin';
 import PlaceQRManager from './components/PlaceQRManager';
 import QRRedirect from './components/QRRedirect';
 import FinancialDashboard from './components/FinancialDashboard';
+import PricingManager from './components/PricingManager';
 
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -268,6 +269,16 @@ function App() {
                                     <ProtectedRoute>
                                         <ProtectedLayout>
                                             <CateringOrders />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/pricing-manager"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <PricingManager />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }

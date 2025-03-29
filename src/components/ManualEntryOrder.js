@@ -900,7 +900,7 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
                     className="pl-10 w-full rounded-lg border border-gray-300 shadow-sm py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="e.g. Port Adriano"
+                    placeholder="e.g. Marina Ibiza"
                   />
                 </div>
               </div>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
     Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3,
     User, CreditCard, Euro, Ship, MessageSquare,
-    Settings, Building, ChevronDown, ChevronUp, Utensils, Package, Box, ShoppingCart, FileText,
+    Settings, Building, ChevronDown, ChevronUp, Utensils, Package, ShoppingCart, FileText,
     Star, StarOff, LineChart
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -221,16 +221,18 @@ const Sidebar = () => {
                         path: '/products',
                         allowed: true
                     },
-                    {
-                        name: 'Packages',
-                        icon: Box,
-                        path: '/packages',
-                        allowed: true
-                    },
+                    
                     {
                         name: 'Orders',
                         icon: ShoppingCart,
                         path: '/catering-orders',
+                        allowed: true
+                    },
+                    // In the catering section or financial section, add:
+                    {
+                        name: 'Pricing Manager',
+                        icon: Euro,
+                        path: '/pricing-manager',
                         allowed: true
                     }
                 ]
