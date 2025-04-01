@@ -1,6 +1,6 @@
 // components/PricingManager.js
 import React, { useState, useEffect } from 'react';
-import { Tag, Edit, Save, X, Plus, Trash2, Filter, Search, ArrowUpDown, Wine, Download, Loader } from 'lucide-react';
+import { Tag, Edit, Save, X, Plus, Trash2, Filter, Search, ArrowUpDown, Wine, Download, Loader, CheckSquare, EyeOff } from 'lucide-react';
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from "../firebase/firebaseConfig";
 
@@ -14,6 +14,7 @@ const PricingManager = () => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
+  const [onlineFilter, setOnlineFilter] = useState('All');
   const [sortField, setSortField] = useState('name');
   const [sortDirection, setSortDirection] = useState('asc');
   const [editingId, setEditingId] = useState(null);
@@ -25,14 +26,16 @@ const PricingManager = () => {
     name: '',
     category: '',
     buyingPrice: '',
-    sellingPrice: ''
+    sellingPrice: '',
+    isOnline: false
   });
   
   const [newProduct, setNewProduct] = useState({
     name: '',
     category: '',
     buyingPrice: '',
-    sellingPrice: ''
+    sellingPrice: '',
+    isOnline: false
   });
 
   // Fetch products from Firebase on component mount
@@ -44,7 +47,9 @@ const PricingManager = () => {
         const productsSnapshot = await getDocs(productsCollection);
         const productsList = productsSnapshot.docs.map(doc => ({
           id: doc.id,
-          ...doc.data()
+          ...doc.data(),
+          // Set default value for isOnline if it doesn't exist in the data
+          isOnline: doc.data().isOnline !== undefined ? doc.data().isOnline : false
         }));
         setProducts(productsList);
         setError(null);
@@ -66,9 +71,18 @@ const PricingManager = () => {
   const filteredProducts = products
     .filter(product => 
       (categoryFilter === 'All' || product.category === categoryFilter) &&
-      product.name.toLowerCase().includes(searchTerm.toLowerCase())
+      product.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
+      (onlineFilter === 'All' || 
+        (onlineFilter === 'Online' && product.isOnline) || 
+        (onlineFilter === 'Offline' && !product.isOnline))
     )
     .sort((a, b) => {
+      if (sortField === 'isOnline') {
+        return sortDirection === 'asc' 
+          ? (a.isOnline === b.isOnline ? 0 : a.isOnline ? 1 : -1)
+          : (a.isOnline === b.isOnline ? 0 : a.isOnline ? -1 : 1);
+      }
+      
       const fieldA = sortField === 'name' || sortField === 'category' 
         ? String(a[sortField]).toLowerCase()
         : Number(a[sortField]);
@@ -92,6 +106,32 @@ const PricingManager = () => {
     }
   };
 
+  // Toggle online status
+  const toggleOnlineStatus = async (product) => {
+    try {
+      const productRef = doc(db, COLLECTION_NAME, product.id);
+      const newStatus = !product.isOnline;
+      
+      await updateDoc(productRef, { 
+        isOnline: newStatus,
+        updatedAt: new Date()
+      });
+      
+      // Update local state
+      setProducts(products.map(p => {
+        if (p.id === product.id) {
+          return { ...p, isOnline: newStatus };
+        }
+        return p;
+      }));
+      
+      setError(null);
+    } catch (err) {
+      console.error('Error updating online status:', err);
+      setError('Failed to update online status. Please try again.');
+    }
+  };
+
   // Calculate profit margin
   const calculateProfitMargin = (buyingPrice, sellingPrice) => {
     if (!buyingPrice || !sellingPrice) return '';
@@ -108,16 +148,17 @@ const PricingManager = () => {
       name: product.name,
       category: product.category,
       buyingPrice: product.buyingPrice,
-      sellingPrice: product.sellingPrice
+      sellingPrice: product.sellingPrice,
+      isOnline: product.isOnline
     });
   };
 
   // Handle edit form changes
   const handleEditChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     setEditForm({
       ...editForm,
-      [name]: value
+      [name]: type === 'checkbox' ? checked : value
     });
   };
 
@@ -131,6 +172,7 @@ const PricingManager = () => {
         category: editForm.category,
         buyingPrice: parseFloat(editForm.buyingPrice),
         sellingPrice: parseFloat(editForm.sellingPrice),
+        isOnline: editForm.isOnline,
         updatedAt: new Date()
       };
       
@@ -154,10 +196,10 @@ const PricingManager = () => {
 
   // Handle new product form
   const handleNewProductChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     setNewProduct({
       ...newProduct,
-      [name]: value
+      [name]: type === 'checkbox' ? checked : value
     });
     
     // Auto-calculate selling price based on 100% markup
@@ -188,6 +230,7 @@ const PricingManager = () => {
         category: newProduct.category,
         buyingPrice: parseFloat(newProduct.buyingPrice),
         sellingPrice: parseFloat(newProduct.sellingPrice),
+        isOnline: newProduct.isOnline,
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -207,7 +250,8 @@ const PricingManager = () => {
         name: '',
         category: newProduct.category, // Keep the category for convenience
         buyingPrice: '',
-        sellingPrice: ''
+        sellingPrice: '',
+        isOnline: false
       });
       
       setShowAddProductForm(false);
@@ -308,7 +352,7 @@ const PricingManager = () => {
   // Download table data as CSV
   const downloadTableAsCSV = () => {
     // Create CSV content
-    const headers = ["Name", "Category", "Buying Price (€)", "Selling Price (€)", "Profit Margin"];
+    const headers = ["Name", "Category", "Buying Price (€)", "Selling Price (€)", "Profit Margin", "Website Status"];
     
     const csvRows = [
       headers.join(','),
@@ -317,7 +361,8 @@ const PricingManager = () => {
         product.category,
         product.buyingPrice.toFixed(2),
         product.sellingPrice.toFixed(2),
-        calculateProfitMargin(product.buyingPrice, product.sellingPrice).replace('%', '')
+        calculateProfitMargin(product.buyingPrice, product.sellingPrice).replace('%', ''),
+        product.isOnline ? 'On Website' : 'Hidden'
       ].join(','))
     ];
     
@@ -420,6 +465,16 @@ const PricingManager = () => {
                 <option key={category} value={category}>{category}</option>
               ))}
             </select>
+            
+            <select
+              value={onlineFilter}
+              onChange={(e) => setOnlineFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-md bg-blue-50"
+            >
+              <option value="All">All Products</option>
+              <option value="Online">Website Products</option>
+              <option value="Offline">Hidden Products</option>
+            </select>
           </div>
         </div>
         
@@ -512,6 +567,20 @@ const PricingManager = () => {
                   step="0.01"
                   min="0"
                 />
+              </div>
+              
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="newProductIsOnline"
+                  name="isOnline"
+                  checked={newProduct.isOnline}
+                  onChange={handleNewProductChange}
+                  className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                />
+                <label htmlFor="newProductIsOnline" className="ml-2 block text-sm text-gray-700">
+                  Show on Website
+                </label>
               </div>
             </div>
             
@@ -612,6 +681,17 @@ const PricingManager = () => {
                   </div>
                 </th>
                 <th className="border border-gray-200 px-4 py-2 text-left bg-blue-100">Profit Margin</th>
+                <th 
+                  className="border border-gray-200 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 bg-green-50"
+                  onClick={() => handleSort('isOnline')}
+                >
+                  <div className="flex items-center justify-center">
+                    Website Status
+                    {sortField === 'isOnline' && (
+                      <ArrowUpDown size={16} className="ml-1" />
+                    )}
+                  </div>
+                </th>
                 <th className="border border-gray-200 px-4 py-2 text-left">Actions</th>
               </tr>
             </thead>
@@ -687,6 +767,30 @@ const PricingManager = () => {
                       editingId === product.id ? editForm.sellingPrice : product.sellingPrice
                     )}
                   </td>
+                  <td className="border border-gray-200 px-4 py-2 text-center bg-green-50">
+                    {editingId === product.id ? (
+                      <div className="flex items-center justify-center">
+                        <input
+                          type="checkbox"
+                          name="isOnline"
+                          checked={editForm.isOnline}
+                          onChange={handleEditChange}
+                          className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        />
+                        <label className="ml-2 text-sm text-gray-700">
+                          Show on Website
+                        </label>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => toggleOnlineStatus(product)}
+                        className={`p-1 rounded-full ${product.isOnline ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+                        title={product.isOnline ? "Available on website - Click to hide" : "Not on website - Click to make available"}
+                      >
+                        {product.isOnline ? <CheckSquare size={18} /> : <EyeOff size={18} />}
+                      </button>
+                    )}
+                  </td>
                   <td className="border border-gray-200 px-4 py-2">
                     {editingId === product.id ? (
                       <div className="flex space-x-2">
@@ -729,7 +833,7 @@ const PricingManager = () => {
               
               {filteredProducts.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="border border-gray-200 px-4 py-8 text-center text-gray-500">
+                  <td colSpan="7" className="border border-gray-200 px-4 py-8 text-center text-gray-500">
                     <div className="flex flex-col items-center">
                       <Wine size={40} className="text-gray-400 mb-2" />
                       {categoryFilter !== 'All' ? (
@@ -752,8 +856,6 @@ const PricingManager = () => {
             </tbody>
           </table>
         </div>
-
-        
       </div>
     </div>
   );
