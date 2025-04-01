@@ -67,6 +67,12 @@ const calculateCompletionPercentage = (booking) => {
 };
 /* eslint-enable no-unused-vars */
 
+const decodeHtmlEntities = (text) => {
+    if (!text) return '';
+    const textArea = document.createElement('textarea');
+    textArea.innerHTML = text;
+    return textArea.value;
+};
 // Custom Components
 const CustomTooltip = ({ children, content }) => (
     <div className="relative group">
@@ -1416,36 +1422,36 @@ const PaymentTracking = () => {
             )}
 
             {/* Alerts Panel */}
-            {alerts.length > 0 && (
-                <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                        <h3 className="font-semibold text-yellow-800 flex items-center">
-                            <AlertTriangle className="w-5 h-5 mr-2" />
-                            Payment Alerts ({alerts.length})
-                        </h3>
-                        <button 
-                            onClick={() => setAlerts([])}
-                            className="text-gray-400 hover:text-gray-600"
-                        >
-                            <X className="w-4 h-4" />
-                        </button>
-                    </div>
-                    <div className="space-y-2 max-h-32 overflow-y-auto">
-                        {alerts.map(alert => (
-                            <div 
-                                key={alert.id}
-                                className={`p-2 rounded-lg ${
-                                    alert.type === 'error' 
-                                        ? 'bg-red-100 text-red-800'
-                                        : 'bg-yellow-100 text-yellow-800'
-                                }`}
-                            >
-                                {alert.message}
-                            </div>
-                        ))}
-                    </div>
+{alerts.length > 0 && (
+    <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-yellow-800 flex items-center">
+                <AlertTriangle className="w-5 h-5 mr-2" />
+                Payment Alerts ({alerts.length})
+            </h3>
+            <button 
+                onClick={() => setAlerts([])}
+                className="text-gray-400 hover:text-gray-600"
+            >
+                <X className="w-4 h-4" />
+            </button>
+        </div>
+        <div className="space-y-2 max-h-32 overflow-y-auto">
+            {alerts.map(alert => (
+                <div 
+                    key={alert.id}
+                    className={`p-2 rounded-lg ${
+                        alert.type === 'error' 
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-yellow-100 text-yellow-800'
+                    }`}
+                >
+                    {decodeHtmlEntities(alert.message)}
                 </div>
-            )}
+            ))}
+        </div>
+    </div>
+)}
 
             {/* Header Section */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 space-y-4 lg:space-y-0">

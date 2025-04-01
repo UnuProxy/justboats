@@ -6,12 +6,13 @@ import {
   orderBy,
   onSnapshot,
   updateDoc,
+  deleteDoc,
   doc,
   limit,
   startAfter,
   getDocs,
 } from 'firebase/firestore';
-import { CheckCircle, XCircle, Search, X, Printer, Plus } from 'lucide-react';
+import { CheckCircle, XCircle, Search, X, Printer, Plus, Trash2 } from 'lucide-react';
 import ManualOrderEntry from './ManualEntryOrder';
 
 const ORDERS_PER_PAGE = 10;
@@ -93,6 +94,19 @@ const CateringOrders = () => {
       });
     } catch (error) {
       console.error('Error updating order status:', error);
+    }
+  };
+  
+  const deleteOrder = async (orderId) => {
+    if (window.confirm('Are you sure you want to delete this order? This action cannot be undone.')) {
+      try {
+        await deleteDoc(doc(db, 'orders', orderId));
+        // Remove the order from local state
+        setOrders(orders.filter(order => order.id !== orderId));
+      } catch (error) {
+        console.error('Error deleting order:', error);
+        alert('Failed to delete order. Please try again.');
+      }
     }
   };
 
@@ -325,6 +339,15 @@ const CateringOrders = () => {
 
           {/* Action Buttons */}
           <div className="flex flex-wrap justify-end gap-2 mt-4">
+            {/* Delete Button */}
+            <button
+              onClick={() => deleteOrder(order.id)}
+              className="flex items-center px-3 py-1.5 bg-red-700 text-white rounded hover:bg-red-800 text-sm"
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              Delete
+            </button>
+            
             {/* Print Button */}
             <button
               onClick={() => handlePrint(order)}
