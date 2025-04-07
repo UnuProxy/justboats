@@ -82,10 +82,23 @@ const InvoiceGenerator = () => {
     setItems(items.filter(item => item.id !== id));
   };
 
-  // Calculate subtotal, VAT, and total
+  // Calculate by summing the individual item totals directly
   const subtotal = items.reduce((sum, item) => sum + (item.unitPrice - (item.unitPrice * item.discount / 100)), 0);
-  const vat = subtotal * 0.21;
-  const total = subtotal + vat;
+  const vat = Math.round(subtotal * 0.21 * 100) / 100; // Round to 2 decimal places
+  
+  // Calculate total by summing individual item totals instead of subtotal + vat
+  const total = items.reduce((sum, item) => {
+    const discountedPrice = item.unitPrice - (item.unitPrice * item.discount / 100);
+    const itemTotal = Math.round((discountedPrice + Math.round(discountedPrice * 0.21 * 100) / 100) * 100) / 100;
+    return sum + itemTotal;
+  }, 0);
+  
+  // Format currency with Euro symbol, ensuring proper rounding
+  const formatCurrency = (amount) => {
+    // Round to exactly 2 decimal places to avoid floating point issues
+    const roundedAmount = Math.round(amount * 100) / 100;
+    return `€ ${roundedAmount.toFixed(2)}`;
+  };
   
   // Reference to the invoice content for PDF generation
   const invoiceRef = useRef(null);
@@ -395,17 +408,17 @@ const InvoiceGenerator = () => {
             <tbody>
               {items.map((item, index) => {
                 const discountedPrice = item.unitPrice - (item.unitPrice * item.discount / 100);
-                const itemVat = discountedPrice * 0.21;
-                const totalAmount = discountedPrice + itemVat;
+                const itemVat = Math.round(discountedPrice * 0.21 * 100) / 100; // Round VAT to 2 decimal places
+                const totalAmount = Math.round((discountedPrice + itemVat) * 100) / 100; // Round total to exactly 2 decimal places
                 
                 return (
                   <tr key={item.id} className="border-b border-gray-200">
                     <td className="py-3 px-2">{index + 1}</td>
                     <td className="py-3 px-2">{item.description}</td>
-                    <td className="py-3 px-2 text-right">€ {item.unitPrice.toFixed(2)}</td>
+                    <td className="py-3 px-2 text-right">{formatCurrency(item.unitPrice)}</td>
                     <td className="py-3 px-2 text-right">{item.discount > 0 ? `${item.discount}%` : '-'}</td>
-                    <td className="py-3 px-2 text-right">€ {itemVat.toFixed(2)}</td>
-                    <td className="py-3 px-2 text-right">€ {totalAmount.toFixed(2)}</td>
+                    <td className="py-3 px-2 text-right">{formatCurrency(itemVat)}</td>
+                    <td className="py-3 px-2 text-right">{formatCurrency(totalAmount)}</td>
                     <td className="py-3 px-2 text-center no-print">
                       <button onClick={() => removeItem(item.id)} className="text-red-500">
                         Remove
@@ -461,15 +474,15 @@ const InvoiceGenerator = () => {
           <div className="w-full sm:w-64">
             <div className="flex justify-between border-t border-gray-300 pt-3 pb-2">
               <span className="font-medium">Subtotal</span>
-              <span className="pl-4">€ {subtotal.toFixed(2)}</span>
+              <span className="pl-4">{formatCurrency(subtotal)}</span>
             </div>
             <div className="flex justify-between border-t border-gray-300 pt-3 pb-2">
               <span className="font-medium">VAT</span>
-              <span className="pl-4">€ {vat.toFixed(2)}</span>
+              <span className="pl-4">{formatCurrency(vat)}</span>
             </div>
             <div className="flex justify-between border-t border-b border-gray-300 py-3">
               <span className="font-bold">Total</span>
-              <span className="font-bold pl-4">€ {total.toFixed(2)}</span>
+              <span className="font-bold pl-4">{formatCurrency(total)}</span>
             </div>
           </div>
         </div>
