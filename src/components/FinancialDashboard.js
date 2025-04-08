@@ -19,8 +19,7 @@ import {
   isWithinInterval,
   isBefore,
   isValid,
-  parseISO,
-  differenceInDays 
+  parseISO
 } from 'date-fns';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -28,11 +27,14 @@ import {
 } from 'recharts';
 import {
   Calendar, ChevronDown, DollarSign, TrendingUp, TrendingDown, AlertCircle,
-  Clock, CreditCard, Download, RefreshCw, Users, Package
+  Clock, CreditCard, Download, RefreshCw, Users, Package, Info
 } from 'lucide-react';
 
+// Import the PrecisionFinancialUtils from the correct location
+import FinancialUtils from '../utils/PrecisionFinancialUtils';
+
 // ================================
-// UTILITY FUNCTIONS
+// DATE UTILS
 // ================================
 
 /**
@@ -95,190 +97,6 @@ const DateUtils = {
     const validDate = DateUtils.ensureValidDate(date);
     if (!validDate) return defaultValue;
     return format(validDate, formatStr);
-  }
-};
-
-/**
- * Financial data normalization and formatting
- */
-const FinancialUtils = {
-  // Convert any amount to a valid number
-  normalizeAmount: (amount) => {
-    if (typeof amount === 'number' && !isNaN(amount)) {
-      return amount;
-    }
-    
-    if (typeof amount === 'string') {
-      // Remove non-numeric characters except decimal point
-      const cleanedAmount = amount.replace(/[^0-9.-]/g, '');
-      return parseFloat(cleanedAmount) || 0;
-    }
-    
-    return 0;
-  },
-  
-  // Format currency with proper locale
-  formatCurrency: (amount, locale = 'en-US', currency = 'EUR') => {
-    const normalizedAmount = typeof amount === 'number' ? amount : FinancialUtils.normalizeAmount(amount);
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(normalizedAmount);
-  },
-  
-  // Calculate percentage change between current and previous values
-  calculatePercentChange: (current, previous) => {
-    if (!previous || previous === 0) {
-      return { value: 0, isIncrease: false, displayValue: "0%" };
-    }
-    
-    const change = ((current - previous) / Math.abs(previous)) * 100;
-    const formattedChange = Math.abs(Math.round(change * 10) / 10);
-    
-    return {
-      value: formattedChange, // Raw value
-      isIncrease: change >= 0,
-      displayValue: `${formattedChange.toFixed(1)}%` // Formatted for display
-    };
-  },
-  
-  // Extract payment data from booking object
-  extractBookingPayments: (booking) => {
-    // Initialize with default values
-    const result = {
-      totalAgreedPrice: 0,
-      totalPaid: 0,
-      totalOutstanding: 0,
-      receivedPayments: [],
-      pendingPayments: []
-    };
-    
-    // Safely access pricing data
-    if (!booking || (!booking.pricing && !booking.payments)) {
-      return result;
-    }
-    
-    // Get agreed price if available
-    if (booking.pricing && booking.pricing.agreedPrice) {
-      result.totalAgreedPrice = FinancialUtils.normalizeAmount(booking.pricing.agreedPrice);
-    }
-    
-    // Process all possible payment sources
-    let paymentsArray = [];
-    
-    // Check for payments in pricing object
-    if (booking.pricing && Array.isArray(booking.pricing.payments)) {
-      paymentsArray = paymentsArray.concat(booking.pricing.payments);
-    }
-    
-    // Check for payments in root object
-    if (Array.isArray(booking.payments)) {
-      paymentsArray = paymentsArray.concat(booking.payments);
-    }
-    
-    // Process all discovered payments
-    paymentsArray.forEach(payment => {
-      const amount = FinancialUtils.normalizeAmount(payment.amount);
-      
-      // FIXED: Track received vs pending payments based on received flag
-      if (payment.received === true) {
-        result.receivedPayments.push({
-          amount,
-          date: payment.date,
-          method: payment.method,
-          type: payment.type
-        });
-        result.totalPaid += amount;
-      } else {
-        result.pendingPayments.push({
-          amount,
-          date: payment.date,
-          method: payment.method,
-          type: payment.type
-        });
-        // FIXED: Add to outstanding if not received
-        result.totalOutstanding += amount;
-      }
-    });
-    
-    // If no payments detected but totalPaid is available, use that
-    if (result.totalPaid === 0) {
-      if (typeof booking.totalPaid === 'number' || typeof booking.totalPaid === 'string') {
-        result.totalPaid = FinancialUtils.normalizeAmount(booking.totalPaid);
-      } else if (booking.pricing && booking.pricing.totalPaid !== undefined) {
-        result.totalPaid = FinancialUtils.normalizeAmount(booking.pricing.totalPaid);
-      }
-    }
-    
-    // If outstanding is still 0, calculate it based on agreed price minus paid
-    if (result.totalOutstanding === 0 && result.totalAgreedPrice > result.totalPaid) {
-      result.totalOutstanding = result.totalAgreedPrice - result.totalPaid;
-    }
-    
-    // Debug: Log discrepancies for investigation
-    if (Math.abs(result.totalPaid - result.receivedPayments.reduce((sum, p) => sum + p.amount, 0)) > 1) {
-      console.warn('Payment discrepancy in booking:', booking.id, { 
-        totalPaid: result.totalPaid, 
-        sumOfReceived: result.receivedPayments.reduce((sum, p) => sum + p.amount, 0)
-      });
-    }
-    
-    return result;
-  },
-  
-  // Extract payment data from order object
-  extractOrderPayments: (order) => {
-    // Initialize with default values
-    const result = {
-      totalAmount: 0,
-      amountPaid: 0,
-      amountDue: 0
-    };
-    
-    // Early return if no order or invalid data
-    if (!order) {
-      return result;
-    }
-    
-    // Get total amount if available
-    if (order.amount_total !== undefined) {
-      result.totalAmount = FinancialUtils.normalizeAmount(order.amount_total);
-    }
-    
-    // Process payment details if available
-    if (order.payment_details) {
-      result.amountPaid = FinancialUtils.normalizeAmount(order.payment_details.amountPaid || 0);
-      result.amountDue = FinancialUtils.normalizeAmount(order.payment_details.amountDue || 0);
-      
-      // Safety check - if both are 0 but totalAmount is set, assume full payment
-      if (result.amountPaid === 0 && result.amountDue === 0 && result.totalAmount > 0) {
-        if (order.paymentStatus === 'paid') {
-          result.amountPaid = result.totalAmount;
-        } else if (order.paymentStatus === 'unpaid') {
-          result.amountDue = result.totalAmount;
-        }
-      }
-      
-      // Another safety check - if amountDue is 0 but totalAmount > amountPaid
-      if (result.amountDue === 0 && result.totalAmount > result.amountPaid) {
-        result.amountDue = result.totalAmount - result.amountPaid;
-      }
-    } else {
-      // No payment details, infer from payment status
-      if (order.paymentStatus === 'paid') {
-        result.amountPaid = result.totalAmount;
-      } else if (order.paymentStatus === 'partially_paid' && result.totalAmount > 0) {
-        // Default to 50% paid if partially paid without specific details
-        result.amountPaid = result.totalAmount / 2;
-        result.amountDue = result.totalAmount - result.amountPaid;
-      } else {
-        result.amountDue = result.totalAmount;
-      }
-    }
-    
-    return result;
   }
 };
 
@@ -437,11 +255,15 @@ const DataUtils = {
         };
       }
       
-      const itemAmount = FinancialUtils.normalizeAmount(item.amount);
+      // Use PrecisionFinancialUtils for consistent money handling
+      const itemAmount = item.amount ? FinancialUtils.normalizeAmount(item.amount).toNumber() : 0;
       
       // Handle income vs expense logic
       if (item.type === 'income' || (item.paymentStatus === 'paid' && item.payment_details?.amountPaid)) {
-        groupedData[periodKey].income += item.payment_details?.amountPaid || itemAmount;
+        const paidAmount = item.payment_details?.amountPaid 
+          ? FinancialUtils.normalizeAmount(item.payment_details.amountPaid).toNumber() 
+          : itemAmount;
+        groupedData[periodKey].income += paidAmount;
       } else {
         groupedData[periodKey].expenses += itemAmount;
       }
@@ -457,30 +279,6 @@ const DataUtils = {
     
     // Convert to array and sort by period
     return Object.values(groupedData).sort((a, b) => a.period.localeCompare(b.period));
-  },
-  
-  // Create time-trend data for charts
-  prepareTrendData: (incomeData, expenseData) => {
-    // Combine income and expense data
-    const allPeriods = new Set([
-      ...incomeData.map(item => item.name),
-      ...expenseData.map(item => item.name)
-    ]);
-    
-    const combinedData = Array.from(allPeriods).map(period => {
-      const incomeItem = incomeData.find(item => item.name === period);
-      const expenseItem = expenseData.find(item => item.name === period);
-      
-      return {
-        name: period,
-        income: incomeItem ? incomeItem.value : 0,
-        expenses: expenseItem ? expenseItem.value : 0,
-        profit: (incomeItem ? incomeItem.value : 0) - (expenseItem ? expenseItem.value : 0)
-      };
-    });
-    
-    // Sort by period
-    return combinedData.sort((a, b) => a.name.localeCompare(b.name));
   }
 };
 
@@ -600,6 +398,171 @@ const ChartCard = ({ title, children, isLoading = false, className = "" }) => (
   </div>
 );
 
+/**
+ * Financial Validation Component for data integrity
+ */
+const FinancialValidationPanel = ({ dataIssues = [] }) => {
+  if (!dataIssues || dataIssues.length === 0) {
+    return (
+      <div className="mt-2 p-3 bg-green-50 rounded border border-green-200 text-green-700">
+        <div className="flex items-center">
+          <Info className="h-5 w-5 mr-2" />
+          <span className="text-sm">All financial data appears consistent.</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="p-3 bg-yellow-50 rounded border border-yellow-200 text-yellow-700">
+        <div className="flex items-center mb-2">
+          <AlertCircle className="h-5 w-5 mr-2" />
+          <span className="font-medium">Potential Data Inconsistencies</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr>
+                <th className="py-1 px-2 text-left">ID</th>
+                <th className="py-1 px-2 text-left">Type</th>
+                <th className="py-1 px-2 text-left">Client</th>
+                <th className="py-1 px-2 text-left">Issue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dataIssues.map((issue, index) => (
+                <tr key={index} className={index % 2 === 0 ? 'bg-yellow-100 bg-opacity-40' : ''}>
+                  <td className="py-1 px-2">{issue.id}</td>
+                  <td className="py-1 px-2 capitalize">{issue.type}</td>
+                  <td className="py-1 px-2">{issue.client}</td>
+                  <td className="py-1 px-2">{issue.issue}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-2 text-xs">
+          These inconsistencies may affect financial calculations. Consider reviewing these records.
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Financial Reconciliation Summary
+ */
+const ReconciliationSummary = ({ metrics, formatCurrency }) => {
+  // Only show if we have data to display
+  if (!metrics) return null;
+  
+  return (
+    <div className="mt-6 bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+      <h2 className="text-lg font-semibold text-gray-800 mb-4">Financial Reconciliation</h2>
+      
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="p-4 bg-blue-50 rounded-lg">
+          <p className="text-sm font-medium text-blue-800">Booking Revenue</p>
+          <p className="text-xl font-bold">{formatCurrency(metrics.bookingIncome)}</p>
+        </div>
+        
+        <div className="p-4 bg-green-50 rounded-lg">
+          <p className="text-sm font-medium text-green-800">Order Revenue</p>
+          <p className="text-xl font-bold">{formatCurrency(metrics.orderIncome)}</p>
+        </div>
+        
+        <div className="p-4 bg-purple-50 rounded-lg">
+          <p className="text-sm font-medium text-purple-800">Other Revenue</p>
+          <p className="text-xl font-bold">{formatCurrency(metrics.otherIncome || 0)}</p>
+        </div>
+        
+        <div className="p-4 bg-yellow-50 rounded-lg">
+          <p className="text-sm font-medium text-yellow-800">Total Outstanding</p>
+          <p className="text-xl font-bold">{formatCurrency(metrics.outstandingPayments)}</p>
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Income Sources</h3>
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <table className="min-w-full text-sm">
+              <tbody>
+                <tr>
+                  <td className="py-1">Bookings</td>
+                  <td className="py-1 text-right font-medium">{formatCurrency(metrics.bookingIncome)}</td>
+                  <td className="py-1 text-right text-gray-500">
+                    {metrics.totalIncome > 0 
+                      ? `${Math.round((metrics.bookingIncome / metrics.totalIncome) * 100)}%` 
+                      : '0%'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1">Orders</td>
+                  <td className="py-1 text-right font-medium">{formatCurrency(metrics.orderIncome)}</td>
+                  <td className="py-1 text-right text-gray-500">
+                    {metrics.totalIncome > 0 
+                      ? `${Math.round((metrics.orderIncome / metrics.totalIncome) * 100)}%` 
+                      : '0%'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1">Other Payments</td>
+                  <td className="py-1 text-right font-medium">{formatCurrency(metrics.otherIncome || 0)}</td>
+                  <td className="py-1 text-right text-gray-500">
+                    {metrics.totalIncome > 0 && metrics.otherIncome
+                      ? `${Math.round((metrics.otherIncome / metrics.totalIncome) * 100)}%` 
+                      : '0%'}
+                  </td>
+                </tr>
+                <tr className="border-t border-gray-200">
+                  <td className="py-1 font-medium">Total Income</td>
+                  <td className="py-1 text-right font-medium">{formatCurrency(metrics.totalIncome)}</td>
+                  <td className="py-1 text-right text-gray-500">100%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Outstanding Payments</h3>
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <table className="min-w-full text-sm">
+              <tbody>
+                <tr>
+                  <td className="py-1">Bookings</td>
+                  <td className="py-1 text-right font-medium">{formatCurrency(metrics.bookingOutstanding || 0)}</td>
+                  <td className="py-1 text-right text-gray-500">
+                    {metrics.outstandingPayments > 0 && metrics.bookingOutstanding
+                      ? `${Math.round((metrics.bookingOutstanding / metrics.outstandingPayments) * 100)}%` 
+                      : '0%'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1">Orders</td>
+                  <td className="py-1 text-right font-medium">{formatCurrency(metrics.orderOutstanding || 0)}</td>
+                  <td className="py-1 text-right text-gray-500">
+                    {metrics.outstandingPayments > 0 && metrics.orderOutstanding
+                      ? `${Math.round((metrics.orderOutstanding / metrics.outstandingPayments) * 100)}%` 
+                      : '0%'}
+                  </td>
+                </tr>
+                <tr className="border-t border-gray-200">
+                  <td className="py-1 font-medium">Total Outstanding</td>
+                  <td className="py-1 text-right font-medium">{formatCurrency(metrics.outstandingPayments)}</td>
+                  <td className="py-1 text-right text-gray-500">100%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ================================
 // MAIN COMPONENT
 // ================================
@@ -662,47 +625,18 @@ const FinancialDashboard = () => {
     const prevExpenses = DataUtils.filterByDateRange(expenses, previousStart, previousEnd);
     const prevBookings = DataUtils.filterByDateRange(bookings, previousStart, previousEnd);
     
-    // Calculate income from bookings for previous period
-    let prevBookingIncome = 0;
-    prevBookings.forEach(booking => {
-      const paymentData = FinancialUtils.extractBookingPayments(booking);
-      prevBookingIncome += paymentData.totalPaid;
-    });
+    // Calculate with precision using FinancialUtils
+    const prevMetrics = FinancialUtils.calculateCompanyMargin(
+      prevOrders, prevBookings, prevExpenses, [], 
+      { startDate: previousStart, endDate: previousEnd }
+    );
     
-    // Calculate income from orders for previous period
-    let prevOrderIncome = 0;
-    prevOrders.forEach(order => {
-      const paymentData = FinancialUtils.extractOrderPayments(order);
-      prevOrderIncome += paymentData.amountPaid;
-    });
-    
-    // Calculate expenses for previous period
-    const prevTotalExpenses = prevExpenses.reduce((sum, expense) => {
-      if (expense.paymentStatus === 'paid') {
-        return sum + FinancialUtils.normalizeAmount(expense.amount);
-      }
-      return sum;
-    }, 0);
-    
-    // Calculate outstanding payments for previous period
-    let prevOutstanding = 0;
-    prevBookings.forEach(booking => {
-      const paymentData = FinancialUtils.extractBookingPayments(booking);
-      prevOutstanding += paymentData.totalOutstanding;
-    });
-    
-    prevOrders.forEach(order => {
-      const paymentData = FinancialUtils.extractOrderPayments(order);
-      prevOutstanding += paymentData.amountDue;
-    });
-    
-    // Update previous period data
-    const prevTotalIncome = prevBookingIncome + prevOrderIncome;
+    // Update previous period data - using number values for compatibility
     setPreviousPeriodData({
-      totalIncome: prevTotalIncome,
-      totalExpenses: prevTotalExpenses,
-      netProfit: prevTotalIncome - prevTotalExpenses,
-      outstandingPayments: prevOutstanding
+      totalIncome: prevMetrics.revenueNumber,
+      totalExpenses: prevMetrics.costsNumber,
+      netProfit: prevMetrics.netProfitNumber,
+      outstandingPayments: prevMetrics.outstandingNumber
     });
   }, [orders, expenses, bookings]);
   
@@ -747,14 +681,7 @@ const FinancialDashboard = () => {
               const data = doc.data();
               return {
                 id: doc.id,
-                ...data,
-                // Normalize important fields for consistent processing
-                amount_total: FinancialUtils.normalizeAmount(data.amount_total),
-                payment_details: data.payment_details ? {
-                  ...data.payment_details,
-                  amountPaid: FinancialUtils.normalizeAmount(data.payment_details.amountPaid),
-                  amountDue: FinancialUtils.normalizeAmount(data.payment_details.amountDue)
-                } : null
+                ...data
               };
             });
             
@@ -774,9 +701,7 @@ const FinancialDashboard = () => {
               const data = doc.data();
               return {
                 id: doc.id,
-                ...data,
-                // Normalize amount field to ensure it's a number
-                amount: FinancialUtils.normalizeAmount(data.amount)
+                ...data
               };
             });
             
@@ -796,27 +721,7 @@ const FinancialDashboard = () => {
               const data = doc.data();
               return {
                 id: doc.id,
-                ...data,
-                // Normalize pricing fields
-                pricing: data.pricing ? {
-                  ...data.pricing,
-                  agreedPrice: FinancialUtils.normalizeAmount(data.pricing.agreedPrice),
-                  totalPaid: FinancialUtils.normalizeAmount(data.pricing.totalPaid),
-                  payments: Array.isArray(data.pricing.payments) 
-                    ? data.pricing.payments.map(payment => ({
-                        ...payment,
-                        amount: FinancialUtils.normalizeAmount(payment.amount)
-                      }))
-                    : []
-                } : null,
-                // Normalize payments array at the root level if it exists
-                payments: Array.isArray(data.payments)
-                  ? data.payments.map(payment => ({
-                      ...payment,
-                      amount: FinancialUtils.normalizeAmount(payment.amount)
-                    }))
-                  : [],
-                totalPaid: FinancialUtils.normalizeAmount(data.totalPaid)
+                ...data
               };
             });
             
@@ -842,8 +747,7 @@ const FinancialDashboard = () => {
                 const data = doc.data();
                 return {
                   id: doc.id,
-                  ...data,
-                  amount: FinancialUtils.normalizeAmount(data.amount)
+                  ...data
                 };
               });
               
@@ -886,28 +790,17 @@ const FinancialDashboard = () => {
   // DATA PROCESSING & CALCULATIONS
   // ================================
   
-  // Calculate financial metrics with safe date handling and proper normalization
+  // Calculate financial metrics using PrecisionFinancialUtils
   const financialMetrics = useMemo(() => {
     if (isLoading) return {
       totalIncome: 0,
       totalExpenses: 0,
       outstandingPayments: 0,
       netProfit: 0,
-      incomeByCategory: [],
-      expensesByCategory: [],
-      incomeTrend: [],
-      expenseTrend: [],
-      upcomingPayments: [],
-      averageDailyIncome: 0,
-      averageDailyExpense: 0,
-      profitMargin: 0,
-      debug: {
-        bookingPayments: [],
-        orderPayments: [],
-      }
+      dataIssues: []
     };
     
-    console.log("Calculating financial metrics...");
+    console.log("Calculating financial metrics with PrecisionFinancialUtils...");
     
     // Filter data by selected date range with safe date handling
     const filteredOrders = DataUtils.filterByDateRange(orders, startDate, endDate);
@@ -915,111 +808,66 @@ const FinancialDashboard = () => {
     const filteredBookings = DataUtils.filterByDateRange(bookings, startDate, endDate);
     const filteredPayments = DataUtils.filterByDateRange(payments, startDate, endDate);
     
-    console.log(`Filtered data - Orders: ${filteredOrders.length}, Bookings: ${filteredBookings.length}, Expenses: ${filteredExpenses.length}`);
+    console.log(`Filtered data - Orders: ${filteredOrders.length}, Bookings: ${filteredBookings.length}, Expenses: ${filteredExpenses.length}, Payments: ${filteredPayments.length}`);
     
-    // ================================
-    // INCOME CALCULATIONS
-    // ================================
+    // Calculate company margin with high precision using PrecisionFinancialUtils
+    const companyMargin = FinancialUtils.calculateCompanyMargin(
+      filteredOrders,
+      filteredBookings,
+      filteredExpenses,
+      filteredPayments,
+      { startDate, endDate }
+    );
     
-    // Calculate income from bookings
-    let bookingIncome = 0;
-    const bookingPaymentsInfo = [];
+    // Data validation - check for potential issues
+    const dataIssues = [];
     
-    filteredBookings.forEach((booking) => {
+    // Check bookings with missing payment info
+    const bookingsWithNoPayments = filteredBookings.filter(booking => {
       const paymentData = FinancialUtils.extractBookingPayments(booking);
-      bookingIncome += paymentData.totalPaid;
-      
-      // Track payment info for debugging
-      bookingPaymentsInfo.push({
+      return paymentData.totalAgreedPriceNumber > 0 && 
+             paymentData.totalPaidNumber === 0 && 
+             paymentData.totalOutstandingNumber === 0;
+    });
+    
+    bookingsWithNoPayments.forEach(booking => {
+      dataIssues.push({
         id: booking.id,
-        clientName: booking.clientName || booking.clientDetails?.name || 'Unknown',
-        totalAgreedPrice: paymentData.totalAgreedPrice,
-        totalPaid: paymentData.totalPaid,
-        totalOutstanding: paymentData.totalOutstanding,
-        receivedPayments: paymentData.receivedPayments,
-        pendingPayments: paymentData.pendingPayments
+        type: 'booking',
+        client: booking.clientName || booking.clientDetails?.name || 'Unknown',
+        issue: 'Has agreed price but missing payment structure'
       });
     });
     
-    // Calculate income from orders
-    let orderIncome = 0;
-    const orderPaymentsInfo = [];
-    
-    filteredOrders.forEach((order) => {
+    // Check orders with payment status inconsistencies
+    const ordersWithStatusIssues = filteredOrders.filter(order => {
       const paymentData = FinancialUtils.extractOrderPayments(order);
-      orderIncome += paymentData.amountPaid;
-      
-      // Track payment info for debugging
-      orderPaymentsInfo.push({
+      return (paymentData.amountPaidNumber === 0 && order.paymentStatus === 'paid') ||
+             (paymentData.amountPaidNumber > 0 && order.paymentStatus === 'unpaid');
+    });
+    
+    ordersWithStatusIssues.forEach(order => {
+      dataIssues.push({
         id: order.id,
-        totalAmount: paymentData.totalAmount,
-        amountPaid: paymentData.amountPaid,
-        amountDue: paymentData.amountDue,
-        status: order.paymentStatus
+        type: 'order',
+        client: order.fullName || order.name || 'Unknown',
+        issue: 'Payment status inconsistent with amount paid'
       });
     });
     
-    // Add income from dedicated payments collection if available
-    let otherPaymentsIncome = 0;
-    if (filteredPayments.length > 0) {
-      otherPaymentsIncome = filteredPayments.reduce((sum, payment) => {
-        // Only count payments not associated with bookings or orders to avoid double-counting
-        if (!payment.bookingId && !payment.orderId) {
-          return sum + FinancialUtils.normalizeAmount(payment.amount);
-        }
-        return sum;
-      }, 0);
-    }
-    
-    // Total income from all sources
-    const totalIncome = bookingIncome + orderIncome + otherPaymentsIncome;
-    
-    console.log(`Income calculation - Bookings: ${bookingIncome}, Orders: ${orderIncome}, Other: ${otherPaymentsIncome}, Total: ${totalIncome}`);
-    
-    // ================================
-    // EXPENSE CALCULATIONS
-    // ================================
-    
-    // Calculate total expenses with proper normalization
-    const totalExpenses = filteredExpenses.reduce((sum, expense) => {
-      if (expense.paymentStatus === 'paid') {
-        return sum + FinancialUtils.normalizeAmount(expense.amount);
-      }
-      return sum;
-    }, 0);
-    
-    // ================================
-    // OUTSTANDING PAYMENTS
-    // ================================
-    
-    // FIXED: Calculate outstanding payments from bookings
-    let outstandingBookings = 0;
-    filteredBookings.forEach(booking => {
-      const paymentData = FinancialUtils.extractBookingPayments(booking);
-      outstandingBookings += paymentData.totalOutstanding;
+    // Check expenses with missing categories
+    const expensesWithNoCategories = filteredExpenses.filter(expense => {
+      return !expense.category && FinancialUtils.normalizeAmount(expense.amount).toNumber() > 0;
     });
     
-    // Calculate outstanding payments from orders
-    let outstandingOrders = 0;
-    filteredOrders.forEach(order => {
-      const paymentData = FinancialUtils.extractOrderPayments(order);
-      outstandingOrders += paymentData.amountDue;
+    expensesWithNoCategories.forEach(expense => {
+      dataIssues.push({
+        id: expense.id,
+        type: 'expense',
+        client: 'N/A',
+        issue: 'Expense has amount but no category'
+      });
     });
-    
-    // Total outstanding payments
-    const outstandingPayments = outstandingBookings + outstandingOrders;
-    
-    console.log(`Outstanding payments - Bookings: ${outstandingBookings}, Orders: ${outstandingOrders}, Total: ${outstandingPayments}`);
-    
-    // ================================
-    // PROFIT CALCULATIONS
-    // ================================
-    
-    // Calculate net profit
-    const netProfit = totalIncome - totalExpenses;
-    
-    // Calculate profit margin (as percentage)
-    const profitMargin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
     
     // ================================
     // CATEGORY BREAKDOWNS
@@ -1036,7 +884,7 @@ const FinancialDashboard = () => {
       if (!incomeByCategoryMap[categoryName]) {
         incomeByCategoryMap[categoryName] = 0;
       }
-      incomeByCategoryMap[categoryName] += paymentData.totalPaid;
+      incomeByCategoryMap[categoryName] += paymentData.totalPaidNumber;
     });
     
     // Process orders by item category
@@ -1044,7 +892,7 @@ const FinancialDashboard = () => {
       if (order.items && Array.isArray(order.items)) {
         order.items.forEach(item => {
           const categoryName = item.category || 'Other';
-          const itemPrice = FinancialUtils.normalizeAmount(item.price);
+          const itemPrice = FinancialUtils.normalizeAmount(item.price).toNumber();
           const itemQuantity = parseInt(item.quantity) || 1;
           const itemTotal = itemPrice * itemQuantity;
           
@@ -1061,7 +909,7 @@ const FinancialDashboard = () => {
         if (!incomeByCategoryMap[categoryName]) {
           incomeByCategoryMap[categoryName] = 0;
         }
-        incomeByCategoryMap[categoryName] += paymentData.amountPaid;
+        incomeByCategoryMap[categoryName] += paymentData.amountPaidNumber;
       }
     });
     
@@ -1076,7 +924,7 @@ const FinancialDashboard = () => {
       if (expense.paymentStatus !== 'paid') return categories;
       
       const categoryName = expense.category || 'Uncategorized';
-      const amount = FinancialUtils.normalizeAmount(expense.amount);
+      const amount = FinancialUtils.normalizeAmount(expense.amount).toNumber();
       
       const existingCategory = categories.find(cat => cat.name === categoryName);
       if (existingCategory) {
@@ -1105,7 +953,7 @@ const FinancialDashboard = () => {
       }
       
       const paymentData = FinancialUtils.extractBookingPayments(booking);
-      trendsByMonth[monthKey].income += paymentData.totalPaid;
+      trendsByMonth[monthKey].income += paymentData.totalPaidNumber;
     });
     
     // Process order income by month
@@ -1119,7 +967,7 @@ const FinancialDashboard = () => {
       }
       
       const paymentData = FinancialUtils.extractOrderPayments(order);
-      trendsByMonth[monthKey].income += paymentData.amountPaid;
+      trendsByMonth[monthKey].income += paymentData.amountPaidNumber;
     });
     
     // Process expenses by month
@@ -1134,7 +982,7 @@ const FinancialDashboard = () => {
         trendsByMonth[monthKey] = { income: 0, expenses: 0 };
       }
       
-      trendsByMonth[monthKey].expenses += FinancialUtils.normalizeAmount(expense.amount);
+      trendsByMonth[monthKey].expenses += FinancialUtils.normalizeAmount(expense.amount).toNumber();
     });
     
     // Convert to array format for charts
@@ -1149,17 +997,6 @@ const FinancialDashboard = () => {
       const dateB = new Date(b.name);
       return dateA - dateB;
     });
-    
-    // ================================
-    // AVERAGES & PROJECTIONS
-    // ================================
-    
-    // Calculate date difference for averages
-    const daysBetween = differenceInDays(endDate, startDate) + 1;
-    
-    // Calculate average daily income and expense
-    const averageDailyIncome = daysBetween > 0 ? totalIncome / daysBetween : 0;
-    const averageDailyExpense = daysBetween > 0 ? totalExpenses / daysBetween : 0;
     
     // ================================
     // UPCOMING PAYMENTS
@@ -1183,7 +1020,7 @@ const FinancialDashboard = () => {
       .filter(booking => {
         // Only include bookings with outstanding payments
         const paymentData = FinancialUtils.extractBookingPayments(booking);
-        return paymentData.totalOutstanding > 0;
+        return paymentData.totalOutstandingNumber > 0;
       })
       .map(booking => {
         const paymentData = FinancialUtils.extractBookingPayments(booking);
@@ -1193,7 +1030,7 @@ const FinancialDashboard = () => {
           id: booking.id,
           clientName: booking.clientName || booking.clientDetails?.name || 'Unknown Client',
           date: serviceDate,
-          amount: paymentData.totalOutstanding,
+          amount: paymentData.totalOutstandingNumber,
           type: 'booking',
           details: booking.bookingDetails
         };
@@ -1203,44 +1040,75 @@ const FinancialDashboard = () => {
     // CALCULATE PERCENTAGE CHANGES
     // ================================
     
-    // Calculate percentage changes for KPIs
+    // Calculate percentage changes for KPIs with high precision
     const incomeChange = FinancialUtils.calculatePercentChange(
-      totalIncome, 
+      companyMargin.revenueNumber, 
       previousPeriodData.totalIncome
     );
     
     const expenseChange = FinancialUtils.calculatePercentChange(
-      totalExpenses, 
+      companyMargin.costsNumber, 
       previousPeriodData.totalExpenses
     );
     
     const profitChange = FinancialUtils.calculatePercentChange(
-      netProfit, 
+      companyMargin.netProfitNumber, 
       previousPeriodData.netProfit
     );
     
     const outstandingChange = FinancialUtils.calculatePercentChange(
-      outstandingPayments,
+      companyMargin.outstandingNumber,
       previousPeriodData.outstandingPayments
     );
     
-    // Return all calculated metrics
+    // Debug info for payment tracking
+    const bookingPaymentsInfo = [];
+    filteredBookings.forEach(booking => {
+      const paymentData = FinancialUtils.extractBookingPayments(booking);
+      bookingPaymentsInfo.push({
+        id: booking.id,
+        clientName: booking.clientName || booking.clientDetails?.name || 'Unknown',
+        totalAgreedPrice: paymentData.totalAgreedPriceNumber,
+        totalPaid: paymentData.totalPaidNumber,
+        totalOutstanding: paymentData.totalOutstandingNumber,
+        receivedPayments: paymentData.receivedPayments,
+        pendingPayments: paymentData.pendingPayments
+      });
+    });
+    
+    const orderPaymentsInfo = [];
+    filteredOrders.forEach(order => {
+      const paymentData = FinancialUtils.extractOrderPayments(order);
+      orderPaymentsInfo.push({
+        id: order.id,
+        totalAmount: paymentData.totalAmountNumber,
+        amountPaid: paymentData.amountPaidNumber,
+        amountDue: paymentData.amountDueNumber,
+        status: order.paymentStatus
+      });
+    });
+    
+    // Return all calculated metrics with both precision Decimal objects and number values
     return {
       // Primary KPIs
-      totalIncome,
-      totalExpenses,
-      outstandingPayments,
-      netProfit,
-      profitMargin,
+      totalIncome: companyMargin.revenueNumber,
+      totalExpenses: companyMargin.costsNumber,
+      outstandingPayments: companyMargin.outstandingNumber,
+      netProfit: companyMargin.netProfitNumber,
+      profitMargin: companyMargin.profitMarginNumber,
       
       // Income sources
-      bookingIncome,
-      orderIncome,
-      otherPaymentsIncome,
+      bookingIncome: companyMargin.bookingRevenueNumber,
+      orderIncome: companyMargin.orderRevenueNumber,
+      otherIncome: companyMargin.otherRevenueNumber,
+      
+      // Outstanding details
+      bookingOutstanding: companyMargin.bookingOutstandingNumber,
+      orderOutstanding: companyMargin.orderOutstandingNumber,
       
       // Averages
-      averageDailyIncome,
-      averageDailyExpense,
+      averageDailyIncome: companyMargin.dailyAvgRevenueNumber,
+      averageDailyExpense: companyMargin.dailyAvgExpenseNumber,
       
       // Category breakdowns
       incomeByCategory,
@@ -1265,6 +1133,12 @@ const FinancialDashboard = () => {
         outstanding: outstandingChange
       },
       
+      // Formatted display values
+      displayValues: companyMargin.displayValues,
+      
+      // Validation issues found
+      dataIssues,
+      
       // Debug information
       debug: {
         bookingPayments: bookingPaymentsInfo,
@@ -1288,7 +1162,7 @@ const FinancialDashboard = () => {
     neutral: ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d']
   };
   
-  // Format currency with the utility
+  // Format currency with FinancialUtils
   const formatCurrency = useCallback((amount) => {
     return FinancialUtils.formatCurrency(amount);
   }, []);
@@ -1302,14 +1176,19 @@ const FinancialDashboard = () => {
     
     return (
       <div className="mt-6 p-4 bg-gray-100 rounded-lg border border-gray-300">
-        <h3 className="font-bold text-lg mb-2">Debug Information</h3>
+        <h3 className="font-bold text-lg mb-2">Financial Data Validation</h3>
         
-        <div className="mb-4">
+        <FinancialValidationPanel 
+          dataIssues={financialMetrics.dataIssues}
+          formatCurrency={formatCurrency}
+        />
+        
+        <div className="mb-4 mt-6">
           <h4 className="font-semibold">Income Sources:</h4>
           <ul className="list-disc pl-5">
             <li>Booking Income: {formatCurrency(financialMetrics.bookingIncome)}</li>
             <li>Order Income: {formatCurrency(financialMetrics.orderIncome)}</li>
-            <li>Other Payments: {formatCurrency(financialMetrics.otherPaymentsIncome)}</li>
+            <li>Other Payments: {formatCurrency(financialMetrics.otherIncome || 0)}</li>
           </ul>
         </div>
         
@@ -1379,6 +1258,19 @@ const FinancialDashboard = () => {
             </table>
           </div>
         </div>
+        
+        <div className="mt-4">
+          <h4 className="font-semibold">Financial Metrics Calculation:</h4>
+          <pre className="bg-gray-800 text-white p-3 rounded text-xs overflow-x-auto mt-2">
+            {JSON.stringify({
+              totalIncome: formatCurrency(financialMetrics.totalIncome),
+              totalExpenses: formatCurrency(financialMetrics.totalExpenses),
+              netProfit: formatCurrency(financialMetrics.netProfit),
+              profitMargin: `${financialMetrics.profitMargin.toFixed(2)}%`,
+              totalOutstanding: formatCurrency(financialMetrics.outstandingPayments)
+            }, null, 2)}
+          </pre>
+        </div>
       </div>
     );
   };
@@ -1394,7 +1286,7 @@ const FinancialDashboard = () => {
         <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Financial Dashboard</h1>
-            <p className="text-gray-600 mt-1">Real-time overview of your financial performance</p>
+            <p className="text-gray-600 mt-1">High-precision financial tracking</p>
           </div>
           
           <div className="flex items-center space-x-2 mt-4 sm:mt-0">
@@ -1525,7 +1417,7 @@ const FinancialDashboard = () => {
               {/* Total Income */}
               <MetricCard
                 title="Total Income"
-                value={formatCurrency(financialMetrics.totalIncome)}
+                value={financialMetrics.displayValues?.revenue || formatCurrency(financialMetrics.totalIncome)}
                 icon={DollarSign}
                 change={financialMetrics.changes.income}
                 color="green"
@@ -1535,7 +1427,7 @@ const FinancialDashboard = () => {
               {/* Total Expenses */}
               <MetricCard
                 title="Total Expenses"
-                value={formatCurrency(financialMetrics.totalExpenses)}
+                value={financialMetrics.displayValues?.costs || formatCurrency(financialMetrics.totalExpenses)}
                 icon={TrendingDown}
                 change={financialMetrics.changes.expenses}
                 color="red"
@@ -1545,7 +1437,7 @@ const FinancialDashboard = () => {
               {/* Outstanding Payments */}
               <MetricCard
                 title="Outstanding Payments"
-                value={formatCurrency(financialMetrics.outstandingPayments)}
+                value={financialMetrics.displayValues?.outstanding || formatCurrency(financialMetrics.outstandingPayments)}
                 icon={Clock}
                 change={financialMetrics.changes.outstanding}
                 changeLabel={`${financialMetrics.upcomingPayments.length} payments due soon`}
@@ -1556,14 +1448,20 @@ const FinancialDashboard = () => {
               {/* Net Profit */}
               <MetricCard
                 title="Net Profit"
-                value={formatCurrency(financialMetrics.netProfit)}
+                value={financialMetrics.displayValues?.netProfit || formatCurrency(financialMetrics.netProfit)}
                 icon={CreditCard}
                 change={financialMetrics.changes.profit}
-                changeLabel={`${financialMetrics.profitMargin.toFixed(1)}% margin`}
+                changeLabel={financialMetrics.displayValues?.profitMargin || `${financialMetrics.profitMargin.toFixed(1)}%`}
                 color={financialMetrics.netProfit >= 0 ? "green" : "red"}
                 isLoading={isLoading}
               />
             </div>
+            
+            {/* Reconciliation Summary */}
+            <ReconciliationSummary 
+              metrics={financialMetrics} 
+              formatCurrency={formatCurrency} 
+            />
             
             {/* Debug Panel */}
             <DebugPanel />
@@ -1771,7 +1669,7 @@ const FinancialDashboard = () => {
                   <CreditCard className="h-5 w-5 text-blue-500 mr-1" />
                   <div>
                     <p className="text-sm font-medium text-gray-500">Profit Margin</p>
-                    <p className="text-lg font-semibold">{financialMetrics.profitMargin.toFixed(1)}%</p>
+                    <p className="text-lg font-semibold">{financialMetrics.displayValues?.profitMargin || `${financialMetrics.profitMargin.toFixed(1)}%`}</p>
                   </div>
                 </div>
               </div>
@@ -1987,7 +1885,7 @@ const FinancialDashboard = () => {
                         return dateB - dateA;
                       })
                       .slice(0, 5)
-                      .map((transaction) => {
+                      .map((transaction, idx) => {
                         const isExpense = transaction.transactionType === 'expense';
                         const isBooking = transaction.transactionType === 'booking';
                         const date = DataUtils.extractDate(transaction) || new Date();
@@ -1996,22 +1894,22 @@ const FinancialDashboard = () => {
                         let status = transaction.paymentStatus || 'unknown';
                         
                         if (isExpense) {
-                          amount = -FinancialUtils.normalizeAmount(transaction.amount);
+                          amount = -FinancialUtils.normalizeAmount(transaction.amount).toNumber();
                         } else if (isBooking) {
                           // Sum all received payments
                           amount = transaction.receivedPayments.reduce(
-                            (sum, payment) => sum + FinancialUtils.normalizeAmount(payment.amount), 
+                            (sum, payment) => sum + payment.amountNumber, 
                             0
                           );
                           status = 'paid';
                         } else {
                           // Order
                           const paymentData = FinancialUtils.extractOrderPayments(transaction);
-                          amount = paymentData.amountPaid;
+                          amount = paymentData.amountPaidNumber;
                         }
                         
                         return (
-                          <tr key={transaction.id} className="hover:bg-gray-50">
+                          <tr key={`${transaction.id}-${idx}`} className="hover:bg-gray-50">
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex items-center">
                                 <div className={`flex-shrink-0 h-10 w-10 flex items-center justify-center rounded-full ${isExpense ? 'bg-red-100' : 'bg-green-100'}`}>
