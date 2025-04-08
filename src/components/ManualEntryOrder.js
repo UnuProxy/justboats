@@ -194,7 +194,7 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
           setFormIsValid(formData.items.length > 0 && formData.items.every(item => 
             item.name.trim() !== '' && 
             item.quantity > 0 && 
-            parseFloat(item.price) >= 0)
+            parseFloat(typeof item.price === 'string' ? item.price.replace(/,/g, '') : item.price) >= 0)
           );
           break;
         case 3: // Payment & Finalize
@@ -221,8 +221,8 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
   const handleAmountChange = (e) => {
     const value = e.target.value;
     
-    // Allow only numbers and a single decimal point
-    if (/^(\d+)?([.])?(\d+)?$/.test(value) || value === '') {
+    // Allow numbers, commas, and a single decimal point
+    if (/^(\d{1,3}(,\d{3})*)?([.])?(\d+)?$/.test(value) || value === '') {
       setFormData(prev => ({
         ...prev,
         amountPaid: value
@@ -268,13 +268,15 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
   };
   
   const calculateTotal = () => {
-    return formData.items.reduce((total, item) => 
-      total + (parseFloat(item.price) * parseInt(item.quantity)), 0);
+    return formData.items.reduce((total, item) => {
+      const price = typeof item.price === 'string' ? item.price.replace(/,/g, '') : item.price;
+      return total + (parseFloat(price) * parseInt(item.quantity || 1));
+    }, 0);
   };
   
   const calculateRemainingBalance = () => {
     const total = calculateTotal();
-    const amountPaid = parseFloat(formData.amountPaid) || 0;
+    const amountPaid = parseFloat(formData.amountPaid.replace(/,/g, '')) || 0;
     return Math.max(0, total - amountPaid);
   };
   
@@ -377,7 +379,7 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
       
       const totalAmount = calculateTotal();
       // Safely parse amount paid with handling for decimal separator
-      let amountPaid = parseFloat(formData.amountPaid.replace(',', '.')) || 0;
+      let amountPaid = parseFloat(formData.amountPaid.replace(/,/g, '')) || 0;
       let amountDue = totalAmount - amountPaid;
       if (amountDue < 0) amountDue = 0;
       
@@ -394,6 +396,13 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
       // Determine delivery status based on the order status
       const isDelivered = ['dispatched', 'completed'].includes(formData.status);
       
+      // Clean up items data - ensure prices don't have commas
+      const cleanedItems = formData.items.map(item => ({
+        ...item,
+        price: typeof item.price === 'string' ? parseFloat(item.price.replace(/,/g, '')) : item.price,
+        quantity: parseInt(item.quantity || 1)
+      }));
+      
       // Create order object
       const orderData = {
         fullName: formData.fullName,
@@ -403,7 +412,7 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
         customerEmail: formData.customerEmail,
         orderDate: formData.orderDate,
         status: formData.status,
-        items: formData.items,
+        items: cleanedItems,
         marina: formData.marina,
         berthNumber: formData.berthNumber,
         amount_total: totalAmount,
@@ -1090,9 +1099,18 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
                       onKeyDown={handleKeyDown}
                       onChange={(e) => {
                         const value = e.target.value;
-                        // Allow only numbers
-                        if (/^\d*$/.test(value) || value === '') {
-                          handleItemChange(index, 'quantity', parseInt(value) || 1);
+                        // Allow only numbers but don't immediately parse
+                        if (/^\d*$/.test(value)) {
+                          // If empty, don't default to 1 right away - let user type
+                          const newValue = value === '' ? '' : parseInt(value);
+                          handleItemChange(index, 'quantity', newValue || (value === '' ? '' : 1));
+                        }
+                      }}
+                      onBlur={(e) => {
+                        // On blur, ensure we have at least 1
+                        const value = e.target.value;
+                        if (value === '' || parseInt(value) < 1) {
+                          handleItemChange(index, 'quantity', 1);
                         }
                       }}
                       className="w-full rounded-lg border border-gray-300 shadow-sm py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1113,9 +1131,10 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
                         onKeyDown={handleKeyDown}
                         onChange={(e) => {
                           const value = e.target.value;
-                          // Allow only numbers and a single decimal point
-                          if (/^(\d+)?([.])?(\d+)?$/.test(value) || value === '') {
-                            handleItemChange(index, 'price', parseFloat(value) || 0);
+                          // Allow numbers, commas, and a single decimal point
+                          if (/^(\d{1,3}(,\d{3})*)?([.])?(\d+)?$/.test(value) || value === '') {
+                            // Store the raw string
+                            handleItemChange(index, 'price', value);
                           }
                         }}
                         className="pl-7 w-full rounded-lg border border-gray-300 shadow-sm py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1127,7 +1146,8 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
                   <div className="w-1/3 text-right">
                     <label className="block text-xs font-medium text-gray-500 mb-1">Total</label>
                     <div className="py-1.5 font-medium text-blue-700">
-                      €{(parseFloat(item.price) * parseInt(item.quantity)).toFixed(2)}
+                      €{(parseFloat(typeof item.price === 'string' ? item.price.replace(/,/g, '') : item.price) * 
+                         (parseInt(item.quantity) || 1)).toFixed(2)}
                     </div>
                   </div>
                 </div>
@@ -1238,7 +1258,7 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
               
               <div className="flex justify-between items-center text-sm">
                 <span className="text-gray-600">Amount Paid:</span>
-                <span className="text-green-600">€{parseFloat(formData.amountPaid || 0).toFixed(2)}</span>
+                <span className="text-green-600">€{parseFloat(formData.amountPaid.replace(/,/g, '') || 0).toFixed(2)}</span>
               </div>
               
               <div className="flex justify-between items-center font-medium mt-2 pt-2 border-t border-gray-200">
@@ -1304,7 +1324,7 @@ const ManualOrderEntry = ({ onClose, onOrderAdded, onOrderDeleted, initialOrderD
                       <span className="font-medium">{item.name || 'Unnamed item'}</span>
                       <span className="text-gray-600 ml-2">x{item.quantity}</span>
                     </div>
-                    <span>€{(parseFloat(item.price) * parseInt(item.quantity)).toFixed(2)}</span>
+                    <span>€{(parseFloat(typeof item.price === 'string' ? item.price.replace(/,/g, '') : item.price) * parseInt(item.quantity || 1)).toFixed(2)}</span>
                   </div>
                 ))}
               </div>

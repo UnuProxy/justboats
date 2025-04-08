@@ -102,13 +102,14 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
   // LinkedOrdersSection Component
 
 
+  // Complete replacement for the LinkedOrdersSection component
   const LinkedOrdersSection = () => {
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
-    const [forceUpdate, setForceUpdate] = useState(0); // Use to force re-renders
+    const [forceUpdate, setForceUpdate] = useState(0);
     
-    // Initial data load
+    // Data loading useEffect
     useEffect(() => {
       if (!booking?.id) return;
       
@@ -268,18 +269,30 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
       }
     };
     
-    // Handle order status update
     const handleOrderStatusUpdate = async (order, field, newValue) => {
       if (isUpdating) return;
       setIsUpdating(true);
       
       try {
-        // Update the order in the orders collection
-        const orderRef = doc(db, "orders", order.id);
-        await updateDoc(orderRef, {
+        // Create update object
+        const updateData = {
           [field]: newValue,
           updatedAt: serverTimestamp()
-        });
+        };
+  
+        // If we're updating payment status to 'paid', also update the payment details
+        if (field === 'paymentStatus' && newValue === 'paid') {
+          const totalAmount = order.amount_total || order.amount || 0;
+          updateData.payment_details = {
+            ...(order.payment_details || {}),
+            amountPaid: totalAmount,
+            paymentDate: new Date().toISOString()
+          };
+        }
+        
+        // Update the order in the orders collection
+        const orderRef = doc(db, "orders", order.id);
+        await updateDoc(orderRef, updateData);
         
         // Update the booking's linkedOrders array to reflect the change
         const bookingRef = doc(db, "bookings", booking.id);
@@ -291,10 +304,21 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
           
           const updatedLinkedOrders = linkedOrders.map(linkedOrder => {
             if (linkedOrder.orderDocId === order.id) {
-              return {
+              const linkedOrderUpdate = {
                 ...linkedOrder,
                 [field]: newValue
               };
+              
+              // If updating payment status to paid, also update payment details in the linked order
+              if (field === 'paymentStatus' && newValue === 'paid') {
+                linkedOrderUpdate.payment_details = {
+                  ...(linkedOrder.payment_details || {}),
+                  amountPaid: order.amount_total || order.amount || 0,
+                  paymentDate: new Date().toISOString()
+                };
+              }
+              
+              return linkedOrderUpdate;
             }
             return linkedOrder;
           });
@@ -307,9 +331,24 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
         
         // Update local state
         setOrders(prevOrders => 
-          prevOrders.map(o => 
-            o.id === order.id ? { ...o, [field]: newValue } : o
-          )
+          prevOrders.map(o => {
+            if (o.id === order.id) {
+              const updatedOrder = { ...o, [field]: newValue };
+              
+              // If updating payment status to paid, also update payment details in local state
+              if (field === 'paymentStatus' && newValue === 'paid') {
+                const totalAmount = o.amount_total || o.amount || 0;
+                updatedOrder.payment_details = {
+                  ...(o.payment_details || {}),
+                  amountPaid: totalAmount,
+                  paymentDate: new Date().toISOString()
+                };
+              }
+              
+              return updatedOrder;
+            }
+            return o;
+          })
         );
       } catch (error) {
         console.error(`Error updating ${field}:`, error);
@@ -319,7 +358,6 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
       }
     };
     
-    // View order details
     const handleViewOrder = (order) => {
       alert(`Order Details:\n
         Order ID: ${order.orderId || 'N/A'}\n
@@ -345,66 +383,126 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
           return 'bg-gray-100 text-gray-800';
       }
     };
+  
+    // Function to organize items by category
+    const renderItems = (items) => {
+      if (!items || !items.length) return "No items";
+      
+      // Organize items by category
+      const categories = {
+        grazing: [],
+        drinks: [],
+        other: []
+      };
+      
+      items.forEach(item => {
+        if (item.name.includes('Grazing')) {
+          categories.grazing.push(item);
+        } else if (item.name.includes('Wine') || item.name.includes('Estrella')) {
+          categories.drinks.push(item);
+        } else {
+          categories.other.push(item);
+        }
+      });
+      
+      return (
+        <div className="space-y-2">
+          {categories.grazing.length > 0 && (
+            <div>
+              <div className="text-xs uppercase text-gray-500 font-medium mb-1">Grazing Platters</div>
+              {categories.grazing.map((item, idx) => (
+                <div key={idx} className="text-sm py-0.5">
+                  <strong>{item.quantity}x</strong> {item.name.replace('pax x', '').replace('Grazing Platter', '').replace('Grazing Plater', '').trim()}
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {categories.drinks.length > 0 && (
+            <div>
+              <div className="text-xs uppercase text-gray-500 font-medium mb-1">Drinks</div>
+              {categories.drinks.map((item, idx) => (
+                <div key={idx} className="text-sm py-0.5">
+                  <strong>{item.quantity}x</strong> {item.name}
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {categories.other.length > 0 && (
+            <div>
+              <div className="text-xs uppercase text-gray-500 font-medium mb-1">Other Items</div>
+              {categories.other.map((item, idx) => (
+                <div key={idx} className="text-sm py-0.5">
+                  <strong>{item.quantity}x</strong> {item.name}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    };
     
     return (
-      <div className="p-4 border rounded-lg">
-        <div className="flex justify-between items-center mb-4">
-          <h4 className="text-lg font-bold">Linked Orders</h4>
-          {isUpdating && <span className="text-sm text-blue-600">Updating...</span>}
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+          <div className="flex justify-between items-center">
+            <h4 className="text-lg font-bold text-gray-800">Linked Orders</h4>
+            {isUpdating && <span className="text-sm text-blue-600 animate-pulse">Updating...</span>}
+          </div>
         </div>
         
         {isLoading ? (
-          <div className="text-center py-4">Loading orders...</div>
+          <div className="text-center py-8 text-gray-500">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-blue-600 mb-2"></div>
+            <p>Loading orders...</p>
+          </div>
         ) : orders.length === 0 ? (
-          <div className="text-center py-4 text-gray-500">No orders linked to this booking</div>
+          <div className="text-center py-8 text-gray-500">
+            <p>No orders linked to this booking</p>
+          </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full divide-y divide-gray-200 table-fixed">
               <thead>
                 <tr className="bg-gray-50">
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order ID</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Paid/Due</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Payment</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Delivery</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">Order ID</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider flex-1">Items</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Total</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-28">Paid/Due</th>
+                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Payment</th>
+                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Delivery</th>
+                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-28">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {orders.map((order) => {
                   const totalAmount = order.amount_total || order.amount || 0;
-                  const amountPaid = order.payment_details?.amountPaid || 0;
-                  const amountDue = Math.max(0, totalAmount - amountPaid);
+                  const amountPaid = order.paymentStatus === 'paid' 
+                    ? totalAmount 
+                    : order.payment_details?.amountPaid || 0;
+                  const amountDue = order.paymentStatus === 'paid'
+                    ? 0
+                    : Math.max(0, totalAmount - amountPaid);
                   
                   return (
                     <tr key={order.id} id={`order-row-${order.id}`} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm text-gray-900 font-medium">
                         {order.orderId || 'N/A'}
                       </td>
-                      <td className="px-4 py-2">
-                        {order.items ? (
-                          <ul className="list-disc list-inside">
-                            {order.items.map((item, idx) => (
-                              <li key={idx} className="text-sm">
-                                {item.quantity} x {item.name}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          "No items information"
-                        )}
+                      <td className="px-4 py-3">
+                        {renderItems(order.items)}
                       </td>
-                      <td className="px-4 py-2 whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm text-gray-900 font-medium text-right">
                         €{totalAmount.toFixed(2)}
                       </td>
-                      <td className="px-4 py-2 whitespace-nowrap">
-                        <div className="text-green-600">€{amountPaid.toFixed(2)} paid</div>
+                      <td className="px-4 py-3 text-right">
+                        <div className="text-sm text-green-600 font-medium">€{amountPaid.toFixed(2)} paid</div>
                         {amountDue > 0 && (
-                          <div className="text-red-600">€{amountDue.toFixed(2)} due</div>
+                          <div className="text-sm text-red-600 font-medium">€{amountDue.toFixed(2)} due</div>
                         )}
                       </td>
-                      <td className="px-4 py-2 whitespace-nowrap">
+                      <td className="px-4 py-3 text-center">
                         <button
                           onClick={() => handleOrderStatusUpdate(
                             order, 
@@ -413,15 +511,15 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                           )}
                           disabled={isUpdating}
                           className={`
-                            px-2 py-1 rounded-full text-xs font-medium cursor-pointer
+                            px-3 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors
                             ${getStatusColor(order.paymentStatus)}
-                            ${isUpdating ? 'opacity-50 cursor-not-allowed' : ''}
+                            ${isUpdating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-opacity-80'}
                           `}
                         >
                           {order.paymentStatus || 'unpaid'}
                         </button>
                       </td>
-                      <td className="px-4 py-2 whitespace-nowrap">
+                      <td className="px-4 py-3 text-center">
                         <button
                           onClick={() => handleOrderStatusUpdate(
                             order, 
@@ -430,28 +528,30 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                           )}
                           disabled={isUpdating}
                           className={`
-                            px-2 py-1 rounded-full text-xs font-medium cursor-pointer
+                            px-3 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors
                             ${getStatusColor(order.deliveryStatus || order.status)}
-                            ${isUpdating ? 'opacity-50 cursor-not-allowed' : ''}
+                            ${isUpdating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-opacity-80'}
                           `}
                         >
                           {order.deliveryStatus || order.status || 'pending'}
                         </button>
                       </td>
-                      <td className="px-4 py-2 whitespace-nowrap flex space-x-2">
-                        <button
-                          className="text-blue-600 hover:text-blue-900 px-2 py-1 bg-blue-50 rounded"
-                          onClick={() => handleViewOrder(order)}
-                        >
-                          View
-                        </button>
-                        <button
-                          className="text-red-600 hover:text-red-900 px-2 py-1 bg-red-50 rounded"
-                          onClick={() => handleDeleteOrder(order)}
-                          disabled={isUpdating}
-                        >
-                          Remove
-                        </button>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex justify-center space-x-2">
+                          <button
+                            className="text-blue-600 hover:text-blue-800 px-2 py-1 bg-blue-50 hover:bg-blue-100 rounded text-sm transition-colors"
+                            onClick={() => handleViewOrder(order)}
+                          >
+                            View
+                          </button>
+                          <button
+                            className="text-red-600 hover:text-red-800 px-2 py-1 bg-red-50 hover:bg-red-100 rounded text-sm transition-colors"
+                            onClick={() => handleDeleteOrder(order)}
+                            disabled={isUpdating}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
