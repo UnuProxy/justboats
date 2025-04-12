@@ -399,6 +399,9 @@ class PrecisionFinancialUtils {
       costs: new Decimal(0),
       outstanding: new Decimal(0),
       
+      // Add this new property to track owner payments
+      ownerPayments: new Decimal(0),
+      
       // Detailed breakdown
       bookingRevenue: new Decimal(0),
       orderRevenue: new Decimal(0),
@@ -416,7 +419,8 @@ class PrecisionFinancialUtils {
         bookings: [],
         orders: [],
         expenses: [],
-        otherPayments: []
+        otherPayments: [],
+        ownerPayments: [] // Add this new array to track owner payment details
       }
     };
     
@@ -455,6 +459,72 @@ class PrecisionFinancialUtils {
         totals.bookingRevenue = totals.bookingRevenue.plus(bookingOnlyRevenue);
         totals.orderRevenue = totals.orderRevenue.plus(linkedOrderRevenue);
         totals.bookingOutstanding = totals.bookingOutstanding.plus(paymentData.totalOutstanding);
+        
+        // *** NEW CODE FOR OWNER PAYMENTS ***
+        // Process owner payments from this booking
+        if (booking.ownerPayments) {
+          // Track owner payment totals for this booking
+          let bookingOwnerPayments = new Decimal(0);
+          const ownerPaymentDetails = [];
+          
+          // First payment
+          if (booking.ownerPayments.firstPayment && booking.ownerPayments.firstPayment.signature) {
+            const amount = this.normalizeAmount(booking.ownerPayments.firstPayment.amount);
+            bookingOwnerPayments = bookingOwnerPayments.plus(amount);
+            
+            // Add to details
+            ownerPaymentDetails.push({
+              type: 'first',
+              amount: amount,
+              date: booking.ownerPayments.firstPayment.date,
+              signature: true
+            });
+          }
+          
+          // Second payment
+          if (booking.ownerPayments.secondPayment && booking.ownerPayments.secondPayment.signature) {
+            const amount = this.normalizeAmount(booking.ownerPayments.secondPayment.amount);
+            bookingOwnerPayments = bookingOwnerPayments.plus(amount);
+            
+            // Add to details
+            ownerPaymentDetails.push({
+              type: 'second',
+              amount: amount,
+              date: booking.ownerPayments.secondPayment.date,
+              signature: true
+            });
+          }
+          
+          // Transfer payment
+          if (booking.ownerPayments.transferPayment && booking.ownerPayments.transferPayment.signature) {
+            const amount = this.normalizeAmount(booking.ownerPayments.transferPayment.amount);
+            bookingOwnerPayments = bookingOwnerPayments.plus(amount);
+            
+            // Add to details
+            ownerPaymentDetails.push({
+              type: 'transfer',
+              amount: amount,
+              date: booking.ownerPayments.transferPayment.date,
+              signature: true
+            });
+          }
+          
+          // Add to total owner payments
+          totals.ownerPayments = totals.ownerPayments.plus(bookingOwnerPayments);
+          
+          // Add to owner payment sources if there are any payments
+          if (bookingOwnerPayments.greaterThan(0)) {
+            totals.sources.ownerPayments.push({
+              id: booking.id,
+              bookingId: booking.id,
+              clientName: booking.clientName || booking.clientDetails?.name || 'Unknown',
+              boatName: booking.bookingDetails?.boatName || 'Unknown Boat',
+              totalPaid: bookingOwnerPayments,
+              payments: ownerPaymentDetails
+            });
+          }
+        }
+        // *** END NEW CODE FOR OWNER PAYMENTS ***
         
         // Track source for reconciliation
         totals.sources.bookings.push({
@@ -532,6 +602,10 @@ class PrecisionFinancialUtils {
     totals.revenue = totals.bookingRevenue.plus(totals.orderRevenue).plus(totals.otherRevenue);
     totals.outstanding = totals.bookingOutstanding.plus(totals.orderOutstanding);
     
+    // *** NEW CODE: Add owner payments to costs ***
+    totals.costs = totals.costs.plus(totals.ownerPayments);
+    // *** END NEW CODE ***
+    
     // Calculate net profit
     const netProfit = totals.revenue.minus(totals.costs);
     
@@ -567,6 +641,10 @@ class PrecisionFinancialUtils {
       bookingOutstanding: totals.bookingOutstanding,
       orderOutstanding: totals.orderOutstanding,
       
+      // *** NEW CODE: Add owner payments to returned data ***
+      ownerPayments: totals.ownerPayments,
+      // *** END NEW CODE ***
+      
       // Daily averages
       dailyAvgRevenue: totals.dailyAvgRevenue,
       dailyAvgExpense: totals.dailyAvgExpense,
@@ -584,6 +662,10 @@ class PrecisionFinancialUtils {
       bookingOutstandingNumber: totals.bookingOutstanding.toNumber(),
       orderOutstandingNumber: totals.orderOutstanding.toNumber(),
       
+      // *** NEW CODE: Add owner payments as number to returned data ***
+      ownerPaymentsNumber: totals.ownerPayments.toNumber(),
+      // *** END NEW CODE ***
+      
       dailyAvgRevenueNumber: totals.dailyAvgRevenue.toNumber(),
       dailyAvgExpenseNumber: totals.dailyAvgExpense.toNumber(),
       
@@ -593,7 +675,10 @@ class PrecisionFinancialUtils {
         costs: this.formatCurrency(totals.costs),
         netProfit: this.formatCurrency(netProfit),
         profitMargin: `${marginPercentage.toFixed(2)}%`,
-        outstanding: this.formatCurrency(totals.outstanding)
+        outstanding: this.formatCurrency(totals.outstanding),
+        // *** NEW CODE: Add formatted owner payments ***
+        ownerPayments: this.formatCurrency(totals.ownerPayments)
+        // *** END NEW CODE ***
       },
       
       // Source data for reconciliation

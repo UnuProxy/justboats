@@ -526,6 +526,7 @@ const ReconciliationSummary = ({ metrics, formatCurrency }) => {
           </div>
         </div>
         
+        
         <div>
           <h3 className="text-sm font-medium text-gray-700 mb-2">Outstanding Payments</h3>
           <div className="bg-gray-50 p-4 rounded-lg">

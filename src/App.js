@@ -9,7 +9,6 @@ import UserManagement from './components/UserManagement';
 import UpcomingBookings from './components/UpcomingBookings';
 import FirestoreTest from "./FirestoreTest";
 import Login from './components/Login';
-import Analytics from './components/Analytics';
 import ClientDirectory from './components/ClientDirectory';
 import PaymentTracking from './components/PaymentTracking';
 import ExpenseOverview from './components/ExpenseOverview';
@@ -30,6 +29,8 @@ import PlaceQRManager from './components/PlaceQRManager';
 import QRRedirect from './components/QRRedirect';
 import FinancialDashboard from './components/FinancialDashboard';
 import PricingManager from './components/PricingManager';
+import ExpenseTracker from './components/ExpenseTracker';
+import CateringExpensesTracker from './components/CateringExpensesTracker';
 
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -273,6 +274,16 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
+   <Route
+    path="/catering-expenses"
+    element={
+        <ProtectedRoute>
+            <ProtectedLayout>
+                <CateringExpensesTracker />
+            </ProtectedLayout>
+        </ProtectedRoute>
+    }
+/>
                             <Route
                                 path="/pricing-manager"
                                 element={
@@ -363,18 +374,19 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
-
-                            {/* Administration Routes */}
                             <Route
-                                path="/analytics"
+                                path="/expense-tracker"
                                 element={
-                                    <ProtectedRoute requiredPermission="admin">
+                                    <ProtectedRoute>
                                         <ProtectedLayout>
-                                            <Analytics />
+                                            <ExpenseTracker />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }
                             />
+
+                            {/* Administration Routes */}
+                            
                             <Route
                                 path="/financial-dashboard"
                                 element={
