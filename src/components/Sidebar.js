@@ -3,14 +3,10 @@ import {
     Menu, X, Calendar, PlusCircle, Users, LogOut, BarChart3,
     User, CreditCard, Euro, Ship, MessageSquare,
     Settings, Building, ChevronDown, ChevronUp, Utensils, Package, ShoppingCart, FileText,
-    Star, StarOff, LineChart
+    Star, StarOff, LineChart, Home, QrCode, MapPin, Divide, DollarSign
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { 
-    // ... existing imports
-    QrCode, MapPin  // Add these imports
-} from 'lucide-react';
 
 const Sidebar = () => {
     const navigate = useNavigate();
@@ -26,6 +22,21 @@ const Sidebar = () => {
         const savedFavorites = localStorage.getItem(favoritesStorageKey);
         return savedFavorites ? JSON.parse(savedFavorites) : [];
     });
+
+    // Expand the current active section by default
+    useEffect(() => {
+        // Find which group the current path belongs to
+        for (const group of navigationGroups) {
+            // Fix: Check if group.items exists and is an array before calling some()
+            if (group && group.items && Array.isArray(group.items)) {
+                const pathInGroup = group.items.some(item => item && location.pathname === item.path);
+                if (pathInGroup) {
+                    setExpandedGroup(group.id);
+                    break;
+                }
+            }
+        }
+    }, [location.pathname]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -45,6 +56,7 @@ const Sidebar = () => {
     }, [favorites, favoritesStorageKey]);
 
     const toggleSidebar = () => setIsOpen(!isOpen);
+    
     const toggleGroup = (group) => {
         setExpandedGroup(expandedGroup === group ? null : group);
     };
@@ -67,21 +79,26 @@ const Sidebar = () => {
     
     // Favorite functions
     const addToFavorites = (item) => {
-        if (!favorites.some(fav => fav.path === item.path)) {
-            setFavorites([...favorites, item]);
+        // Fix: Make sure favorites is an array before calling some()
+        const currentFavorites = Array.isArray(favorites) ? favorites : [];
+        if (!currentFavorites.some(fav => fav && fav.path === item.path)) {
+            setFavorites([...currentFavorites, item]);
         }
     };
     
     const removeFromFavorites = (path) => {
-        setFavorites(favorites.filter(item => item.path !== path));
+        // Fix: Make sure favorites is an array before filtering
+        const currentFavorites = Array.isArray(favorites) ? favorites : [];
+        setFavorites(currentFavorites.filter(item => item && item.path !== path));
     };
     
     const isFavorite = (path) => {
-        return favorites.some(item => item.path === path);
+        // Fix: Make sure favorites is an array before calling some()
+        return Array.isArray(favorites) && favorites.some(item => item && item.path === path);
     };
 
     // Basic navigation for regular users
-    const navigationGroups = [
+    let navigationGroups = [
         {
             id: 'bookings',
             title: "Trips & Tours",
@@ -105,25 +122,35 @@ const Sidebar = () => {
     
     // Add full navigation for admin users
     if (isAdmin()) {
-        navigationGroups.length = 0; // Clear basic navigation
-        
-        // Full navigation structure for admins
-        navigationGroups.push(
+        navigationGroups = [
+            {
+                id: 'dashboard',
+                title: "Dashboard",
+                icon: Home,
+                items: [
+                    {
+                        name: 'Dashboard',
+                        icon: Home,
+                        path: '/',
+                        allowed: true
+                    }
+                ]
+            },
             {
                 id: 'bookings',
                 title: "Bookings & Calendar",
                 icon: Calendar,
                 items: [
                     {
-                        name: 'Add New Booking',
-                        icon: PlusCircle,
-                        path: '/add-booking',
-                        allowed: true
-                    },
-                    {
                         name: 'Upcoming Bookings',
                         icon: Calendar,
                         path: '/bookings',
+                        allowed: true
+                    },
+                    {
+                        name: 'Add New Booking',
+                        icon: PlusCircle,
+                        path: '/add-booking',
                         allowed: true
                     },
                     {
@@ -154,6 +181,95 @@ const Sidebar = () => {
                 ]
             },
             {
+                id: 'financial',
+                title: "Finance & Payments",
+                icon: Euro,
+                items: [
+                    {
+                        name: 'Payment Tracking',
+                        icon: CreditCard,
+                        path: '/payment-tracking',
+                        allowed: true
+                    },
+                    {
+                        name: 'Invoice Generator',
+                        icon: FileText, 
+                        path: '/invoice-generator',
+                        allowed: true
+                    },
+                    {
+                        name: 'Expenses Overview',
+                        icon: Euro,
+                        path: '/expenses',
+                        allowed: true
+                    },
+                    {
+                        name: 'Expense Tracker',
+                        icon: LineChart,
+                        path: '/expense-tracker',
+                        allowed: true
+                    },
+                    {
+                        name: 'Financial Dashboard',
+                        icon: BarChart3,
+                        path: '/financial-dashboard',
+                        allowed: true
+                    }
+                ]
+            },
+            // Food & Beverages section with visual separator
+            {
+                id: 'catering-separator',
+                title: "Food & Beverages Business",
+                icon: Divide,
+                type: 'separator'
+            },
+            {
+                id: 'catering',
+                title: "Food & Beverages",
+                icon: Utensils,
+                special: true, // Mark as special section
+                items: [
+                    {
+                        name: 'Product Catalog',
+                        icon: Package,
+                        path: '/products',
+                        allowed: true
+                    },
+                    {
+                        name: 'Add New Product',
+                        icon: PlusCircle,
+                        path: '/add-product',
+                        allowed: true
+                    },
+                    {
+                        name: 'Catering Orders',
+                        icon: ShoppingCart,
+                        path: '/catering-orders',
+                        allowed: true
+                    },
+                    {
+                        name: 'Provisioning Expenses',
+                        icon: DollarSign,
+                        path: '/catering-expenses',
+                        allowed: true
+                    },
+                    {
+                        name: 'Price Management',
+                        icon: Euro,
+                        path: '/pricing-manager',
+                        allowed: true
+                    }
+                ]
+            },
+            // Add another visual separator after Food & Beverages
+            {
+                id: 'main-business-separator',
+                title: "Core Business Operations",
+                icon: Divide,
+                type: 'separator'
+            },
+            {
                 id: 'customers',
                 title: "Customer Relations",
                 icon: Users,
@@ -165,9 +281,15 @@ const Sidebar = () => {
                         allowed: true
                     },
                     {
-                        name: 'Manage Partners',
+                        name: 'Partner Management',
                         icon: Building,
                         path: '/manage-partners',
+                        allowed: true
+                    },
+                    {
+                        name: 'Inquiries & Leads',
+                        icon: MessageSquare,
+                        path: '/inquiries',
                         allowed: true
                     }
                 ]
@@ -191,74 +313,9 @@ const Sidebar = () => {
                 icon: MessageSquare,
                 items: [
                     {
-                        name: 'Inquiries & Leads',
-                        icon: MessageSquare,
-                        path: '/inquiries',
-                        allowed: true
-                    },
-                    {
-                        name: 'Chatbot Conversations',
+                        name: 'Chatbot Settings',
                         icon: MessageSquare,
                         path: '/chatbot-settings',
-                        allowed: true
-                    }
-                ]
-            },
-            {
-                id: 'catering',
-                title: "Food & Beverages",
-                icon: Utensils,
-                items: [
-                    {
-                        name: 'Add Product',
-                        icon: PlusCircle,
-                        path: '/add-product',
-                        allowed: true
-                    },
-                    {
-                        name: 'Products List',
-                        icon: Package,
-                        path: '/products',
-                        allowed: true
-                    },
-                    
-                    {
-                        name: 'Orders',
-                        icon: ShoppingCart,
-                        path: '/catering-orders',
-                        allowed: true
-                    },
-                    // In the catering section or financial section, add:
-                    {
-                        name: 'Pricing Manager',
-                        icon: Euro,
-                        path: '/pricing-manager',
-                        allowed: true
-                    }
-                ]
-            },
-            {
-                id: 'financial',
-                title: "Finance & Payments",
-                icon: Euro,
-                items: [
-                    {
-                        name: 'Payment Tracking',
-                        icon: CreditCard,
-                        path: '/payment-tracking',
-                        allowed: true
-                    },
-                    {
-                        name: 'Invoice',
-                        icon: FileText, 
-                        path: '/invoice-generator',
-                        allowed: true
-                    },
-                    
-                    {
-                        name: 'Expenses Overview',
-                        icon: Euro,
-                        path: '/expenses',
                         allowed: true
                     }
                 ]
@@ -268,18 +325,6 @@ const Sidebar = () => {
                 title: "Administration",
                 icon: Settings,
                 items: [
-                    {
-                        name: 'Analytics Dashboard',
-                        icon: BarChart3,
-                        path: '/analytics',
-                        allowed: true
-                    },
-                    {
-                        name: 'Financial Dashboard',  // New item
-                        icon: LineChart,
-                        path: '/financial-dashboard',
-                        allowed: true
-                    },
                     {
                         name: 'User Management',
                         icon: User,
@@ -294,16 +339,18 @@ const Sidebar = () => {
                     }
                 ]
             }
-        );
+        ];
     }
     
-
     // Function to get the icon component for a given path
     const getIconForPath = (path) => {
         for (const group of navigationGroups) {
-            for (const item of group.items) {
-                if (item.path === path) {
-                    return item.icon;
+            // Fix: Check if group.items exists and is an array
+            if (group && group.items && Array.isArray(group.items)) {
+                for (const item of group.items) {
+                    if (item && item.path === path) {
+                        return item.icon;
+                    }
                 }
             }
         }
@@ -331,13 +378,13 @@ const Sidebar = () => {
 
             {/* Sidebar */}
             <aside
-                className={`fixed top-0 left-0 h-full bg-gray-900 text-gray-100 z-30 transform transition-transform duration-300 ease-in-out w-64 overflow-hidden
+                className={`fixed top-0 left-0 h-full bg-gray-900 text-gray-100 z-30 transform transition-transform duration-300 ease-in-out w-72 overflow-hidden
                     ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
             >
                 <div className="flex flex-col h-full">
                     {/* Header */}
-                    <div className="p-4 border-b border-gray-700 relative">
-                        {/* Mobile close button - now properly positioned */}
+                    <div className="p-5 border-b border-gray-700 relative bg-gray-800">
+                        {/* Mobile close button */}
                         {isMobile && (
                             <button
                                 onClick={() => setIsOpen(false)}
@@ -347,124 +394,167 @@ const Sidebar = () => {
                                 <X size={24} />
                             </button>
                         )}
-                        <h1 className="text-xl font-bold mb-4">Just Enjoy Ibiza</h1>
-                        <div className="flex items-center space-x-2 p-2 rounded-lg bg-gray-800">
-                            <User size={20} />
+                        <h1 className="text-xl font-bold mb-4 text-white">Just Enjoy Ibiza</h1>
+                        <div className="flex items-center space-x-2 p-3 rounded-lg bg-gray-700">
+                            <User size={20} className="text-blue-400" />
                             <div className="flex-1 overflow-hidden">
-                                <p className="text-sm truncate">{user?.email}</p>
-                                <p className="text-xs text-gray-400 capitalize">{userRole}</p>
+                                <p className="text-sm truncate text-white">{user?.email}</p>
+                                <p className="text-xs text-gray-300 capitalize">{userRole}</p>
                             </div>
                         </div>
                     </div>
 
                     {/* Navigation */}
-                    <nav className="flex-1 overflow-y-auto">
+                    <nav className="flex-1 overflow-y-auto pt-3">
                         {/* Favorites Section */}
-                        <div className="mb-2 mt-2">
-                            <div className="px-4 py-2 flex items-center justify-between text-gray-300">
-                                <div className="flex items-center">
-                                    <Star size={20} className="mr-2 text-yellow-400" />
-                                    <span className="font-medium">My Favorites</span>
+                        {Array.isArray(favorites) && favorites.length > 0 && (
+                            <div className="mb-6">
+                                <div className="px-5 py-3 flex items-center text-white bg-gradient-to-r from-yellow-700 to-gray-800">
+                                    <Star size={18} className="mr-3 text-yellow-400" />
+                                    <span className="font-medium">Favorites</span>
                                 </div>
-                            </div>
-                            <div className="py-2 bg-gray-800">
-                                {favorites.length === 0 ? (
-                                    <p className="text-xs text-gray-500 px-6 py-2">Add favorites by clicking the star icon next to menu items</p>
-                                ) : (
-                                    favorites.map((item) => {
+                                <div className="py-2">
+                                    {favorites.map((item) => {
+                                        if (!item || !item.path) return null;
+                                        
                                         const IconComponent = getIconForPath(item.path);
+                                        const isActive = location.pathname === item.path;
+                                        
                                         return (
-                                            <div key={item.path} className="flex items-center px-6 py-2">
+                                            <div key={item.path} className={`
+                                                flex items-center px-3 mx-3 my-2 rounded-md
+                                                ${isActive ? 'bg-blue-600' : 'hover:bg-gray-800'}
+                                            `}>
                                                 <button
                                                     onClick={() => handleNavClick(item.path)}
-                                                    className={`flex-1 flex items-center text-sm text-left transition-colors
-                                                        ${location.pathname === item.path
-                                                            ? 'text-blue-400'
-                                                            : 'text-gray-300 hover:text-gray-100'
-                                                        }`}
+                                                    className={`
+                                                        flex-1 flex items-center py-3 px-2 text-sm text-left
+                                                        ${isActive ? 'text-white font-medium' : 'text-gray-300'}
+                                                    `}
                                                 >
-                                                    <IconComponent size={16} className="mr-2" />
+                                                    <IconComponent size={18} className="mr-3" />
                                                     {item.name}
                                                 </button>
                                                 <button
                                                     onClick={() => removeFromFavorites(item.path)}
-                                                    className="text-gray-400 hover:text-red-400 p-1"
+                                                    className="p-1 text-gray-400 hover:text-red-400 rounded-full hover:bg-gray-700"
                                                     aria-label="Remove from favorites"
                                                 >
-                                                    <StarOff size={14} />
+                                                    <StarOff size={16} />
                                                 </button>
                                             </div>
                                         );
-                                    })
-                                )}
+                                    })}
+                                </div>
                             </div>
-                        </div>
+                        )}
                         
                         {/* Regular Navigation Groups */}
-                        {navigationGroups.map((group) => {
-                            const allowedItems = group.items.filter(item => item.allowed);
-                            if (allowedItems.length === 0) return null;
+                        <div className="space-y-3 px-3">
+                            {navigationGroups.map((group) => {
+                                if (!group) return null;
+                                
+                                // Handle separator type items
+                                if (group.type === 'separator') {
+                                    return (
+                                        <div key={group.id} className="pt-2 pb-1">
+                                            <div className="flex items-center px-3 py-2 text-xs uppercase tracking-wider text-gray-400 font-semibold border-b border-gray-700">
+                                                <group.icon size={16} className="mr-2" />
+                                                {group.title}
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                                
+                                // Fix: Check if group.items exists and is an array
+                                const safeItems = group.items && Array.isArray(group.items) ? group.items : [];
+                                const allowedItems = safeItems.filter(item => item && item.allowed);
+                                
+                                if (allowedItems.length === 0) return null;
+                                
+                                const isExpanded = expandedGroup === group.id;
+                                // Fix: Check if group.items exists and is an array before calling some()
+                                const hasActiveItem = allowedItems.some(item => item && location.pathname === item.path);
 
-                            return (
-                                <div key={group.id} className="mb-2">
-                                    <button
-                                        onClick={() => toggleGroup(group.id)}
-                                        className="w-full px-4 py-2 flex items-center justify-between text-gray-300 hover:bg-gray-800 transition-colors"
-                                    >
-                                        <div className="flex items-center">
-                                            <group.icon size={20} className="mr-2" />
-                                            <span className="font-medium">{group.title}</span>
-                                        </div>
-                                        {expandedGroup === group.id ? (
-                                            <ChevronUp size={16} />
-                                        ) : (
-                                            <ChevronDown size={16} />
+                                return (
+                                    <div key={group.id} className="mb-2">
+                                        <button
+                                            onClick={() => toggleGroup(group.id)}
+                                            className={`
+                                                w-full flex items-center justify-between px-4 py-3 text-sm
+                                                transition-colors rounded-lg
+                                                ${isExpanded ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'}
+                                                ${hasActiveItem ? 'border-l-2 border-blue-500 pl-3' : ''}
+                                                ${group.special ? 'bg-gradient-to-r from-blue-900 to-gray-800 font-medium text-white' : ''}
+                                            `}
+                                        >
+                                            <div className="flex items-center">
+                                                <group.icon size={20} className={`mr-3 ${isExpanded ? 'text-blue-400' : ''} ${group.special ? 'text-blue-300' : ''}`} />
+                                                <span className="font-medium">{group.title}</span>
+                                            </div>
+                                            {isExpanded ? (
+                                                <ChevronUp size={18} />
+                                            ) : (
+                                                <ChevronDown size={18} />
+                                            )}
+                                        </button>
+                                        
+                                        {isExpanded && (
+                                            <div className="mt-2 ml-4 space-y-1">
+                                                {allowedItems.map((item) => {
+                                                    if (!item || !item.path) return null;
+                                                    
+                                                    const isActive = location.pathname === item.path;
+                                                    
+                                                    return (
+                                                        <div key={item.path} className="flex items-center group relative">
+                                                            <button
+                                                                onClick={() => handleNavClick(item.path)}
+                                                                className={`
+                                                                    flex items-center w-full px-4 py-3 text-sm transition-colors rounded-md
+                                                                    ${isActive ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'}
+                                                                `}
+                                                            >
+                                                                <item.icon size={18} className="mr-3" />
+                                                                <span>{item.name}</span>
+                                                            </button>
+                                                            
+                                                            <button
+                                                                onClick={() => isFavorite(item.path) 
+                                                                    ? removeFromFavorites(item.path) 
+                                                                    : addToFavorites(item)
+                                                                }
+                                                                className={`
+                                                                    absolute right-2 p-1 rounded-full 
+                                                                    ${isFavorite(item.path) 
+                                                                        ? 'text-yellow-400 hover:bg-gray-700'
+                                                                        : 'text-gray-500 opacity-0 group-hover:opacity-100 hover:bg-gray-700 hover:text-gray-300'
+                                                                    }
+                                                                `}
+                                                                aria-label={isFavorite(item.path) ? "Remove from favorites" : "Add to favorites"}
+                                                            >
+                                                                {isFavorite(item.path) 
+                                                                    ? <Star size={14} />
+                                                                    : <Star size={14} />
+                                                                }
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         )}
-                                    </button>
-                                    {expandedGroup === group.id && (
-                                        <div className="py-2 bg-gray-800">
-                                            {allowedItems.map((item) => (
-                                                <div key={item.path} className="flex items-center">
-                                                    <button
-                                                        onClick={() => handleNavClick(item.path)}
-                                                        className={`flex items-center w-full px-6 py-2 text-sm transition-colors
-                                                            ${location.pathname === item.path
-                                                                ? 'bg-blue-600 text-white'
-                                                                : 'text-gray-300 hover:bg-gray-700'
-                                                            }`}
-                                                    >
-                                                        <item.icon size={16} className="mr-2" />
-                                                        {item.name}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => isFavorite(item.path) 
-                                                            ? removeFromFavorites(item.path) 
-                                                            : addToFavorites(item)
-                                                        }
-                                                        className={`absolute right-3 text-gray-400 hover:text-yellow-400 ${
-                                                            isFavorite(item.path) ? 'text-yellow-400' : ''
-                                                        }`}
-                                                    >
-                                                        {isFavorite(item.path) 
-                                                            ? <Star size={14} />
-                                                            : <Star size={14} />
-                                                        }
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </nav>
 
                     {/* Logout button */}
                     <button
                         onClick={handleLogout}
-                        className="flex items-center w-full p-4 text-red-400 hover:bg-gray-800 transition-colors border-t border-gray-700"
+                        className="flex items-center w-full p-5 mt-2 text-red-400 hover:bg-gray-800 transition-colors border-t border-gray-700"
                     >
-                        <LogOut size={20} className="mr-2" />
+                        <LogOut size={18} className="mr-3" />
                         <span>Logout</span>
                     </button>
                 </div>
