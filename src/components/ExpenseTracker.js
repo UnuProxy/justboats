@@ -15,8 +15,7 @@ import {
   Timestamp,
   serverTimestamp
 } from 'firebase/firestore';
-import { db } from '../firebase/firebaseConfig'; // Adjust this import to match your firebase config location
-
+import { db } from '../firebase/firebaseConfig';
 const ExpenseTracker = () => {
   // State for entries
   const [entries, setEntries] = useState([]);
