@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Save, Download, Trash, Edit, Euro, Loader, ChevronUp, Plus,
-  TrendingUp, ArrowUpDown,  Eye, EyeOff, DollarSign, PieChart
+  TrendingUp, ArrowUpDown, Eye, EyeOff, DollarSign, PieChart, Search
 } from 'lucide-react';
 import { 
   collection, 
@@ -13,15 +13,29 @@ import {
   query, 
   orderBy,
   Timestamp,
-  serverTimestamp
+  serverTimestamp,
+  
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
+
 const ExpenseTracker = () => {
+  // Ref for form scroll
+  const formRef = useRef(null);
+
   // State for entries
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [showPastEntries, setShowPastEntries] = useState(false);
+  const [pastEntries, setPastEntries] = useState([]);
+  const [futureEntries, setFutureEntries] = useState([]);
+  
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+  const [filteredEntries, setFilteredEntries] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
   
   // New state for showing summary
   const [showSummary, setShowSummary] = useState(false);
@@ -36,6 +50,7 @@ const ExpenseTracker = () => {
     // Intrari (Income) section
     data: '',
     detalii: '',
+    bookingId: '',
     sumUpIulian: '',
     stripeIulian: '',
     caixaJustEnjoy: '',
@@ -63,6 +78,22 @@ const ExpenseTracker = () => {
   
   const [editMode, setEditMode] = useState(false);
   const [editId, setEditId] = useState(null);
+  
+  // Format date function (from yyyy-mm-dd to dd/mm/yyyy)
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    
+    try {
+      const parts = dateString.split('-');
+      if (parts.length !== 3) return dateString;
+      
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    } catch (e) {
+      return dateString;
+    }
+  };
+  
+ 
   
   // Calculate summary data
   const calculateSummary = (entriesData) => {
@@ -109,7 +140,7 @@ const ExpenseTracker = () => {
     });
   };
   
-  // Fetch data from Firebase
+  // Fetch expenses data from Firebase
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -119,6 +150,14 @@ const ExpenseTracker = () => {
         const querySnapshot = await getDocs(q);
         
         const fetchedEntries = [];
+        const past = [];
+        const future = [];
+        
+        // Get today's date at midnight for comparison
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayTimestamp = today.getTime();
+        
         querySnapshot.forEach((doc) => {
           const data = doc.data();
           
@@ -130,19 +169,57 @@ const ExpenseTracker = () => {
           const dataCompanie = data.dataCompanie ? 
             (data.dataCompanie instanceof Timestamp ? data.dataCompanie.toDate().toISOString().split('T')[0] : data.dataCompanie) 
             : '';
-            
-          fetchedEntries.push({
+          
+          const entry = {
             id: doc.id,
             ...data,
             data: dataDate,
-            dataCompanie: dataCompanie
-          });
+            dataCompanie: dataCompanie,
+            createdAt: data.createdAt
+          };
+          
+          fetchedEntries.push(entry);
+          
+          // Sort into past and future based on date
+          if (dataDate) {
+            const entryDate = new Date(dataDate);
+            entryDate.setHours(0, 0, 0, 0);
+            
+            if (entryDate.getTime() >= todayTimestamp) {
+              future.push(entry);
+            } else {
+              past.push(entry);
+            }
+          } else {
+            // If no date, consider it as future
+            future.push(entry);
+          }
         });
         
-        setEntries(fetchedEntries);
+        // Sort ALL entries by date (ascending - earliest first)
+        const sortByDateAscending = (a, b) => {
+          const aTimestamp = a.data ? new Date(a.data).getTime() : 0;
+          const bTimestamp = b.data ? new Date(b.data).getTime() : 0;
+          
+          if (aTimestamp && bTimestamp) {
+            return aTimestamp - bTimestamp;
+          }
+          
+          return 0;
+        };
         
-        // Calculate summary when data is loaded
-        calculateSummary(fetchedEntries);
+        past.sort(sortByDateAscending);
+        future.sort(sortByDateAscending);
+        
+        setEntries(fetchedEntries);
+        setPastEntries(past);
+        setFutureEntries(future);
+        
+        // Show only future entries by default
+        setFilteredEntries(future);
+        
+        // Calculate summary based on visible entries
+        calculateSummary(future);
         
         setError(null);
       } catch (err) {
@@ -156,6 +233,207 @@ const ExpenseTracker = () => {
     fetchData();
   }, []);
   
+
+  
+  // Perform search
+  const handleSearch = () => {
+    if (!searchQuery.trim()) {
+      clearSearch();
+      return;
+    }
+    
+    setIsSearching(true);
+    
+    try {
+      const query = searchQuery.toLowerCase().trim();
+      
+      // Determine which entries to search in based on past entries toggle
+      const entriesToSearch = showPastEntries ? entries : futureEntries;
+      
+      const results = entriesToSearch.filter(entry => {
+        // Search in detalii field
+        if (entry.detalii && entry.detalii.toLowerCase().includes(query)) {
+          return true;
+        }
+        
+        // Search in dates
+        if (entry.data && entry.data.includes(query)) {
+          return true;
+        }
+        
+        if (entry.dataCompanie && entry.dataCompanie.includes(query)) {
+          return true;
+        }
+        
+        // Search in boat information
+        if (entry.companieBarci && entry.companieBarci.toLowerCase().includes(query)) {
+          return true;
+        }
+        
+        if (entry.numeleBarci && entry.numeleBarci.toLowerCase().includes(query)) {
+          return true;
+        }
+        
+        // Search in booking ID
+        if (entry.bookingId && entry.bookingId.toLowerCase().includes(query)) {
+          return true;
+        }
+        
+        return false;
+      });
+      
+      setFilteredEntries(results);
+      calculateSummary(results);
+    } catch (err) {
+      console.error("Error during search:", err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+  
+  // Clear search
+  const clearSearch = () => {
+    setSearchQuery("");
+    
+    // Reset to either all entries or just future entries based on toggle state
+    if (showPastEntries) {
+      // Show all entries in chronological order
+      const allEntries = [...pastEntries, ...futureEntries];
+      setFilteredEntries(allEntries);
+      calculateSummary(allEntries);
+    } else {
+      // Only show future entries
+      setFilteredEntries(futureEntries);
+      calculateSummary(futureEntries);
+    }
+  };
+  
+  // Toggle search panel
+  const toggleSearch = () => {
+    setShowSearch(!showSearch);
+    if (showSearch) {
+      // Reset search when closing
+      clearSearch();
+    }
+  };
+  
+  // Toggle past entries visibility
+  const handleTogglePastEntries = () => {
+    if (showPastEntries) {
+      // Hide past entries
+      setShowPastEntries(false);
+      setFilteredEntries(futureEntries);
+      calculateSummary(futureEntries);
+    } else {
+      // Show past entries - chronological order (past then future)
+      setShowPastEntries(true);
+      const allEntries = [...pastEntries, ...futureEntries];
+      setFilteredEntries(allEntries);
+      calculateSummary(allEntries);
+    }
+  };
+  
+  // Refresh entries list
+  const refreshEntries = async () => {
+    try {
+      const expensesRef = collection(db, 'expenses');
+      const q = query(expensesRef, orderBy('createdAt', 'desc'));
+      const querySnapshot = await getDocs(q);
+      
+      const updatedEntries = [];
+      const past = [];
+      const future = [];
+      
+      // Get today's date at midnight for comparison
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayTimestamp = today.getTime();
+      
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        
+        // Convert Firebase timestamps to date strings
+        const dataDate = data.data ? 
+          (data.data instanceof Timestamp ? data.data.toDate().toISOString().split('T')[0] : data.data) 
+          : '';
+          
+        const dataCompanie = data.dataCompanie ? 
+          (data.dataCompanie instanceof Timestamp ? data.dataCompanie.toDate().toISOString().split('T')[0] : data.dataCompanie) 
+          : '';
+        
+        const entry = {
+          id: doc.id,
+          ...data,
+          data: dataDate,
+          dataCompanie: dataCompanie,
+          createdAt: data.createdAt
+        };
+        
+        updatedEntries.push(entry);
+        
+        // Sort into past and future based on date
+        if (dataDate) {
+          const entryDate = new Date(dataDate);
+          entryDate.setHours(0, 0, 0, 0);
+          
+          if (entryDate.getTime() >= todayTimestamp) {
+            future.push(entry);
+          } else {
+            past.push(entry);
+          }
+        } else {
+          // If no date, consider it as future
+          future.push(entry);
+        }
+      });
+      
+      // Sort future entries by date (ascending - closest future date first)
+      future.sort((a, b) => {
+        const aTimestamp = a.data ? new Date(a.data).getTime() : 0;
+        const bTimestamp = b.data ? new Date(b.data).getTime() : 0;
+        
+        if (aTimestamp && bTimestamp) {
+          return aTimestamp - bTimestamp;
+        }
+        
+        return 0;
+      });
+      
+      // Sort past entries by date (descending - most recent past date first)
+      past.sort((a, b) => {
+        const aTimestamp = a.data ? new Date(a.data).getTime() : 0;
+        const bTimestamp = b.data ? new Date(b.data).getTime() : 0;
+        
+        if (aTimestamp && bTimestamp) {
+          return bTimestamp - aTimestamp;
+        }
+        
+        return 0;
+      });
+      
+      setEntries(updatedEntries);
+      setPastEntries(past);
+      setFutureEntries(future);
+      
+      // Update filtered entries based on toggle state
+      if (showPastEntries) {
+        // Show all entries - past entries at TOP, followed by future entries
+        const allEntries = [...past, ...future];
+        setFilteredEntries(allEntries);
+        calculateSummary(allEntries);
+      } else {
+        // Only show future entries
+        setFilteredEntries(future);
+        calculateSummary(future);
+      }
+      
+      return updatedEntries;
+    } catch (err) {
+      console.error("Error refreshing entries:", err);
+      throw err;
+    }
+  };
+  
   // Payment method options
   const paymentMethodOptions = ['Cash', 'Bank Transfer', 'Credit Card', 'PayPal'];
   
@@ -165,6 +443,16 @@ const ExpenseTracker = () => {
   // Handle input change
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    setNewEntry({
+      ...newEntry,
+      [name]: value
+    });
+  };
+  
+  // Handle date input change
+  const handleDateChange = (e) => {
+    const { name, value } = e.target;
+    // Keep the original format for the input field
     setNewEntry({
       ...newEntry,
       [name]: value
@@ -217,45 +505,27 @@ const ExpenseTracker = () => {
         updatedAt: serverTimestamp()
       };
       
-      let updatedEntries;
-      
       if (editMode) {
         // Update existing document
         const entryRef = doc(db, 'expenses', editId);
         await updateDoc(entryRef, dataToSave);
         
-        // Update the local state
-        updatedEntries = entries.map(entry => 
-          entry.id === editId ? { 
-            ...dataToSave, 
-            id: editId, 
-            data: newEntry.data, // Keep the formatted date strings for display
-            dataCompanie: newEntry.dataCompanie 
-          } : entry
-        );
-        setEntries(updatedEntries);
+        // Refresh entries to get updated data
+        await refreshEntries();
       } else {
         // Add new document
         dataToSave.createdAt = serverTimestamp();
-        const docRef = await addDoc(collection(db, 'expenses'), dataToSave);
+        await addDoc(collection(db, 'expenses'), dataToSave);
         
-        // Add the new entry to local state
-        updatedEntries = [{ 
-          ...dataToSave, 
-          id: docRef.id,
-          data: newEntry.data, // Keep the formatted date strings for display
-          dataCompanie: newEntry.dataCompanie
-        }, ...entries];
-        setEntries(updatedEntries);
+        // Refresh entries to get the proper timestamp
+        await refreshEntries();
       }
-      
-      // Recalculate summary data
-      calculateSummary(updatedEntries);
       
       // Reset form
       setNewEntry({
         data: '',
         detalii: '',
+        bookingId: '',
         sumUpIulian: '',
         stripeIulian: '',
         caixaJustEnjoy: '',
@@ -282,6 +552,11 @@ const ExpenseTracker = () => {
       setEditId(null);
       setShowForm(false);
       setError(null);
+      
+      // Clear any search to show the newly added/updated entries
+      if (searchQuery) {
+        clearSearch();
+      }
     } catch (err) {
       console.error("Error saving data to Firebase:", err);
       setError("Failed to save data to the database. Please try again.");
@@ -298,6 +573,7 @@ const ExpenseTracker = () => {
       setNewEntry({
         data: entryToEdit.data || '',
         detalii: entryToEdit.detalii || '',
+        bookingId: entryToEdit.bookingId || '',
         sumUpIulian: entryToEdit.sumUpIulian || '',
         stripeIulian: entryToEdit.stripeIulian || '',
         caixaJustEnjoy: entryToEdit.caixaJustEnjoy || '',
@@ -320,9 +596,17 @@ const ExpenseTracker = () => {
         profitTotal: entryToEdit.profitTotal || '',
         transferatContCheltuieli: entryToEdit.transferatContCheltuieli || 'No'
       });
+      
       setEditMode(true);
       setEditId(id);
       setShowForm(true);
+      
+      // Scroll to the form
+      setTimeout(() => {
+        if (formRef.current) {
+          formRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 100);
     }
   };
   
@@ -335,12 +619,8 @@ const ExpenseTracker = () => {
       // Delete from Firebase
       await deleteDoc(doc(db, 'expenses', id));
       
-      // Update local state
-      const updatedEntries = entries.filter(entry => entry.id !== id);
-      setEntries(updatedEntries);
-      
-      // Recalculate summary
-      calculateSummary(updatedEntries);
+      // Refresh entries
+      await refreshEntries();
       
       setError(null);
     } catch (err) {
@@ -363,7 +643,7 @@ const ExpenseTracker = () => {
   const exportToCSV = () => {
     // Define headers based on your Excel structure
     const headers = [
-      "Data", "Detalii", "SumUp - Iulian", "Stripe - Iulian", "Caixa - Just Enjoy Company",
+      "Data", "Detalii", "Booking ID", "SumUp - Iulian", "Stripe - Iulian", "Caixa - Just Enjoy Company",
       "SumUp - Alin", "Stripe - Alin", "Cash - Iulian", "Cash - Alin", "Data",
       "Companie Barci", "Numele Barci", "Suma 1", "Suma 2", "Suma Integral",
       "Metoda Plata", "Comisioane", "Colaboratori", "Metoda Plata", "Suma",
@@ -372,10 +652,11 @@ const ExpenseTracker = () => {
     
     const csvRows = [headers.join(',')];
     
-    entries.forEach(entry => {
+    filteredEntries.forEach(entry => {
       const values = [
-        entry.data,
+        formatDate(entry.data),
         `"${entry.detalii || ''}"`,
+        entry.bookingId || '',
         entry.sumUpIulian || 0,
         entry.stripeIulian || 0,
         entry.caixaJustEnjoy || 0,
@@ -383,7 +664,7 @@ const ExpenseTracker = () => {
         entry.stripeAlin || 0,
         entry.cashIulian || 0,
         entry.cashAlin || 0,
-        entry.dataCompanie,
+        formatDate(entry.dataCompanie),
         `"${entry.companieBarci || ''}"`,
         `"${entry.numeleBarci || ''}"`,
         entry.suma1 || 0,
@@ -421,13 +702,13 @@ const ExpenseTracker = () => {
       setNewEntry({
         data: '',
         detalii: '',
+        bookingId: '',
         sumUpIulian: '',
         cashIulian: '',
         stripeIulian: '',
         caixaJustEnjoy: '',
         sumUpAlin: '',
         stripeAlin: '',
-        
         cashAlin: '',
         dataCompanie: '',
         companieBarci: '',
@@ -460,6 +741,26 @@ const ExpenseTracker = () => {
         <h1 className="text-2xl font-bold">Expense Tracker</h1>
         <div className="flex space-x-2">
           <button 
+            onClick={toggleSearch}
+            className={`px-4 py-2 ${showSearch ? 'bg-teal-500' : 'bg-teal-600'} text-white rounded flex items-center hover:bg-teal-700`}
+          >
+            <Search size={16} className="mr-2" /> Search
+          </button>
+          <button 
+            onClick={handleTogglePastEntries}
+            className={`px-4 py-2 ${showPastEntries ? 'bg-yellow-500' : 'bg-yellow-600'} text-white rounded flex items-center hover:bg-yellow-700`}
+          >
+            {showPastEntries ? (
+              <>
+                <EyeOff size={16} className="mr-2" /> Hide Past Entries
+              </>
+            ) : (
+              <>
+                <Eye size={16} className="mr-2" /> Show Past Entries
+              </>
+            )}
+          </button>
+          <button 
             onClick={toggleSummary}
             className={`px-4 py-2 ${showSummary ? 'bg-indigo-500' : 'bg-indigo-600'} text-white rounded flex items-center hover:bg-indigo-700`}
           >
@@ -490,12 +791,56 @@ const ExpenseTracker = () => {
           <button 
             onClick={exportToCSV}
             className="px-4 py-2 bg-green-500 text-white rounded flex items-center hover:bg-green-600"
-            disabled={loading || entries.length === 0}
+            disabled={loading || filteredEntries.length === 0}
           >
             <Download size={16} className="mr-2" /> Export CSV
           </button>
         </div>
       </div>
+      
+      {/* Search Panel */}
+      {showSearch && (
+        <div className="mb-6 border rounded-md p-4 bg-teal-50">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-lg font-bold text-teal-700">Search Entries</h2>
+          </div>
+          <div className="flex items-center">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by client, boat, date..."
+              className="flex-grow rounded-md border-gray-300 shadow-sm p-2 border"
+              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+            />
+            <button
+              onClick={handleSearch}
+              className="ml-2 px-4 py-2 bg-teal-500 text-white rounded hover:bg-teal-600"
+              disabled={isSearching}
+            >
+              {isSearching ? (
+                <Loader size={16} className="animate-spin" />
+              ) : (
+                <Search size={16} />
+              )}
+            </button>
+            <button
+              onClick={clearSearch}
+              className="ml-2 px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+              disabled={isSearching}
+            >
+              Clear
+            </button>
+          </div>
+          <div className="mt-2 text-sm text-gray-600">
+            {filteredEntries.length === entries.length 
+              ? "Showing all entries" 
+              : `Found ${filteredEntries.length} entries`}
+          </div>
+        </div>
+      )}
+      
+
       
       {/* Financial Summary Panel */}
       {showSummary && (
@@ -570,7 +915,7 @@ const ExpenseTracker = () => {
       )}
       
       {/* Loading indicator for initial load */}
-      {loading && entries.length === 0 && (
+      {loading && filteredEntries.length === 0 && (
         <div className="flex justify-center items-center py-10">
           <Loader size={24} className="animate-spin text-blue-500 mr-2" />
           <span>Loading data...</span>
@@ -579,7 +924,7 @@ const ExpenseTracker = () => {
       
       {/* Collapsible Entry Form */}
       {showForm && (
-        <div className="mb-8 border rounded-md p-4 bg-gray-50 transition-all duration-300">
+        <div ref={formRef} className="mb-8 border rounded-md p-4 bg-gray-50 transition-all duration-300">
           <h2 className="text-lg font-bold mb-4">{editMode ? 'Edit Entry' : 'Add New Entry'}</h2>
           
           <form onSubmit={handleSubmit}>
@@ -596,11 +941,11 @@ const ExpenseTracker = () => {
                       type="date"
                       name="data"
                       value={newEntry.data}
-                      onChange={handleInputChange}
+                      onChange={handleDateChange}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"
                     />
                   </div>
-                  <div>
+                  <div className="col-span-2">
                     <label className="block text-sm font-medium text-gray-700">Detalii</label>
                     <input
                       type="text"
@@ -738,7 +1083,7 @@ const ExpenseTracker = () => {
                       type="date"
                       name="dataCompanie"
                       value={newEntry.dataCompanie}
-                      onChange={handleInputChange}
+                      onChange={handleDateChange}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"
                     />
                   </div>
@@ -949,7 +1294,7 @@ const ExpenseTracker = () => {
           className={`flex items-center justify-center p-4 rounded-full shadow-lg text-white ${showSummary ? 'bg-green-600' : 'bg-green-500 hover:bg-green-600'} transform transition-transform hover:scale-105`}
           title="View Total Profit Summary"
         >
-          <DollarSign size={24} />
+          <Euro size={24} />
           <span className="ml-2 font-bold">
             {new Intl.NumberFormat('en-US', {
               style: 'currency',
@@ -962,8 +1307,15 @@ const ExpenseTracker = () => {
       </div>
       
       {/* Data Display */}
-      {entries.length > 0 && (
+      {filteredEntries.length > 0 ? (
         <div className="overflow-x-auto rounded-lg shadow">
+          {!showPastEntries && pastEntries.length > 0 && (
+            <div className="mb-2 p-2 bg-yellow-100 text-yellow-800 rounded-md flex items-center justify-center">
+              <Eye size={16} className="mr-2" /> 
+              <span>{pastEntries.length} past entries from previous dates are hidden. Click Show Past Entries to view them.</span>
+            </div>
+          )}
+          
           <table className="min-w-full divide-y divide-gray-200 border-collapse">
             <thead>
               <tr>
@@ -993,75 +1345,92 @@ const ExpenseTracker = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {entries.map((entry, index) => (
-                <tr key={entry.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
+              {filteredEntries.map((entry, index) => {
+                // Check if entry is a past entry for styling
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const entryDate = entry.data ? new Date(entry.data) : new Date();
+                entryDate.setHours(0, 0, 0, 0);
+                const isPastEntry = entryDate < today;
+                
+                return (
+                  <tr 
+                    key={entry.id} 
+                    className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${isPastEntry ? 'border-l-4 border-yellow-300' : ''}`} 
                     onMouseEnter={(e) => e.currentTarget.classList.add('bg-gray-100')}
                     onMouseLeave={(e) => e.currentTarget.classList.remove('bg-gray-100')}>
-                  {/* Intrari Data */}
-                  <td className="px-2 py-3 text-xs border-r border-blue-100">{entry.data}</td>
-                  <td className="px-2 py-3 text-xs border-r border-blue-100">{entry.detalii}</td>
-                  <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.sumUpIulian)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.stripeIulian)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.cashIulian)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.caixaJustEnjoy)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.sumUpAlin)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.stripeAlin)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.cashAlin)}</td>
-                  
-                  {/* Cheltuieli Data */}
-                  <td className="px-2 py-3 text-xs border-r border-red-100">{entry.dataCompanie}</td>
-                  <td className="px-2 py-3 text-xs border-r border-red-100">{entry.companieBarci}</td>
-                  <td className="px-2 py-3 text-xs border-r border-red-100">{entry.numeleBarci}</td>
-                  <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma1)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma2)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.sumaIntegral)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-red-100">{entry.metodaPlata}</td>
-                  <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.comisioane)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right font-bold">{formatCurrency(entry.profitTotal)}</td>
-                  <td className="px-2 py-3 text-xs border-r border-red-100">
-                    <span className={`inline-block rounded-full px-2 py-1 text-xs ${
-                      entry.transferatContCheltuieli === 'Yes' ? 'bg-green-100 text-green-800' :
-                      entry.transferatContCheltuieli === 'No' ? 'bg-red-100 text-red-800' :
-                      entry.transferatContCheltuieli === 'Partial' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-blue-100 text-blue-800'
-                    }`}>
-                      {entry.transferatContCheltuieli}
-                    </span>
-                  </td>
-                  
-                  {/* Actions */}
-                  <td className="px-2 py-3 text-xs whitespace-nowrap">
-                    <div className="flex space-x-2">
-                      <button 
-                        onClick={() => handleEdit(entry.id)}
-                        className="p-1 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded"
-                        disabled={loading}
-                        title="Edit Entry"
-                      >
-                        <Edit size={14} />
-                      </button>
-                      <button 
-                        onClick={() => handleDelete(entry.id)}
-                        className="p-1 bg-red-100 text-red-600 hover:bg-red-200 rounded"
-                        disabled={loading}
-                        title="Delete Entry"
-                      >
-                        <Trash size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    {/* Intrari Data */}
+                    <td className="px-2 py-3 text-xs border-r border-blue-100">{formatDate(entry.data)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-blue-100">{entry.detalii}</td>
+                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.sumUpIulian)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.stripeIulian)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.caixaJustEnjoy)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.sumUpAlin)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.stripeAlin)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.cashIulian)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.cashAlin)}</td>
+                    
+                    {/* Cheltuieli Data */}
+                    <td className="px-2 py-3 text-xs border-r border-red-100">{formatDate(entry.dataCompanie)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100">{entry.companieBarci}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100">{entry.numeleBarci}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma1)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma2)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.sumaIntegral)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100">{entry.metodaPlata}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.comisioane)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right font-bold">{formatCurrency(entry.profitTotal)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100">
+                      <span className={`inline-block rounded-full px-2 py-1 text-xs ${
+                        entry.transferatContCheltuieli === 'Yes' ? 'bg-green-100 text-green-800' :
+                        entry.transferatContCheltuieli === 'No' ? 'bg-red-100 text-red-800' :
+                        entry.transferatContCheltuieli === 'Partial' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-blue-100 text-blue-800'
+                      }`}>
+                        {entry.transferatContCheltuieli}
+                      </span>
+                    </td>
+                    
+                    {/* Actions */}
+                    <td className="px-2 py-3 text-xs whitespace-nowrap">
+                      <div className="flex space-x-2">
+                        <button 
+                          onClick={() => handleEdit(entry.id)}
+                          className="p-1 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded"
+                          disabled={loading}
+                          title="Edit Entry"
+                        >
+                          <Edit size={14} />
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(entry.id)}
+                          className="p-1 bg-red-100 text-red-600 hover:bg-red-200 rounded"
+                          disabled={loading}
+                          title="Delete Entry"
+                        >
+                          <Trash size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+          
+          {/* Divider between past and future entries - when viewing all entries */}
+          {showPastEntries && pastEntries.length > 0 && futureEntries.length > 0 && (
+            <div className="my-4 p-2 bg-green-100 text-green-800 rounded-md flex items-center justify-center">
+              <span>Todays Date: {new Date().toLocaleDateString()} | Upcoming entries below ⬇️</span>
+            </div>
+          )}
         </div>
-      )}
-      
-      {/* No data message */}
-      {!loading && entries.length === 0 && (
+      ) : (
         <div className="text-center py-8 bg-gray-50 rounded-md">
           <p className="text-gray-500 mb-2">No entries found</p>
-          <p className="text-sm text-gray-400">Add a new entry using the form above</p>
+          <p className="text-sm text-gray-400">
+            {searchQuery ? 'Try different search terms or clear the search' : 'Add a new entry using the form above'}
+          </p>
         </div>
       )}
     </div>
