@@ -66,6 +66,10 @@ const ExpenseTracker = () => {
     suma1: '',
     suma2: '',
     sumaIntegral: '',
+    skipperCost: '',       // New field for skipper expenses
+    transferCost: '',      // New field for transfer expenses
+    fuelCost: '',          // New field for fuel expenses
+    boatExpense: '',       // New field for general boat expenses
     metodaPlata: 'Cash',
     comisioane: '',
     colaboratori: '',
@@ -127,6 +131,10 @@ const ExpenseTracker = () => {
         parseFloat(entry.suma1 || 0) +
         parseFloat(entry.suma2 || 0) +
         parseFloat(entry.sumaIntegral || 0) +
+        parseFloat(entry.skipperCost || 0) +    // Include new skipper cost
+        parseFloat(entry.transferCost || 0) +   // Include new transfer cost
+        parseFloat(entry.fuelCost || 0) +       // Include new fuel cost
+        parseFloat(entry.boatExpense || 0) +    // Include new boat expense
         parseFloat(entry.comisioane || 0)
       );
       
@@ -498,6 +506,10 @@ const ExpenseTracker = () => {
         suma1: parseNumber(newEntry.suma1),
         suma2: parseNumber(newEntry.suma2),
         sumaIntegral: parseNumber(newEntry.sumaIntegral),
+        skipperCost: parseNumber(newEntry.skipperCost),   // Parse the new fields
+        transferCost: parseNumber(newEntry.transferCost),
+        fuelCost: parseNumber(newEntry.fuelCost),
+        boatExpense: parseNumber(newEntry.boatExpense),
         comisioane: parseNumber(newEntry.comisioane),
         suma: parseNumber(newEntry.suma),
         profitProvizoriu: parseNumber(newEntry.profitProvizoriu),
@@ -539,6 +551,10 @@ const ExpenseTracker = () => {
         suma1: '',
         suma2: '',
         sumaIntegral: '',
+        skipperCost: '',      // Reset new fields
+        transferCost: '',
+        fuelCost: '',
+        boatExpense: '',
         metodaPlata: 'Cash',
         comisioane: '',
         colaboratori: '',
@@ -587,6 +603,10 @@ const ExpenseTracker = () => {
         suma1: entryToEdit.suma1 || '',
         suma2: entryToEdit.suma2 || '',
         sumaIntegral: entryToEdit.sumaIntegral || '',
+        skipperCost: entryToEdit.skipperCost || '',     // Add new fields for editing
+        transferCost: entryToEdit.transferCost || '',
+        fuelCost: entryToEdit.fuelCost || '',
+        boatExpense: entryToEdit.boatExpense || '',
         metodaPlata: entryToEdit.metodaPlata || 'Cash',
         comisioane: entryToEdit.comisioane || '',
         colaboratori: entryToEdit.colaboratori || '',
@@ -646,6 +666,7 @@ const ExpenseTracker = () => {
       "Data", "Detalii", "Booking ID", "SumUp - Iulian", "Stripe - Iulian", "Caixa - Just Enjoy Company",
       "SumUp - Alin", "Stripe - Alin", "Cash - Iulian", "Cash - Alin", "Data",
       "Companie Barci", "Numele Barci", "Suma 1", "Suma 2", "Suma Integral",
+      "Skipper Cost", "Transfer Cost", "Fuel Cost", "Boat Expense", // Add new fields to CSV export
       "Metoda Plata", "Comisioane", "Colaboratori", "Metoda Plata", "Suma",
       "Profit Provizoriu", "Profit Total", "Transferat Cont Cheltuieli"
     ];
@@ -670,6 +691,10 @@ const ExpenseTracker = () => {
         entry.suma1 || 0,
         entry.suma2 || 0,
         entry.sumaIntegral || 0,
+        entry.skipperCost || 0,    // Add new fields to CSV export
+        entry.transferCost || 0,
+        entry.fuelCost || 0,
+        entry.boatExpense || 0,
         `"${entry.metodaPlata || ''}"`,
         entry.comisioane || 0,
         `"${entry.colaboratori || ''}"`,
@@ -716,6 +741,10 @@ const ExpenseTracker = () => {
         suma1: '',
         suma2: '',
         sumaIntegral: '',
+        skipperCost: '',    // Reset new fields
+        transferCost: '',
+        fuelCost: '',
+        boatExpense: '',
         metodaPlata: 'Cash',
         comisioane: '',
         colaboratori: '',
@@ -1155,6 +1184,73 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
+                  
+                  {/* New Expense Fields */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Skipper Cost</label>
+                    <div className="mt-1 relative rounded-md shadow-sm">
+                      <input
+                        type="number"
+                        name="skipperCost"
+                        value={newEntry.skipperCost}
+                        onChange={handleNumericChange}
+                        className="block w-full rounded-md border-gray-300 shadow-sm p-2 pr-12 border"
+                        placeholder="0"
+                      />
+                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                        <span className="text-gray-500 sm:text-sm">€</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Transfer Cost</label>
+                    <div className="mt-1 relative rounded-md shadow-sm">
+                      <input
+                        type="number"
+                        name="transferCost"
+                        value={newEntry.transferCost}
+                        onChange={handleNumericChange}
+                        className="block w-full rounded-md border-gray-300 shadow-sm p-2 pr-12 border"
+                        placeholder="0"
+                      />
+                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                        <span className="text-gray-500 sm:text-sm">€</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Fuel Cost</label>
+                    <div className="mt-1 relative rounded-md shadow-sm">
+                      <input
+                        type="number"
+                        name="fuelCost"
+                        value={newEntry.fuelCost}
+                        onChange={handleNumericChange}
+                        className="block w-full rounded-md border-gray-300 shadow-sm p-2 pr-12 border"
+                        placeholder="0"
+                      />
+                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                        <span className="text-gray-500 sm:text-sm">€</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Boat Expense</label>
+                    <div className="mt-1 relative rounded-md shadow-sm">
+                      <input
+                        type="number"
+                        name="boatExpense"
+                        value={newEntry.boatExpense}
+                        onChange={handleNumericChange}
+                        className="block w-full rounded-md border-gray-300 shadow-sm p-2 pr-12 border"
+                        placeholder="0"
+                      />
+                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                        <span className="text-gray-500 sm:text-sm">€</span>
+                      </div>
+                    </div>
+                  </div>
+                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Metoda Plata</label>
                     <select
@@ -1337,6 +1433,13 @@ const ExpenseTracker = () => {
                 <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Suma 1</th>
                 <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Suma 2</th>
                 <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Suma Integral</th>
+                
+                {/* New Expense Headers */}
+                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Skipper</th>
+                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Transfer</th>
+                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Fuel</th>
+                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Boat Expense</th>
+                
                 <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Metoda Plata</th>
                 <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Comisioane</th>
                 <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Profit Total</th>
@@ -1377,6 +1480,13 @@ const ExpenseTracker = () => {
                     <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma1)}</td>
                     <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma2)}</td>
                     <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.sumaIntegral)}</td>
+                    
+                    {/* New Expense Cells */}
+                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.skipperCost)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.transferCost)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.fuelCost)}</td>
+                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.boatExpense)}</td>
+                    
                     <td className="px-2 py-3 text-xs border-r border-red-100">{entry.metodaPlata}</td>
                     <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.comisioane)}</td>
                     <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right font-bold">{formatCurrency(entry.profitTotal)}</td>
