@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, orderBy, doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { storage } from '../firebase/firebaseConfig';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db } from '../firebase/firebaseConfig';
 import { format, addDays, isPast, differenceInDays, isBefore } from 'date-fns';
+import SignaturePad from './SignaturePad';
 import { 
     Edit, 
     X, 
@@ -20,10 +21,8 @@ import {
     Info,
     Euro,
     Layers,
-    CheckSquare,
     ArrowUp,
     ArrowDown,
-    Send,
     Printer,
     ChevronDown,
     ChevronUp,
@@ -180,7 +179,7 @@ const ExpandedPaymentRow = ({ booking, onClose, onSignatureClick, onEditPayment,
     
     return (
       <tr className="bg-gray-50 border-b">
-        <td colSpan="9" className="p-4">
+        <td colSpan="8" className="p-4">
           <div className="flex justify-between items-start mb-4">
             <h3 className="font-semibold text-lg">Owner Payment Details</h3>
             <button
@@ -445,25 +444,10 @@ const EnhancedSignatureModal = ({ isOpen, onClose, onSave, paymentInfo }) => {
                   </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => {
-                    // In a real implementation, this would open a signature pad
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 400;
-                    canvas.height = 200;
-                    const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = '#f0f0f0';
-                    ctx.fillRect(0, 0, 400, 200);
-                    ctx.font = '30px Arial';
-                    ctx.fillStyle = 'black';
-                    ctx.fillText('Sample Signature', 100, 100);
-                    setSignatureData(canvas.toDataURL());
-                  }}
-                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                  disabled={saving}
-                >
-                  Sign Here
-                </button>
+                <SignaturePad 
+                onSave={(data) => setSignatureData(data)}
+                onClear={() => setSignatureData(null)}
+              />
               )}
             </div>
           </div>
@@ -564,11 +548,6 @@ const PaymentTracking = () => {
     const [editingAmount, setEditingAmount] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(10);
-    const [showBatchPaymentModal, setShowBatchPaymentModal] = useState(false);
-    const [batchSignatureData, setBatchSignatureData] = useState(null);
-    const [batchSignatureName, setBatchSignatureName] = useState('');
-    const [selectedBookings, setSelectedBookings] = useState([]);
-    const [selectAll, setSelectAll] = useState(false);
     const [activeTab, setActiveTab] = useState('all');
     const [notification, setNotification] = useState(null);
     const [showFiltersPanel, setShowFiltersPanel] = useState(false);
@@ -592,8 +571,6 @@ const PaymentTracking = () => {
         paymentDueWithin: 'all', // 'all', '7', '14', '30'
         paymentPriority: 'all', // 'all', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'
     });
-
-    // Use the global calculateCompletionPercentage function
 
     // Helper function to toggle row expansion
     const toggleRowExpansion = (bookingId) => {
@@ -883,17 +860,7 @@ const PaymentTracking = () => {
 
         setFilteredBookings(filtered);
         setCurrentPage(1);
-        
-        // Update selected bookings based on filter change
-        if (selectAll) {
-            setSelectedBookings(filtered.map(booking => booking.id));
-        } else {
-            // Keep only the bookings that are still in the filtered list
-            setSelectedBookings(prev => 
-                prev.filter(id => filtered.some(booking => booking.id === id))
-            );
-        }
-    }, [filters, bookings, activeTab, sortConfig, selectAll]);
+    }, [filters, bookings, activeTab, sortConfig]);
 
     // Generate alerts for important payment actions
     const generateAlerts = (data) => {
@@ -1190,8 +1157,6 @@ const PaymentTracking = () => {
         setEditingAmount(booking.ownerPayments[paymentType + 'Payment']?.amount || '');
     };
 
-    // Using global formatter functions defined outside the component
-
     // Excel export handler
     const handleExport = () => {
         const dataToExport = filteredBookings.map(booking => {
@@ -1268,75 +1233,6 @@ const PaymentTracking = () => {
         showNotification(`Exported ${dataToExport.length} bookings to Excel`);
     };
 
-    // Batch payment processing handler
-    const handleBatchPayment = async () => {
-        if (!batchSignatureData || !batchSignatureName || selectedBookings.length === 0) {
-            showNotification('Please select bookings and provide a signature', 'error');
-            return;
-        }
-        
-        setTaskInProgress(true);
-        try {
-            const batch = writeBatch(db);
-            let successCount = 0;
-            
-            // Process each selected booking
-            for (const bookingId of selectedBookings) {
-                const booking = bookings.find(b => b.id === bookingId);
-                if (!booking) continue;
-                
-                const bookingRef = doc(db, "bookings", bookingId);
-                
-                // Check which payments need processing
-                if (booking.firstPayment.received && !booking.ownerPayments.firstPayment.signature) {
-                    batch.update(bookingRef, {
-                        "ownerPayments.firstPayment.signature": batchSignatureData,
-                        "ownerPayments.firstPayment.paidBy": batchSignatureName,
-                        "ownerPayments.firstPayment.date": new Date().toISOString(),
-                        "ownerPayments.firstPayment.paid": true
-                    });
-                    successCount++;
-                }
-                
-                if (booking.secondPayment.received && !booking.ownerPayments.secondPayment.signature) {
-                    batch.update(bookingRef, {
-                        "ownerPayments.secondPayment.signature": batchSignatureData,
-                        "ownerPayments.secondPayment.paidBy": batchSignatureName,
-                        "ownerPayments.secondPayment.date": new Date().toISOString(),
-                        "ownerPayments.secondPayment.paid": true
-                    });
-                    successCount++;
-                }
-                
-                if (booking.hasTransfer && !booking.ownerPayments.transferPayment.signature) {
-                    batch.update(bookingRef, {
-                        "ownerPayments.transferPayment.signature": batchSignatureData,
-                        "ownerPayments.transferPayment.paidBy": batchSignatureName,
-                        "ownerPayments.transferPayment.date": new Date().toISOString(),
-                        "ownerPayments.transferPayment.paid": true
-                    });
-                    successCount++;
-                }
-            }
-            
-            // Commit the batch
-            await batch.commit();
-            
-            setShowBatchPaymentModal(false);
-            setBatchSignatureData(null);
-            setBatchSignatureName('');
-            setSelectedBookings([]);
-            setSelectAll(false);
-            
-            showNotification(`Successfully processed ${successCount} payments for ${selectedBookings.length} bookings`);
-        } catch (error) {
-            console.error('Error processing batch payments:', error);
-            showNotification('Failed to process batch payments. Please try again.', 'error');
-        } finally {
-            setTaskInProgress(false);
-        }
-    };
-
     // Handle sort change
     const handleSort = (key) => {
         let direction = 'asc';
@@ -1344,27 +1240,6 @@ const PaymentTracking = () => {
             direction = 'desc';
         }
         setSortConfig({ key, direction });
-    };
-
-    // Handle row selection
-    const handleSelectRow = (bookingId) => {
-        setSelectedBookings(prev => {
-            if (prev.includes(bookingId)) {
-                return prev.filter(id => id !== bookingId);
-            } else {
-                return [...prev, bookingId];
-            }
-        });
-    };
-
-    // Handle select all
-    const handleSelectAll = () => {
-        if (selectAll) {
-            setSelectedBookings([]);
-        } else {
-            setSelectedBookings(filteredBookings.map(booking => booking.id));
-        }
-        setSelectAll(!selectAll);
     };
 
     // Calculate data for summary cards
@@ -1422,36 +1297,36 @@ const PaymentTracking = () => {
             )}
 
             {/* Alerts Panel */}
-{alerts.length > 0 && (
-    <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-yellow-800 flex items-center">
-                <AlertTriangle className="w-5 h-5 mr-2" />
-                Payment Alerts ({alerts.length})
-            </h3>
-            <button 
-                onClick={() => setAlerts([])}
-                className="text-gray-400 hover:text-gray-600"
-            >
-                <X className="w-4 h-4" />
-            </button>
-        </div>
-        <div className="space-y-2 max-h-32 overflow-y-auto">
-            {alerts.map(alert => (
-                <div 
-                    key={alert.id}
-                    className={`p-2 rounded-lg ${
-                        alert.type === 'error' 
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                    }`}
-                >
-                    {decodeHtmlEntities(alert.message)}
+            {alerts.length > 0 && (
+                <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-semibold text-yellow-800 flex items-center">
+                            <AlertTriangle className="w-5 h-5 mr-2" />
+                            Payment Alerts ({alerts.length})
+                        </h3>
+                        <button 
+                            onClick={() => setAlerts([])}
+                            className="text-gray-400 hover:text-gray-600"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                        {alerts.map(alert => (
+                            <div 
+                                key={alert.id}
+                                className={`p-2 rounded-lg ${
+                                    alert.type === 'error' 
+                                        ? 'bg-red-100 text-red-800'
+                                        : 'bg-yellow-100 text-yellow-800'
+                                }`}
+                            >
+                                {decodeHtmlEntities(alert.message)}
+                            </div>
+                        ))}
+                    </div>
                 </div>
-            ))}
-        </div>
-    </div>
-)}
+            )}
 
             {/* Header Section */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 space-y-4 lg:space-y-0">
@@ -1462,18 +1337,6 @@ const PaymentTracking = () => {
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <button
-                        onClick={() => setShowBatchPaymentModal(true)}
-                        className={`px-3 py-1.5 rounded flex items-center ${
-                            selectedBookings.length > 0
-                                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                                : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                        }`}
-                        disabled={selectedBookings.length === 0}
-                    >
-                        <Send className="w-4 h-4 mr-1" />
-                        Batch Pay ({selectedBookings.length})
-                    </button>
                     <button
                         onClick={handleExport}
                         className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 flex items-center"
@@ -1566,7 +1429,6 @@ const PaymentTracking = () => {
                     <h3 className="font-semibold mb-2">Quick Help Guide</h3>
                     <ul className="space-y-2 text-sm">
                         <li>• <strong>Tabs:</strong> Quickly filter payments by status</li>
-                        <li>• <strong>Batch Payments:</strong> Select multiple bookings and process payments in one go</li>
                         <li>• <strong>Alerts:</strong> System automatically highlights urgent payments</li>
                         <li>• <strong>Priority System:</strong> Payments are color-coded by urgency</li>
                         <li>• <strong>Keyboard Shortcuts:</strong> Ctrl/Cmd+F (search), Ctrl/Cmd+E (export)</li>
@@ -1703,19 +1565,11 @@ const PaymentTracking = () => {
                 </div>
             </div>
 
-            {/* Display a basic table for each booking */}
+            {/* Table with bookings */}
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                     <thead>
                         <tr>
-                            <th className="px-4 py-2 text-left">
-                                <input 
-                                    type="checkbox" 
-                                    checked={selectAll} 
-                                    onChange={handleSelectAll}
-                                    className="form-checkbox h-5 w-5 text-blue-600"
-                                />
-                            </th>
                             <th className="px-4 py-2 text-left" onClick={() => handleSort('boatName')}>
                                 Boat Name {sortConfig.key === 'boatName' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                             </th>
@@ -1766,17 +1620,7 @@ const PaymentTracking = () => {
                             
                             return (
                                 <React.Fragment key={booking.id}>
-                                    <tr 
-                                        className={`${rowBgClass} ${selectedBookings.includes(booking.id) ? 'bg-blue-100' : ''} hover:bg-gray-50`}
-                                    >
-                                        <td className="px-4 py-2">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={selectedBookings.includes(booking.id)}
-                                                onChange={() => handleSelectRow(booking.id)}
-                                                className="form-checkbox h-5 w-5 text-blue-600"
-                                            />
-                                        </td>
+                                    <tr className={`${rowBgClass} hover:bg-gray-50`}>
                                         <td className="px-4 py-2">
                                             <div className="flex flex-col">
                                                 <span>{booking.boatName}</span>
@@ -1954,124 +1798,6 @@ const PaymentTracking = () => {
                 </div>
             </div>
 
-            {/* Batch Payment Modal */}
-            {showBatchPaymentModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg p-6 w-full max-w-md">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-semibold">Batch Process Payments</h3>
-                            <button
-                                onClick={() => setShowBatchPaymentModal(false)}
-                                className="text-gray-500 hover:text-gray-700"
-                                disabled={taskInProgress}
-                            >
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-                        
-                        <div className="mb-4">
-                            <p className="mb-2">You&apos;re about to process payments for {selectedBookings.length} bookings:</p>
-                            <div className="max-h-32 overflow-y-auto bg-gray-50 p-2 rounded">
-                                {selectedBookings.map(id => {
-                                    const booking = bookings.find(b => b.id === id);
-                                    return booking ? (
-                                        <div key={id} className="text-sm py-1">
-                                            • {booking.boatName} ({formatDate(booking.embarkedDate)})
-                                        </div>
-                                    ) : null;
-                                })}
-                            </div>
-                        </div>
-                        
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Your Name
-                            </label>
-                            <input
-                                type="text"
-                                className="w-full p-2 border rounded"
-                                value={batchSignatureName}
-                                onChange={(e) => setBatchSignatureName(e.target.value)}
-                                placeholder="Enter your name"
-                                disabled={taskInProgress}
-                            />
-                        </div>
-                        
-                        {/* Signature Pad would go here */}
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Signature
-                            </label>
-                            <div className="border border-gray-300 rounded p-2 h-32 bg-gray-50 flex items-center justify-center">
-                                {batchSignatureData ? (
-                                    <div className="relative w-full h-full">
-                                        <img 
-                                            src={batchSignatureData} 
-                                            alt="Signature" 
-                                            className="object-contain w-full h-full"
-                                        />
-                                        <button
-                                            onClick={() => setBatchSignatureData(null)}
-                                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1"
-                                            disabled={taskInProgress}
-                                        >
-                                            <X className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <button
-                                        onClick={() => {
-                                            // In a real implementation, this would open a signature pad
-                                            const canvas = document.createElement('canvas');
-                                            canvas.width = 400;
-                                            canvas.height = 200;
-                                            const ctx = canvas.getContext('2d');
-                                            ctx.fillStyle = '#f0f0f0';
-                                            ctx.fillRect(0, 0, 400, 200);
-                                            ctx.font = '30px Arial';
-                                            ctx.fillStyle = 'black';
-                                            ctx.fillText('Sample Signature', 100, 100);
-                                            setBatchSignatureData(canvas.toDataURL());
-                                        }}
-                                        className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                                        disabled={taskInProgress}
-                                    >
-                                        Sign Here
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                        
-                        <div className="flex justify-end space-x-2">
-                            <button
-                                onClick={() => setShowBatchPaymentModal(false)}
-                                className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
-                                disabled={taskInProgress}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleBatchPayment}
-                                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
-                                disabled={!batchSignatureData || !batchSignatureName || taskInProgress}
-                            >
-                                {taskInProgress ? (
-                                    <>
-                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                                        Processing...
-                                    </>
-                                ) : (
-                                    <>
-                                        <CheckSquare className="w-4 h-4 mr-2" />
-                                        Process All Payments
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* Signature Modal - Using Enhanced Version */}
             {isSignatureModalOpen && (
                 <EnhancedSignatureModal
@@ -2142,17 +1868,6 @@ const PaymentTracking = () => {
                                 disabled={taskInProgress}
                             >
                                 <Filter className="w-5 h-5" />
-                            </button>
-                        </CustomTooltip>
-
-                        <CustomTooltip content="Batch Payment">
-                            <button 
-                                className={`p-2 ${selectedBookings.length > 0 ? 'text-blue-600' : 'text-gray-400'}`}
-                                onClick={() => setShowBatchPaymentModal(true)}
-                                disabled={selectedBookings.length === 0 || taskInProgress}
-                            >
-                                <CheckSquare className="w-5 h-5" />
-                                <span className="text-xs">{selectedBookings.length}</span>
                             </button>
                         </CustomTooltip>
 
