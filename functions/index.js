@@ -6,6 +6,7 @@ const axios = require('axios');
 
 // Initialize Firebase Admin
 admin.initializeApp();
+const db = admin.firestore();
 
 // Constants
 const SENDGRID_TEMPLATE_ID = 'd-a0536d03f0c74ef2b52e722e8b26ef4e';
@@ -394,7 +395,46 @@ exports.testEmail = onCall({
 });
 
 
+// ────────── NEW! ──────────
+// This onRequest endpoint logs the scan and then redirects to wa.me
+exports.trackAndRedirect = onRequest({
+  region: 'us-central1',
+  cors: ALLOWED_ORIGINS
+}, async (req, res) => {
+  try {
+    const placeId = req.query.placeId;
+    if (!placeId) {
+      return res.status(400).send('Missing placeId');
+    }
 
+    const placeRef = db.collection('places').doc(placeId);
+    const snap     = await placeRef.get();
+    if (!snap.exists) {
+      return res.status(404).send('Place not found');
+    }
+    const place = snap.data();
+
+    await placeRef.update({
+      scanCount: admin.firestore.FieldValue.increment(1)
+    });
+    await db.collection('placeScanEvents').add({
+      placeId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      userAgent: req.get('User-Agent') || null,
+      referrer:  req.get('Referer')   || null
+    });
+
+    const cleanNumber = place.whatsappNumber.replace(/\D/g, '');
+    const text        = encodeURIComponent(place.whatsappMessage);
+    const waUrl       = `https://wa.me/${cleanNumber}?text=${text}`;
+    return res.redirect(302, waUrl);
+
+  } catch (err) {
+    console.error('trackAndRedirect error:', err);
+    // send back the real error message
+    return res.status(500).send(`Error: ${err.message}`);
+  }
+});
 
 
 
