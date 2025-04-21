@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Save, Download, Trash, Edit, Euro, Loader, ChevronUp, Plus,
-  TrendingUp, ArrowUpDown, Eye, EyeOff, DollarSign, PieChart, Search
+  TrendingUp, ArrowUpDown, Eye, EyeOff, DollarSign, PieChart, Search,
+  CalendarClock, AlertTriangle, Ship, Menu, X, ChevronDown
 } from 'lucide-react';
 import { 
   collection, 
@@ -13,8 +14,7 @@ import {
   query, 
   orderBy,
   Timestamp,
-  serverTimestamp,
-  
+  serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 
@@ -30,6 +30,15 @@ const ExpenseTracker = () => {
   const [showPastEntries, setShowPastEntries] = useState(false);
   const [pastEntries, setPastEntries] = useState([]);
   const [futureEntries, setFutureEntries] = useState([]);
+  
+  // Mobile menu state
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Track expanded state for mobile cards
+  const [expandedEntryId, setExpandedEntryId] = useState(null);
+  
+  // New state for bookings
+  const [pendingBookings, setPendingBookings] = useState([]);
+  const [showPendingBookings, setShowPendingBookings] = useState(true);
   
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -82,6 +91,7 @@ const ExpenseTracker = () => {
   
   const [editMode, setEditMode] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [createFromBooking, setCreateFromBooking] = useState(null);
   
   // Format date function (from yyyy-mm-dd to dd/mm/yyyy)
   const formatDate = (dateString) => {
@@ -96,8 +106,6 @@ const ExpenseTracker = () => {
       return dateString;
     }
   };
-  
- 
   
   // Calculate summary data
   const calculateSummary = (entriesData) => {
@@ -131,10 +139,10 @@ const ExpenseTracker = () => {
         parseFloat(entry.suma1 || 0) +
         parseFloat(entry.suma2 || 0) +
         parseFloat(entry.sumaIntegral || 0) +
-        parseFloat(entry.skipperCost || 0) +    // Include new skipper cost
-        parseFloat(entry.transferCost || 0) +   // Include new transfer cost
-        parseFloat(entry.fuelCost || 0) +       // Include new fuel cost
-        parseFloat(entry.boatExpense || 0) +    // Include new boat expense
+        parseFloat(entry.skipperCost || 0) +   
+        parseFloat(entry.transferCost || 0) +   
+        parseFloat(entry.fuelCost || 0) +      
+        parseFloat(entry.boatExpense || 0) +    
         parseFloat(entry.comisioane || 0)
       );
       
@@ -148,25 +156,28 @@ const ExpenseTracker = () => {
     });
   };
   
-  // Fetch expenses data from Firebase
+  // Fetch expenses and bookings data from Firebase
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
+        
+        // Fetch expenses
         const expensesRef = collection(db, 'expenses');
-        const q = query(expensesRef, orderBy('createdAt', 'desc'));
-        const querySnapshot = await getDocs(q);
+        const expensesQuery = query(expensesRef, orderBy('createdAt', 'desc'));
+        const expensesSnapshot = await getDocs(expensesQuery);
         
         const fetchedEntries = [];
         const past = [];
         const future = [];
+        const expenseBookingIds = new Set(); // To track which bookings already have expense entries
         
         // Get today's date at midnight for comparison
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const todayTimestamp = today.getTime();
         
-        querySnapshot.forEach((doc) => {
+        expensesSnapshot.forEach((doc) => {
           const data = doc.data();
           
           // Convert Firebase timestamps to date strings
@@ -188,11 +199,17 @@ const ExpenseTracker = () => {
           
           fetchedEntries.push(entry);
           
+          // Keep track of bookings that already have expense entries
+          if (data.bookingId) {
+            expenseBookingIds.add(data.bookingId);
+          }
+          
           // Sort into past and future based on date
           if (dataDate) {
             const entryDate = new Date(dataDate);
             entryDate.setHours(0, 0, 0, 0);
             
+            // Change to include today in the "current" view rather than "past"
             if (entryDate.getTime() >= todayTimestamp) {
               future.push(entry);
             } else {
@@ -201,6 +218,29 @@ const ExpenseTracker = () => {
           } else {
             // If no date, consider it as future
             future.push(entry);
+          }
+        });
+        
+        // Fetch bookings
+        const bookingsRef = collection(db, 'bookings');
+        const bookingsQuery = query(bookingsRef, orderBy('bookingDate', 'desc'));
+        const bookingsSnapshot = await getDocs(bookingsQuery);
+        
+        const pendingBookingsList = [];
+        
+        bookingsSnapshot.forEach((doc) => {
+          const bookingData = doc.data();
+          const booking = {
+            id: doc.id,
+            ...bookingData,
+            // Make sure the dates are consistently formatted
+            bookingDate: bookingData.bookingDate || '',
+            createdAt: bookingData.createdAt || ''
+          };
+          
+          // If this booking doesn't have an expense entry yet and is active, add to pending
+          if (!expenseBookingIds.has(doc.id) && bookingData.status === 'active') {
+            pendingBookingsList.push(booking);
           }
         });
         
@@ -219,12 +259,24 @@ const ExpenseTracker = () => {
         past.sort(sortByDateAscending);
         future.sort(sortByDateAscending);
         
+        // Sort pending bookings by date (closest first)
+        pendingBookingsList.sort((a, b) => {
+          const aDate = a.bookingDate ? new Date(a.bookingDate).getTime() : 0;
+          const bDate = b.bookingDate ? new Date(b.bookingDate).getTime() : 0;
+          return aDate - bDate;
+        });
+        
         setEntries(fetchedEntries);
         setPastEntries(past);
         setFutureEntries(future);
+        setPendingBookings(pendingBookingsList);
         
-        // Show only future entries by default
-        setFilteredEntries(future);
+        // Show only future entries and pending bookings by default
+        const combinedDisplayList = showPendingBookings 
+          ? [...future] 
+          : future;
+        
+        setFilteredEntries(combinedDisplayList);
         
         // Calculate summary based on visible entries
         calculateSummary(future);
@@ -239,9 +291,7 @@ const ExpenseTracker = () => {
     };
     
     fetchData();
-  }, []);
-  
-
+  }, [showPendingBookings]);
   
   // Perform search
   const handleSearch = () => {
@@ -290,8 +340,38 @@ const ExpenseTracker = () => {
         return false;
       });
       
-      setFilteredEntries(results);
-      calculateSummary(results);
+      // Also search in pending bookings if they're shown
+      let bookingResults = [];
+      if (showPendingBookings) {
+        bookingResults = pendingBookings.filter(booking => {
+          // Search in client name
+          if (booking.clientName && booking.clientName.toLowerCase().includes(query)) {
+            return true;
+          }
+          
+          // Search in booking date
+          if (booking.bookingDate && booking.bookingDate.includes(query)) {
+            return true;
+          }
+          
+          // Search in boat information
+          if (booking.bookingDetails?.boatName && booking.bookingDetails.boatName.toLowerCase().includes(query)) {
+            return true;
+          }
+          
+          if (booking.bookingDetails?.boatCompany && booking.bookingDetails.boatCompany.toLowerCase().includes(query)) {
+            return true;
+          }
+          
+          return false;
+        });
+      }
+      
+      // Combine results
+      const combinedResults = [...results, ...bookingResults];
+      
+      setFilteredEntries(combinedResults);
+      calculateSummary(results); // Only calculate summary from real expense entries
     } catch (err) {
       console.error("Error during search:", err);
     } finally {
@@ -307,11 +387,19 @@ const ExpenseTracker = () => {
     if (showPastEntries) {
       // Show all entries in chronological order
       const allEntries = [...pastEntries, ...futureEntries];
-      setFilteredEntries(allEntries);
+      const combinedResults = showPendingBookings 
+        ? [...allEntries, ...pendingBookings] 
+        : allEntries;
+      
+      setFilteredEntries(combinedResults);
       calculateSummary(allEntries);
     } else {
       // Only show future entries
-      setFilteredEntries(futureEntries);
+      const combinedResults = showPendingBookings 
+        ? [...futureEntries, ...pendingBookings] 
+        : futureEntries;
+      
+      setFilteredEntries(combinedResults);
       calculateSummary(futureEntries);
     }
   };
@@ -330,34 +418,60 @@ const ExpenseTracker = () => {
     if (showPastEntries) {
       // Hide past entries
       setShowPastEntries(false);
-      setFilteredEntries(futureEntries);
+      
+      const combinedResults = showPendingBookings 
+        ? [...futureEntries, ...pendingBookings] 
+        : futureEntries;
+      
+      setFilteredEntries(combinedResults);
       calculateSummary(futureEntries);
     } else {
       // Show past entries - chronological order (past then future)
       setShowPastEntries(true);
+      
       const allEntries = [...pastEntries, ...futureEntries];
-      setFilteredEntries(allEntries);
+      const combinedResults = showPendingBookings 
+        ? [...allEntries, ...pendingBookings] 
+        : allEntries;
+      
+      setFilteredEntries(combinedResults);
       calculateSummary(allEntries);
+    }
+  };
+  
+  // Toggle pending bookings visibility
+  const togglePendingBookings = () => {
+    setShowPendingBookings(!showPendingBookings);
+  };
+  
+  // Toggle expanded entry in mobile view
+  const toggleExpandedEntry = (id) => {
+    if (expandedEntryId === id) {
+      setExpandedEntryId(null);
+    } else {
+      setExpandedEntryId(id);
     }
   };
   
   // Refresh entries list
   const refreshEntries = async () => {
     try {
+      // Fetch expenses
       const expensesRef = collection(db, 'expenses');
-      const q = query(expensesRef, orderBy('createdAt', 'desc'));
-      const querySnapshot = await getDocs(q);
+      const expensesQuery = query(expensesRef, orderBy('createdAt', 'desc'));
+      const expensesSnapshot = await getDocs(expensesQuery);
       
       const updatedEntries = [];
       const past = [];
       const future = [];
+      const expenseBookingIds = new Set();
       
       // Get today's date at midnight for comparison
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const todayTimestamp = today.getTime();
       
-      querySnapshot.forEach((doc) => {
+      expensesSnapshot.forEach((doc) => {
         const data = doc.data();
         
         // Convert Firebase timestamps to date strings
@@ -379,7 +493,11 @@ const ExpenseTracker = () => {
         
         updatedEntries.push(entry);
         
-        // Sort into past and future based on date
+        if (data.bookingId) {
+          expenseBookingIds.add(data.bookingId);
+        }
+        
+        // Sort into past and future based on date (include today in future)
         if (dataDate) {
           const entryDate = new Date(dataDate);
           entryDate.setHours(0, 0, 0, 0);
@@ -395,7 +513,29 @@ const ExpenseTracker = () => {
         }
       });
       
-      // Sort future entries by date (ascending - closest future date first)
+      // Fetch bookings
+      const bookingsRef = collection(db, 'bookings');
+      const bookingsQuery = query(bookingsRef, orderBy('bookingDate', 'desc'));
+      const bookingsSnapshot = await getDocs(bookingsQuery);
+      
+      const pendingBookingsList = [];
+      
+      bookingsSnapshot.forEach((doc) => {
+        const bookingData = doc.data();
+        const booking = {
+          id: doc.id,
+          ...bookingData,
+          bookingDate: bookingData.bookingDate || '',
+          createdAt: bookingData.createdAt || ''
+        };
+        
+        // If this booking doesn't have an expense entry yet and is active, add to pending
+        if (!expenseBookingIds.has(doc.id) && bookingData.status === 'active') {
+          pendingBookingsList.push(booking);
+        }
+      });
+      
+      // Sort entries by date
       future.sort((a, b) => {
         const aTimestamp = a.data ? new Date(a.data).getTime() : 0;
         const bTimestamp = b.data ? new Date(b.data).getTime() : 0;
@@ -407,7 +547,6 @@ const ExpenseTracker = () => {
         return 0;
       });
       
-      // Sort past entries by date (descending - most recent past date first)
       past.sort((a, b) => {
         const aTimestamp = a.data ? new Date(a.data).getTime() : 0;
         const bTimestamp = b.data ? new Date(b.data).getTime() : 0;
@@ -419,19 +558,33 @@ const ExpenseTracker = () => {
         return 0;
       });
       
+      // Sort pending bookings by date
+      pendingBookingsList.sort((a, b) => {
+        const aDate = a.bookingDate ? new Date(a.bookingDate).getTime() : 0;
+        const bDate = b.bookingDate ? new Date(b.bookingDate).getTime() : 0;
+        return aDate - bDate;
+      });
+      
       setEntries(updatedEntries);
       setPastEntries(past);
       setFutureEntries(future);
+      setPendingBookings(pendingBookingsList);
       
       // Update filtered entries based on toggle state
       if (showPastEntries) {
-        // Show all entries - past entries at TOP, followed by future entries
         const allEntries = [...past, ...future];
-        setFilteredEntries(allEntries);
+        const combinedResults = showPendingBookings 
+          ? [...allEntries, ...pendingBookingsList] 
+          : allEntries;
+        
+        setFilteredEntries(combinedResults);
         calculateSummary(allEntries);
       } else {
-        // Only show future entries
-        setFilteredEntries(future);
+        const combinedResults = showPendingBookings 
+          ? [...future, ...pendingBookingsList] 
+          : future;
+        
+        setFilteredEntries(combinedResults);
         calculateSummary(future);
       }
       
@@ -567,6 +720,7 @@ const ExpenseTracker = () => {
       setEditMode(false);
       setEditId(null);
       setShowForm(false);
+      setCreateFromBooking(null);
       setError(null);
       
       // Clear any search to show the newly added/updated entries
@@ -579,6 +733,56 @@ const ExpenseTracker = () => {
     } finally {
       setLoading(false);
     }
+  };
+  
+  // Create expense entry from booking
+  const handleCreateFromBooking = (booking) => {
+    // Pre-fill the form with booking data
+    setNewEntry({
+      data: booking.bookingDate || '',
+      detalii: `${booking.clientName || 'Unknown Client'} - ${booking.bookingDetails?.boatName || 'Unknown Boat'}`,
+      bookingId: booking.id || '',
+      sumUpIulian: '',
+      stripeIulian: '',
+      caixaJustEnjoy: '',
+      sumUpAlin: '',
+      stripeAlin: '',
+      cashIulian: '',
+      cashAlin: '',
+      dataCompanie: booking.bookingDate || '',
+      companieBarci: booking.bookingDetails?.boatCompany || '',
+      numeleBarci: booking.bookingDetails?.boatName || '',
+      suma1: booking.pricing?.agreedPrice || 0,
+      suma2: '',
+      sumaIntegral: '',
+      skipperCost: '',
+      transferCost: booking.transfer?.required ? 50 : 0, // Default transfer cost if transfer is required
+      fuelCost: '',
+      boatExpense: '',
+      metodaPlata: 'Cash',
+      comisioane: '',
+      colaboratori: '',
+      metodaPlataColaboratori: '',
+      suma: '',
+      profitProvizoriu: '',
+      profitTotal: '',
+      transferatContCheltuieli: 'No'
+    });
+    
+    setCreateFromBooking(booking);
+    setEditMode(false);
+    setEditId(null);
+    setShowForm(true);
+    
+    // Close mobile menu when creating from booking
+    setMobileMenuOpen(false);
+    
+    // Scroll to the form
+    setTimeout(() => {
+      if (formRef.current) {
+        formRef.current.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 100);
   };
   
   // Edit an entry
@@ -619,6 +823,7 @@ const ExpenseTracker = () => {
       
       setEditMode(true);
       setEditId(id);
+      setCreateFromBooking(null);
       setShowForm(true);
       
       // Scroll to the form
@@ -673,7 +878,10 @@ const ExpenseTracker = () => {
     
     const csvRows = [headers.join(',')];
     
-    filteredEntries.forEach(entry => {
+    // Only export actual expense entries, not pending bookings
+    const expenseEntries = filteredEntries.filter(entry => !entry.bookingDetails); // Bookings have bookingDetails
+    
+    expenseEntries.forEach(entry => {
       const values = [
         formatDate(entry.data),
         `"${entry.detalii || ''}"`,
@@ -756,24 +964,419 @@ const ExpenseTracker = () => {
       });
       setEditMode(false);
       setEditId(null);
+      setCreateFromBooking(null);
     }
+    
+    // Close mobile menu when toggling form
+    setMobileMenuOpen(false);
   };
   
   // Toggle summary visibility
   const toggleSummary = () => {
     setShowSummary(!showSummary);
+    
+    // Close mobile menu when toggling summary
+    setMobileMenuOpen(false);
+  };
+  
+  // Toggle mobile menu
+  const toggleMobileMenu = () => {
+    setMobileMenuOpen(!mobileMenuOpen);
+  };
+  
+  // Check if an item is a booking (not an expense entry)
+  const isBooking = (item) => {
+    return item.bookingDetails !== undefined;
+  };
+  
+  // Calculate total income for an entry
+  const calculateEntryIncome = (entry) => {
+    return (
+      parseFloat(entry.sumUpIulian || 0) +
+      parseFloat(entry.stripeIulian || 0) +
+      parseFloat(entry.caixaJustEnjoy || 0) +
+      parseFloat(entry.sumUpAlin || 0) +
+      parseFloat(entry.stripeAlin || 0) +
+      parseFloat(entry.cashIulian || 0) +
+      parseFloat(entry.cashAlin || 0)
+    );
+  };
+  
+  // Calculate total expenses for an entry
+  const calculateEntryExpenses = (entry) => {
+    return (
+      parseFloat(entry.suma1 || 0) +
+      parseFloat(entry.suma2 || 0) +
+      parseFloat(entry.sumaIntegral || 0) +
+      parseFloat(entry.skipperCost || 0) +
+      parseFloat(entry.transferCost || 0) +
+      parseFloat(entry.fuelCost || 0) +
+      parseFloat(entry.boatExpense || 0) +
+      parseFloat(entry.comisioane || 0)
+    );
+  };
+  
+  // Render a card view for entry (mobile display)
+  const renderEntryCard = (entry) => {
+    // Check if entry is a past entry for styling
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const entryDate = entry.data ? new Date(entry.data) : new Date();
+    entryDate.setHours(0, 0, 0, 0);
+    const isPastEntry = entryDate < today;
+    const isTodayEntry = entryDate.getTime() === today.getTime();
+    
+    // Calculate if this card is expanded
+    const isExpanded = expandedEntryId === entry.id;
+    
+    // Calculate income and expenses for this entry
+    const entryIncome = calculateEntryIncome(entry);
+    const entryExpenses = calculateEntryExpenses(entry);
+    
+    return (
+      <div 
+        key={entry.id}
+        className={`mb-4 p-3 rounded-lg shadow border ${
+          isTodayEntry ? 'border-l-4 border-green-500' : 
+          isPastEntry ? 'border-l-4 border-yellow-300' : 
+          'border-gray-200'
+        } bg-white`}
+      >
+        <div className="flex justify-between items-start mb-2">
+          <div>
+            <span className="text-sm font-medium">
+              {formatDate(entry.data)}
+              {isTodayEntry && (
+                <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  Today
+                </span>
+              )}
+            </span>
+          </div>
+          <div className="flex space-x-2">
+            <button 
+              onClick={() => handleEdit(entry.id)}
+              className="p-1.5 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded"
+              disabled={loading}
+              title="Edit Entry"
+            >
+              <Edit size={14} />
+            </button>
+            <button 
+              onClick={() => handleDelete(entry.id)}
+              className="p-1.5 bg-red-100 text-red-600 hover:bg-red-200 rounded"
+              disabled={loading}
+              title="Delete Entry"
+            >
+              <Trash size={14} />
+            </button>
+          </div>
+        </div>
+        
+        <h3 className="text-base font-medium mb-1 line-clamp-1">
+          {entry.detalii}
+          {entry.bookingId && (
+            <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+              <Ship size={10} className="mr-1" /> 
+              Booking
+            </span>
+          )}
+        </h3>
+        
+        <div className="grid grid-cols-2 gap-1 mt-3 text-xs border-t pt-2">
+          <div className="text-gray-600">Company:</div>
+          <div className="font-medium">{entry.companieBarci || '-'}</div>
+          
+          <div className="text-gray-600">Boat:</div>
+          <div className="font-medium">{entry.numeleBarci || '-'}</div>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
+          <div className="flex flex-col bg-blue-50 p-2 rounded">
+            <span className="text-blue-600 font-semibold text-center mb-1">Income</span>
+            <span className="text-lg font-bold text-center text-blue-700">
+              {new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'EUR',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+              }).format(entryIncome)}
+            </span>
+          </div>
+          
+          <div className="flex flex-col bg-red-50 p-2 rounded">
+            <span className="text-red-600 font-semibold text-center mb-1">Expenses</span>
+            <span className="text-lg font-bold text-center text-red-700">
+              {new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'EUR',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+              }).format(entryExpenses)}
+            </span>
+          </div>
+        </div>
+        
+        <div className="mt-3 p-2 rounded bg-gray-50 flex justify-between items-center">
+          <span className="text-sm font-medium">Profit:</span>
+          <span className={`text-lg font-bold ${parseFloat(entry.profitTotal || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {formatCurrency(entry.profitTotal)}
+          </span>
+        </div>
+        
+        {/* Expand/Collapse button */}
+        <button
+          onClick={() => toggleExpandedEntry(entry.id)}
+          className="w-full flex items-center justify-center mt-2 p-1 text-xs text-gray-500 hover:bg-gray-100 rounded"
+        >
+          {isExpanded ? (
+            <>
+              <ChevronUp size={14} className="mr-1" /> Show Less
+            </>
+          ) : (
+            <>
+              <ChevronDown size={14} className="mr-1" /> Show Details
+            </>
+          )}
+        </button>
+        
+        {/* Expanded details */}
+        {isExpanded && (
+          <div className="mt-3 pt-2 border-t border-gray-200">
+            <h4 className="font-medium text-sm mb-2 text-blue-600">Income Details</h4>
+            <div className="grid grid-cols-2 gap-1 text-xs mb-3">
+              <div className="text-gray-600">SumUp - Iulian:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.sumUpIulian)}</div>
+              
+              <div className="text-gray-600">Stripe - Iulian:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.stripeIulian)}</div>
+              
+              <div className="text-gray-600">Cash - Iulian:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.cashIulian)}</div>
+              
+              <div className="text-gray-600">SumUp - Alin:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.sumUpAlin)}</div>
+              
+              <div className="text-gray-600">Stripe - Alin:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.stripeAlin)}</div>
+              
+              <div className="text-gray-600">Cash - Alin:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.cashAlin)}</div>
+              
+              <div className="text-gray-600">Caixa - Just Enjoy:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.caixaJustEnjoy)}</div>
+            </div>
+            
+            <h4 className="font-medium text-sm mb-2 text-red-600">Expense Details</h4>
+            <div className="grid grid-cols-2 gap-1 text-xs mb-3">
+              <div className="text-gray-600">Suma 1:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.suma1)}</div>
+              
+              <div className="text-gray-600">Suma 2:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.suma2)}</div>
+              
+              <div className="text-gray-600">Suma Integral:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.sumaIntegral)}</div>
+              
+              <div className="text-gray-600">Skipper Cost:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.skipperCost)}</div>
+              
+              <div className="text-gray-600">Transfer Cost:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.transferCost)}</div>
+              
+              <div className="text-gray-600">Fuel Cost:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.fuelCost)}</div>
+              
+              <div className="text-gray-600">Boat Expense:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.boatExpense)}</div>
+              
+              <div className="text-gray-600">Comisioane:</div>
+              <div className="font-medium text-right">{formatCurrency(entry.comisioane)}</div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-1 text-xs">
+              <div className="text-gray-600">Payment Method:</div>
+              <div className="font-medium">{entry.metodaPlata || '-'}</div>
+              
+              <div className="text-gray-600">Transferred:</div>
+              <div className="font-medium">
+                <span className={`inline-block rounded-full px-2 py-1 text-xs ${
+                  entry.transferatContCheltuieli === 'Yes' ? 'bg-green-100 text-green-800' :
+                  entry.transferatContCheltuieli === 'No' ? 'bg-red-100 text-red-800' :
+                  entry.transferatContCheltuieli === 'Partial' ? 'bg-yellow-100 text-yellow-800' :
+                  'bg-blue-100 text-blue-800'
+                }`}>
+                  {entry.transferatContCheltuieli}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  
+  // Render a card view for booking (mobile display)
+  const renderBookingCard = (booking) => {
+    // Check if this is today's booking
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const bookingDate = booking.bookingDate ? new Date(booking.bookingDate) : null;
+    const isToday = bookingDate && bookingDate.setHours(0, 0, 0, 0) === today.getTime();
+    
+    // Calculate if this card is expanded
+    const isExpanded = expandedEntryId === booking.id;
+    
+    return (
+      <div 
+        key={booking.id}
+        className={`mb-4 p-3 rounded-lg shadow border-l-4 ${isToday ? 'border-orange-500' : 'border-orange-300'} bg-orange-50`}
+      >
+        <div className="flex justify-between items-start mb-2">
+          <div>
+            <span className="text-sm font-medium text-orange-800">
+              {formatDate(booking.bookingDate)}
+              {isToday && (
+                <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-200 text-orange-800">
+                  Today
+                </span>
+              )}
+            </span>
+          </div>
+          <div>
+            <button
+              onClick={() => handleCreateFromBooking(booking)}
+              className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded font-medium text-xs"
+            >
+              <Plus size={14} className="mr-1" /> Create Expense
+            </button>
+          </div>
+        </div>
+        
+        <h3 className="text-base font-medium mb-1 text-orange-900 line-clamp-2">
+          {booking.clientName}
+        </h3>
+        
+        <div className="grid grid-cols-2 gap-1 mt-3 text-xs border-t border-orange-200 pt-2">
+          <div className="text-orange-700">Company:</div>
+          <div className="font-medium text-orange-900">{booking.bookingDetails?.boatCompany || '-'}</div>
+          
+          <div className="text-orange-700">Boat:</div>
+          <div className="font-medium text-orange-900">{booking.bookingDetails?.boatName || '-'}</div>
+          
+          <div className="text-orange-700">Time:</div>
+          <div className="font-medium text-orange-900">
+            {booking.bookingDetails?.startTime} - {booking.bookingDetails?.endTime}
+          </div>
+          
+          <div className="text-orange-700">Price:</div>
+          <div className="font-medium text-orange-900">
+            {formatCurrency(booking.pricing?.agreedPrice)}
+          </div>
+        </div>
+        
+        {/* Expand/Collapse button */}
+        <button
+          onClick={() => toggleExpandedEntry(booking.id)}
+          className="w-full flex items-center justify-center mt-2 p-1 text-xs text-orange-700 hover:bg-orange-100 rounded"
+        >
+          {isExpanded ? (
+            <>
+              <ChevronUp size={14} className="mr-1" /> Show Less
+            </>
+          ) : (
+            <>
+              <ChevronDown size={14} className="mr-1" /> Show Details
+            </>
+          )}
+        </button>
+        
+        {/* Expanded booking details */}
+        {isExpanded && (
+          <div className="mt-3 pt-2 border-t border-orange-200">
+            <h4 className="font-medium text-sm mb-2 text-orange-800">Booking Details</h4>
+            <div className="grid grid-cols-2 gap-1 text-xs mb-3">
+              <div className="text-orange-700">Client:</div>
+              <div className="font-medium text-orange-900">{booking.clientName || '-'}</div>
+              
+              <div className="text-orange-700">Email:</div>
+              <div className="font-medium text-orange-900">{booking.clientDetails?.email || '-'}</div>
+              
+              <div className="text-orange-700">Phone:</div>
+              <div className="font-medium text-orange-900">{booking.clientDetails?.phone || '-'}</div>
+              
+              <div className="text-orange-700">Passengers:</div>
+              <div className="font-medium text-orange-900">{booking.bookingDetails?.passengers || '-'}</div>
+              
+              <div className="text-orange-700">Payment Status:</div>
+              <div className="font-medium text-orange-900">
+                <span className={`inline-block rounded-full px-2 py-1 text-xs ${
+                  booking.pricing?.paymentStatus === 'Completed' ? 'bg-green-100 text-green-800' : 
+                  booking.pricing?.paymentStatus === 'Pending' ? 'bg-yellow-100 text-yellow-800' : 
+                  'bg-red-100 text-red-800'
+                }`}>
+                  {booking.pricing?.paymentStatus || 'Unknown'}
+                </span>
+              </div>
+              
+              {booking.transfer?.required && (
+                <>
+                  <div className="text-orange-700">Pickup:</div>
+                  <div className="font-medium text-orange-900">
+                    {booking.transfer?.pickup?.locationDetail || booking.transfer?.pickup?.location || '-'}
+                  </div>
+                  
+                  <div className="text-orange-700">Dropoff:</div>
+                  <div className="font-medium text-orange-900">
+                    {booking.transfer?.dropoff?.locationDetail || booking.transfer?.dropoff?.location || '-'}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
   
   return (
     <div className="bg-white rounded-md shadow p-4">
+      {/* Header with title and mobile menu button */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Expense Tracker</h1>
-        <div className="flex space-x-2">
+        
+        {/* Mobile menu button - only show on small screens */}
+        <div className="md:hidden">
+          <button 
+            onClick={toggleMobileMenu}
+            className="p-2 bg-gray-100 rounded-md"
+            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+          >
+            {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
+        
+        {/* Desktop buttons - hide on small screens */}
+        <div className="hidden md:flex space-x-2">
           <button 
             onClick={toggleSearch}
             className={`px-4 py-2 ${showSearch ? 'bg-teal-500' : 'bg-teal-600'} text-white rounded flex items-center hover:bg-teal-700`}
           >
             <Search size={16} className="mr-2" /> Search
+          </button>
+          <button 
+            onClick={togglePendingBookings}
+            className={`px-4 py-2 ${showPendingBookings ? 'bg-orange-500' : 'bg-orange-600'} text-white rounded flex items-center hover:bg-orange-700`}
+          >
+            {showPendingBookings ? (
+              <>
+                <EyeOff size={16} className="mr-2" /> Hide Pending Bookings
+              </>
+            ) : (
+              <>
+                <Eye size={16} className="mr-2" /> Show Pending Bookings
+              </>
+            )}
           </button>
           <button 
             onClick={handleTogglePastEntries}
@@ -827,39 +1430,123 @@ const ExpenseTracker = () => {
         </div>
       </div>
       
+      {/* Mobile Menu - only show on small screens when menu is open */}
+      {mobileMenuOpen && (
+        <div className="md:hidden mb-6">
+          <div className="grid grid-cols-2 gap-2">
+            <button 
+              onClick={toggleSearch}
+              className={`px-3 py-2 ${showSearch ? 'bg-teal-500' : 'bg-teal-600'} text-white rounded flex items-center justify-center hover:bg-teal-700 text-sm`}
+            >
+              <Search size={14} className="mr-1" /> Search
+            </button>
+            <button 
+              onClick={togglePendingBookings}
+              className={`px-3 py-2 ${showPendingBookings ? 'bg-orange-500' : 'bg-orange-600'} text-white rounded flex items-center justify-center hover:bg-orange-700 text-sm`}
+            >
+              {showPendingBookings ? (
+                <>
+                  <EyeOff size={14} className="mr-1" /> Hide Bookings
+                </>
+              ) : (
+                <>
+                  <Eye size={14} className="mr-1" /> Show Bookings
+                </>
+              )}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <button 
+              onClick={handleTogglePastEntries}
+              className={`px-3 py-2 ${showPastEntries ? 'bg-yellow-500' : 'bg-yellow-600'} text-white rounded flex items-center justify-center hover:bg-yellow-700 text-sm`}
+            >
+              {showPastEntries ? (
+                <>
+                  <EyeOff size={14} className="mr-1" /> Hide Past
+                </>
+              ) : (
+                <>
+                  <Eye size={14} className="mr-1" /> Show Past
+                </>
+              )}
+            </button>
+            <button 
+              onClick={toggleSummary}
+              className={`px-3 py-2 ${showSummary ? 'bg-indigo-500' : 'bg-indigo-600'} text-white rounded flex items-center justify-center hover:bg-indigo-700 text-sm`}
+            >
+              {showSummary ? (
+                <>
+                  <EyeOff size={14} className="mr-1" /> Hide Summary
+                </>
+              ) : (
+                <>
+                  <Eye size={14} className="mr-1" /> Summary
+                </>
+              )}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <button 
+              onClick={toggleForm}
+              className="px-3 py-2 bg-blue-500 text-white rounded flex items-center justify-center hover:bg-blue-600 text-sm"
+            >
+              {showForm ? (
+                <>
+                  <ChevronUp size={14} className="mr-1" /> Hide Form
+                </>
+              ) : (
+                <>
+                  <Plus size={14} className="mr-1" /> Add Entry
+                </>
+              )}
+            </button>
+            <button 
+              onClick={exportToCSV}
+              className="px-3 py-2 bg-green-500 text-white rounded flex items-center justify-center hover:bg-green-600 text-sm"
+              disabled={loading || filteredEntries.filter(entry => !isBooking(entry)).length === 0}
+            >
+              <Download size={14} className="mr-1" /> Export
+            </button>
+          </div>
+        </div>
+      )}
+      
       {/* Search Panel */}
       {showSearch && (
         <div className="mb-6 border rounded-md p-4 bg-teal-50">
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-lg font-bold text-teal-700">Search Entries</h2>
           </div>
-          <div className="flex items-center">
+          <div className="flex flex-wrap items-center">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by client, boat, date..."
-              className="flex-grow rounded-md border-gray-300 shadow-sm p-2 border"
+              className="flex-grow rounded-md border-gray-300 shadow-sm p-2 border mb-2 sm:mb-0 w-full sm:w-auto"
               onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
             />
-            <button
-              onClick={handleSearch}
-              className="ml-2 px-4 py-2 bg-teal-500 text-white rounded hover:bg-teal-600"
-              disabled={isSearching}
-            >
-              {isSearching ? (
-                <Loader size={16} className="animate-spin" />
-              ) : (
-                <Search size={16} />
-              )}
-            </button>
-            <button
-              onClick={clearSearch}
-              className="ml-2 px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-              disabled={isSearching}
-            >
-              Clear
-            </button>
+            <div className="flex space-x-2 w-full sm:w-auto sm:ml-2">
+              <button
+                onClick={handleSearch}
+                className="px-4 py-2 bg-teal-500 text-white rounded hover:bg-teal-600 flex-grow sm:flex-grow-0"
+                disabled={isSearching}
+              >
+                {isSearching ? (
+                  <Loader size={16} className="animate-spin mx-auto" />
+                ) : (
+                  <Search size={16} className="mx-auto sm:mx-0" />
+                )}
+                <span className="hidden sm:inline ml-2">Search</span>
+              </button>
+              <button
+                onClick={clearSearch}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 flex-grow sm:flex-grow-0"
+                disabled={isSearching}
+              >
+                <span className="mx-auto sm:mx-0">Clear</span>
+              </button>
+            </div>
           </div>
           <div className="mt-2 text-sm text-gray-600">
             {filteredEntries.length === entries.length 
@@ -868,8 +1555,6 @@ const ExpenseTracker = () => {
           </div>
         </div>
       )}
-      
-
       
       {/* Financial Summary Panel */}
       {showSummary && (
@@ -881,18 +1566,19 @@ const ExpenseTracker = () => {
             <button
               onClick={toggleSummary}
               className="p-1 rounded-full hover:bg-indigo-500"
+              aria-label="Close summary"
             >
               <ChevronUp size={18} />
             </button>
           </div>
           
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 shadow-sm">
+          <div className="p-4 md:p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
+              <div className="bg-blue-50 p-3 md:p-4 rounded-lg border border-blue-200 shadow-sm">
                 <h3 className="font-medium text-blue-800 mb-1 flex items-center">
                   <TrendingUp size={16} className="mr-2" /> Total Income
                 </h3>
-                <p className="text-2xl font-bold text-blue-900">
+                <p className="text-xl md:text-2xl font-bold text-blue-900">
                   {new Intl.NumberFormat('en-US', {
                     style: 'currency',
                     currency: 'EUR'
@@ -900,11 +1586,11 @@ const ExpenseTracker = () => {
                 </p>
               </div>
               
-              <div className="bg-red-50 p-4 rounded-lg border border-red-200 shadow-sm">
+              <div className="bg-red-50 p-3 md:p-4 rounded-lg border border-red-200 shadow-sm">
                 <h3 className="font-medium text-red-800 mb-1 flex items-center">
                   <ArrowUpDown size={16} className="mr-2" /> Total Expenses
                 </h3>
-                <p className="text-2xl font-bold text-red-900">
+                <p className="text-xl md:text-2xl font-bold text-red-900">
                   {new Intl.NumberFormat('en-US', {
                     style: 'currency',
                     currency: 'EUR'
@@ -912,7 +1598,7 @@ const ExpenseTracker = () => {
                 </p>
               </div>
               
-              <div className={`p-4 rounded-lg border shadow-sm ${
+              <div className={`p-3 md:p-4 rounded-lg border shadow-sm ${
                 summaryData.totalProfit >= 0 
                   ? 'bg-green-50 border-green-200' 
                   : 'bg-red-50 border-red-200'
@@ -920,7 +1606,7 @@ const ExpenseTracker = () => {
                 <h3 className="font-medium text-gray-800 mb-1 flex items-center">
                   <DollarSign size={16} className="mr-2" /> Total Profit
                 </h3>
-                <p className={`text-2xl font-bold ${
+                <p className={`text-xl md:text-2xl font-bold ${
                   summaryData.totalProfit >= 0 
                     ? 'text-green-700' 
                     : 'text-red-700'
@@ -932,6 +1618,27 @@ const ExpenseTracker = () => {
                 </p>
               </div>
             </div>
+            
+            {/* Pending Bookings Summary */}
+            {pendingBookings.length > 0 && (
+              <div className="mt-4">
+                <div className="bg-orange-50 p-3 md:p-4 rounded-lg border border-orange-200 shadow-sm">
+                  <h3 className="font-medium text-orange-800 mb-1 flex items-center">
+                    <AlertTriangle size={16} className="mr-2" /> Pending Bookings
+                  </h3>
+                  <p className="text-base md:text-lg font-bold text-orange-900">
+                    {pendingBookings.length} booking{pendingBookings.length !== 1 ? 's' : ''} need expense entries
+                  </p>
+                  <p className="text-xs md:text-sm text-orange-700 mt-1">
+                    Total potential revenue: {new Intl.NumberFormat('en-US', {
+                      style: 'currency',
+                      currency: 'EUR'
+                    }).format(pendingBookings.reduce((sum, booking) => 
+                      sum + (booking.pricing?.agreedPrice || 0), 0))}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -954,7 +1661,9 @@ const ExpenseTracker = () => {
       {/* Collapsible Entry Form */}
       {showForm && (
         <div ref={formRef} className="mb-8 border rounded-md p-4 bg-gray-50 transition-all duration-300">
-          <h2 className="text-lg font-bold mb-4">{editMode ? 'Edit Entry' : 'Add New Entry'}</h2>
+          <h2 className="text-lg font-bold mb-4">
+            {editMode ? 'Edit Entry' : createFromBooking ? `Create Expense Entry for Booking: ${createFromBooking.clientName}` : 'Add New Entry'}
+          </h2>
           
           <form onSubmit={handleSubmit}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -964,7 +1673,7 @@ const ExpenseTracker = () => {
                   <Euro size={16} className="mr-2" /> Intrari (Income)
                 </h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Data</label>
                     <input
                       type="date"
@@ -984,11 +1693,26 @@ const ExpenseTracker = () => {
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"
                     />
                   </div>
-                  <div>
+                  {/* Only show booking ID field if editing or creating from booking */}
+                  {(editMode || createFromBooking) && (
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700">Booking ID</label>
+                      <input
+                        type="text"
+                        name="bookingId"
+                        value={newEntry.bookingId}
+                        onChange={handleInputChange}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"
+                        readOnly={createFromBooking !== null}
+                      />
+                    </div>
+                  )}
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">SumUp - Iulian</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="sumUpIulian"
                         value={newEntry.sumUpIulian}
                         onChange={handleNumericChange}
@@ -1000,11 +1724,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Stripe - Iulian</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="stripeIulian"
                         value={newEntry.stripeIulian}
                         onChange={handleNumericChange}
@@ -1016,11 +1741,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Cash - Iulian</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="cashIulian"
                         value={newEntry.cashIulian}
                         onChange={handleNumericChange}
@@ -1032,11 +1758,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Caixa - Just Enjoy</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="caixaJustEnjoy"
                         value={newEntry.caixaJustEnjoy}
                         onChange={handleNumericChange}
@@ -1048,11 +1775,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">SumUp - Alin</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="sumUpAlin"
                         value={newEntry.sumUpAlin}
                         onChange={handleNumericChange}
@@ -1064,11 +1792,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Stripe - Alin</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="stripeAlin"
                         value={newEntry.stripeAlin}
                         onChange={handleNumericChange}
@@ -1080,12 +1809,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Cash - Alin</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="cashAlin"
                         value={newEntry.cashAlin}
                         onChange={handleNumericChange}
@@ -1106,7 +1835,7 @@ const ExpenseTracker = () => {
                   <Euro size={16} className="mr-2" /> Cheltuieli (Expenses)
                 </h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Data Companie</label>
                     <input
                       type="date"
@@ -1116,7 +1845,7 @@ const ExpenseTracker = () => {
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"
                     />
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Companie Barci</label>
                     <input
                       type="text"
@@ -1126,7 +1855,7 @@ const ExpenseTracker = () => {
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"
                     />
                   </div>
-                  <div>
+                  <div className="col-span-2">
                     <label className="block text-sm font-medium text-gray-700">Numele Barci</label>
                     <input
                       type="text"
@@ -1136,11 +1865,12 @@ const ExpenseTracker = () => {
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"
                     />
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Suma 1</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="suma1"
                         value={newEntry.suma1}
                         onChange={handleNumericChange}
@@ -1152,11 +1882,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Suma 2</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="suma2"
                         value={newEntry.suma2}
                         onChange={handleNumericChange}
@@ -1168,11 +1899,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Suma Integral</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="sumaIntegral"
                         value={newEntry.sumaIntegral}
                         onChange={handleNumericChange}
@@ -1186,11 +1918,12 @@ const ExpenseTracker = () => {
                   </div>
                   
                   {/* New Expense Fields */}
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Skipper Cost</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="skipperCost"
                         value={newEntry.skipperCost}
                         onChange={handleNumericChange}
@@ -1202,11 +1935,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Transfer Cost</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="transferCost"
                         value={newEntry.transferCost}
                         onChange={handleNumericChange}
@@ -1218,11 +1952,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Fuel Cost</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="fuelCost"
                         value={newEntry.fuelCost}
                         onChange={handleNumericChange}
@@ -1234,11 +1969,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Boat Expense</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="boatExpense"
                         value={newEntry.boatExpense}
                         onChange={handleNumericChange}
@@ -1251,7 +1987,7 @@ const ExpenseTracker = () => {
                     </div>
                   </div>
                   
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Metoda Plata</label>
                     <select
                       name="metodaPlata"
@@ -1264,11 +2000,12 @@ const ExpenseTracker = () => {
                       ))}
                     </select>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Comisioane</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="comisioane"
                         value={newEntry.comisioane}
                         onChange={handleNumericChange}
@@ -1280,7 +2017,7 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2">
                     <label className="block text-sm font-medium text-gray-700">Colaboratori</label>
                     <input
                       type="text"
@@ -1290,7 +2027,7 @@ const ExpenseTracker = () => {
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"
                     />
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Metoda Plata Colaboratori</label>
                     <select
                       name="metodaPlataColaboratori"
@@ -1304,11 +2041,12 @@ const ExpenseTracker = () => {
                       ))}
                     </select>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Profit Provizoriu</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="profitProvizoriu"
                         value={newEntry.profitProvizoriu}
                         onChange={handleNumericChange}
@@ -1320,11 +2058,12 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Profit Total</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
+                        inputMode="decimal"
                         name="profitTotal"
                         value={newEntry.profitTotal}
                         onChange={handleNumericChange}
@@ -1336,7 +2075,7 @@ const ExpenseTracker = () => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-sm font-medium text-gray-700">Transferat Cont Cheltuieli</label>
                     <select
                       name="transferatContCheltuieli"
@@ -1353,18 +2092,18 @@ const ExpenseTracker = () => {
               </div>
             </div>
             
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
               <button
                 type="button"
                 onClick={toggleForm}
-                className="px-4 py-2 bg-gray-300 text-gray-800 rounded mr-2"
+                className="px-4 py-2 bg-gray-300 text-gray-800 rounded w-full sm:w-auto"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="px-4 py-2 bg-blue-500 text-white rounded flex items-center"
+                className="px-4 py-2 bg-blue-500 text-white rounded flex items-center justify-center w-full sm:w-auto"
               >
                 {loading ? (
                   <>
@@ -1387,11 +2126,12 @@ const ExpenseTracker = () => {
       <div className="fixed bottom-6 right-6 z-10">
         <button 
           onClick={toggleSummary}
-          className={`flex items-center justify-center p-4 rounded-full shadow-lg text-white ${showSummary ? 'bg-green-600' : 'bg-green-500 hover:bg-green-600'} transform transition-transform hover:scale-105`}
+          className={`flex items-center justify-center p-3 md:p-4 rounded-full shadow-lg text-white ${showSummary ? 'bg-green-600' : 'bg-green-500 hover:bg-green-600'} transform transition-transform hover:scale-105`}
           title="View Total Profit Summary"
         >
-          <Euro size={24} />
-          <span className="ml-2 font-bold">
+          <Euro size={20} className="md:hidden" />
+          <Euro size={24} className="hidden md:block" />
+          <span className="ml-2 font-bold text-sm md:text-base">
             {new Intl.NumberFormat('en-US', {
               style: 'currency',
               currency: 'EUR',
@@ -1402,131 +2142,241 @@ const ExpenseTracker = () => {
         </button>
       </div>
       
-      {/* Data Display */}
-      {filteredEntries.length > 0 ? (
-        <div className="overflow-x-auto rounded-lg shadow">
-          {!showPastEntries && pastEntries.length > 0 && (
-            <div className="mb-2 p-2 bg-yellow-100 text-yellow-800 rounded-md flex items-center justify-center">
-              <Eye size={16} className="mr-2" /> 
-              <span>{pastEntries.length} past entries from previous dates are hidden. Click Show Past Entries to view them.</span>
-            </div>
-          )}
+      {/* Pending Bookings Section */}
+      {showPendingBookings && pendingBookings.length > 0 && (
+        <div className="mb-8 border rounded-md p-4 bg-orange-50">
+          <h2 className="text-lg font-bold mb-4 text-orange-800 flex items-center">
+            <CalendarClock size={20} className="mr-2" /> Pending Bookings ({pendingBookings.length})
+          </h2>
           
-          <table className="min-w-full divide-y divide-gray-200 border-collapse">
-            <thead>
-              <tr>
-                {/* Intrari Headers */}
-                <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Data</th>
-                <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Detalii</th>
-                <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">SumUp - Iulian</th>
-                <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Stripe - Iulian</th>
-                <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Caixa - Just Enjoy</th>
-                <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">SumUp - Alin</th>
-                <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Stripe - Alin</th>
-                <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Cash - Iulian</th>
-                <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Cash - Alin</th>
-                
-                {/* Cheltuieli Headers */}
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Data</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Companie Barci</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Numele Barci</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Suma 1</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Suma 2</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Suma Integral</th>
-                
-                {/* New Expense Headers */}
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Skipper</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Transfer</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Fuel</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Boat Expense</th>
-                
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Metoda Plata</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Comisioane</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Profit Total</th>
-                <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Transferat</th>
-                <th className="px-2 py-3 bg-gray-100 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider sticky top-0 border-b-2 border-gray-200">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredEntries.map((entry, index) => {
-                // Check if entry is a past entry for styling
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const entryDate = entry.data ? new Date(entry.data) : new Date();
-                entryDate.setHours(0, 0, 0, 0);
-                const isPastEntry = entryDate < today;
-                
-                return (
-                  <tr 
-                    key={entry.id} 
-                    className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${isPastEntry ? 'border-l-4 border-yellow-300' : ''}`} 
-                    onMouseEnter={(e) => e.currentTarget.classList.add('bg-gray-100')}
-                    onMouseLeave={(e) => e.currentTarget.classList.remove('bg-gray-100')}>
-                    {/* Intrari Data */}
-                    <td className="px-2 py-3 text-xs border-r border-blue-100">{formatDate(entry.data)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-blue-100">{entry.detalii}</td>
-                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.sumUpIulian)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.stripeIulian)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.caixaJustEnjoy)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.sumUpAlin)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.stripeAlin)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.cashIulian)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.cashAlin)}</td>
-                    
-                    {/* Cheltuieli Data */}
-                    <td className="px-2 py-3 text-xs border-r border-red-100">{formatDate(entry.dataCompanie)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100">{entry.companieBarci}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100">{entry.numeleBarci}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma1)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma2)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.sumaIntegral)}</td>
-                    
-                    {/* New Expense Cells */}
-                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.skipperCost)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.transferCost)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.fuelCost)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.boatExpense)}</td>
-                    
-                    <td className="px-2 py-3 text-xs border-r border-red-100">{entry.metodaPlata}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.comisioane)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right font-bold">{formatCurrency(entry.profitTotal)}</td>
-                    <td className="px-2 py-3 text-xs border-r border-red-100">
-                      <span className={`inline-block rounded-full px-2 py-1 text-xs ${
-                        entry.transferatContCheltuieli === 'Yes' ? 'bg-green-100 text-green-800' :
-                        entry.transferatContCheltuieli === 'No' ? 'bg-red-100 text-red-800' :
-                        entry.transferatContCheltuieli === 'Partial' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
-                        {entry.transferatContCheltuieli}
-                      </span>
-                    </td>
-                    
-                    {/* Actions */}
-                    <td className="px-2 py-3 text-xs whitespace-nowrap">
-                      <div className="flex space-x-2">
-                        <button 
-                          onClick={() => handleEdit(entry.id)}
-                          className="p-1 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded"
-                          disabled={loading}
-                          title="Edit Entry"
+          {/* Mobile view for bookings - only show on small screens */}
+          <div className="md:hidden">
+            {pendingBookings.map(booking => renderBookingCard(booking))}
+          </div>
+          
+          {/* Desktop view for bookings - hide on small screens */}
+          <div className="hidden md:block overflow-x-auto rounded-lg shadow">
+            <table className="min-w-full divide-y divide-orange-200 border-collapse">
+              <thead>
+                <tr>
+                  <th className="px-3 py-3 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider sticky top-0">Date</th>
+                  <th className="px-3 py-3 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider sticky top-0">Client</th>
+                  <th className="px-3 py-3 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider sticky top-0">Boat</th>
+                  <th className="px-3 py-3 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider sticky top-0">Company</th>
+                  <th className="px-3 py-3 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider sticky top-0">Price</th>
+                  <th className="px-3 py-3 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider sticky top-0">Time</th>
+                  <th className="px-3 py-3 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider sticky top-0">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-orange-200">
+                {pendingBookings.map((booking) => {
+                  // Check if this is today's booking
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const bookingDate = booking.bookingDate ? new Date(booking.bookingDate) : null;
+                  const isToday = bookingDate && bookingDate.setHours(0, 0, 0, 0) === today.getTime();
+                  
+                  return (
+                    <tr 
+                      key={booking.id} 
+                      className={`${isToday ? 'border-l-4 border-orange-500' : ''}`}
+                      onMouseEnter={(e) => e.currentTarget.classList.add('bg-orange-100')}
+                      onMouseLeave={(e) => e.currentTarget.classList.remove('bg-orange-100')}
+                    >
+                      <td className="px-3 py-3 text-sm">
+                        <span className={`font-medium ${isToday ? 'text-orange-600' : ''}`}>
+                          {formatDate(booking.bookingDate)}
+                        </span>
+                        {isToday && (
+                          <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-200 text-orange-800">
+                            Today
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-sm">{booking.clientName}</td>
+                      <td className="px-3 py-3 text-sm">{booking.bookingDetails?.boatName || '-'}</td>
+                      <td className="px-3 py-3 text-sm">{booking.bookingDetails?.boatCompany || '-'}</td>
+                      <td className="px-3 py-3 text-sm font-mono">
+                        {formatCurrency(booking.pricing?.agreedPrice)}
+                      </td>
+                      <td className="px-3 py-3 text-sm">
+                        {booking.bookingDetails?.startTime} - {booking.bookingDetails?.endTime}
+                      </td>
+                      <td className="px-3 py-3 text-sm whitespace-nowrap">
+                        <button
+                          onClick={() => handleCreateFromBooking(booking)}
+                          className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded font-medium text-xs"
                         >
-                          <Edit size={14} />
+                          <Plus size={14} className="mr-1" /> Create Expense
                         </button>
-                        <button 
-                          onClick={() => handleDelete(entry.id)}
-                          className="p-1 bg-red-100 text-red-600 hover:bg-red-200 rounded"
-                          disabled={loading}
-                          title="Delete Entry"
-                        >
-                          <Trash size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      
+      {/* Past Entries Notice */}
+      {!showPastEntries && pastEntries.length > 0 && (
+        <div className="mb-4 p-2 bg-yellow-100 text-yellow-800 rounded-md flex items-center justify-center">
+          <Eye size={16} className="mr-2" /> 
+          <span>{pastEntries.length} past entries from previous dates are hidden. Click Show Past Entries to view them.</span>
+        </div>
+      )}
+      
+      {/* Data Display for Entries */}
+      {filteredEntries.filter(entry => !isBooking(entry)).length > 0 ? (
+        <>          
+          {/* Mobile view for entries - only show on small screens */}
+          <div className="md:hidden">
+            {filteredEntries
+              .filter(entry => !isBooking(entry))
+              .map((entry) => renderEntryCard(entry))}
+          </div>
+          
+          {/* Desktop view for entries - hide on small screens */}
+          <div className="hidden md:block overflow-x-auto rounded-lg shadow">
+            <table className="min-w-full divide-y divide-gray-200 border-collapse">
+              <thead>
+                <tr>
+                  {/* Intrari Headers */}
+                  <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Data</th>
+                  <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Detalii</th>
+                  <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">SumUp - Iulian</th>
+                  <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Stripe - Iulian</th>
+                  <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Caixa - JE</th>
+                  <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">SumUp - Alin</th>
+                  <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Stripe - Alin</th>
+                  <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Cash - Iulian</th>
+                  <th className="px-2 py-3 bg-blue-100 text-left text-xs font-semibold text-blue-800 uppercase tracking-wider sticky top-0 border-b-2 border-blue-200">Cash - Alin</th>
+                  
+                  {/* Cheltuieli Headers */}
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Data</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Companie</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Barci</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Suma 1</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Suma 2</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Integral</th>
+                  
+                  {/* New Expense Headers */}
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Skipper</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Transfer</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Fuel</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Boat Exp</th>
+                  
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Metoda</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Comisioane</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Profit</th>
+                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Transferat</th>
+                  <th className="px-2 py-3 bg-gray-100 text-center text-xs font-semibold text-gray-800 uppercase tracking-wider sticky top-0 border-b-2 border-gray-200 w-20">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {filteredEntries
+                  .filter(entry => !isBooking(entry)) // Only show expense entries, not bookings
+                  .map((entry, index) => {
+                    // Check if entry is a past entry for styling
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const entryDate = entry.data ? new Date(entry.data) : new Date();
+                    entryDate.setHours(0, 0, 0, 0);
+                    const isPastEntry = entryDate < today;
+                    const isTodayEntry = entryDate.getTime() === today.getTime();
+                    
+                    return (
+                      <tr 
+                        key={entry.id} 
+                        className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
+                        ${isPastEntry ? 'border-l-4 border-yellow-300' : ''}
+                        ${isTodayEntry ? 'border-l-4 border-green-500' : ''}`}
+                        onMouseEnter={(e) => e.currentTarget.classList.add('bg-gray-100')}
+                        onMouseLeave={(e) => e.currentTarget.classList.remove('bg-gray-100')}>
+                        {/* Intrari Data */}
+                        <td className="px-2 py-3 text-xs border-r border-blue-100">
+                          {formatDate(entry.data)}
+                          {isTodayEntry && (
+                            <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              Today
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-2 py-3 text-xs border-r border-blue-100 max-w-xs truncate">
+                          {entry.detalii}
+                          {entry.bookingId && (
+                            <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              <Ship size={10} className="mr-1" /> 
+                              Booking
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.sumUpIulian)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.stripeIulian)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.caixaJustEnjoy)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.sumUpAlin)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.stripeAlin)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.cashIulian)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-blue-100 font-mono text-right">{formatCurrency(entry.cashAlin)}</td>
+                        
+                        {/* Cheltuieli Data */}
+                        <td className="px-2 py-3 text-xs border-r border-red-100">{formatDate(entry.dataCompanie)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 max-w-xs truncate">{entry.companieBarci}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 max-w-xs truncate">{entry.numeleBarci}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma1)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.suma2)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.sumaIntegral)}</td>
+                        
+                        {/* New Expense Cells */}
+                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.skipperCost)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.transferCost)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.fuelCost)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.boatExpense)}</td>
+                        
+                        <td className="px-2 py-3 text-xs border-r border-red-100">{entry.metodaPlata}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.comisioane)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right font-bold">{formatCurrency(entry.profitTotal)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-red-100">
+                          <span className={`inline-block rounded-full px-2 py-1 text-xs ${
+                            entry.transferatContCheltuieli === 'Yes' ? 'bg-green-100 text-green-800' :
+                            entry.transferatContCheltuieli === 'No' ? 'bg-red-100 text-red-800' :
+                            entry.transferatContCheltuieli === 'Partial' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-blue-100 text-blue-800'
+                          }`}>
+                            {entry.transferatContCheltuieli}
+                          </span>
+                        </td>
+                        
+                        {/* Actions */}
+                        <td className="px-2 py-3 text-xs whitespace-nowrap">
+                          <div className="flex space-x-2 justify-center">
+                            <button 
+                              onClick={() => handleEdit(entry.id)}
+                              className="p-1 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded"
+                              disabled={loading}
+                              title="Edit Entry"
+                              aria-label="Edit Entry"
+                            >
+                              <Edit size={14} />
+                            </button>
+                            <button 
+                              onClick={() => handleDelete(entry.id)}
+                              className="p-1 bg-red-100 text-red-600 hover:bg-red-200 rounded"
+                              disabled={loading}
+                              title="Delete Entry"
+                              aria-label="Delete Entry"
+                            >
+                              <Trash size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
           
           {/* Divider between past and future entries - when viewing all entries */}
           {showPastEntries && pastEntries.length > 0 && futureEntries.length > 0 && (
@@ -1534,8 +2384,8 @@ const ExpenseTracker = () => {
               <span>Todays Date: {new Date().toLocaleDateString()} | Upcoming entries below ⬇️</span>
             </div>
           )}
-        </div>
-      ) : (
+        </>
+      ) : (!showPendingBookings || pendingBookings.length === 0) && (
         <div className="text-center py-8 bg-gray-50 rounded-md">
           <p className="text-gray-500 mb-2">No entries found</p>
           <p className="text-sm text-gray-400">

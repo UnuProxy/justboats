@@ -617,6 +617,19 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
         return sum + mainAmount + subExpensesTotal;
       }, 0);
     };
+    const safeFormatDate = (dateValue) => {
+      if (!dateValue) return 'N/A';
+      
+      try {
+        const date = new Date(dateValue);
+        // Check if the date is valid
+        if (isNaN(date.getTime())) return 'Invalid date';
+        return format(date, 'dd/MM/yyyy');
+      } catch (error) {
+        console.error('Error formatting date:', error, dateValue);
+        return 'Invalid date';
+      }
+    };
 
     return (
       <div className="p-4 border rounded-lg">
@@ -645,7 +658,7 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                     {/* Parent Expense */}
                     <tr className="hover:bg-gray-50">
                       <td className="px-4 py-2 whitespace-nowrap">
-                        {format(new Date(expense.date), 'dd/MM/yyyy')}
+                      {safeFormatDate(expense.date)}
                       </td>
                       <td className="px-4 py-2 whitespace-nowrap">{expense.category}</td>
                       <td className="px-4 py-2">{expense.description}</td>
@@ -676,7 +689,7 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                     {expense.subExpenses?.map(subExpense => (
                       <tr key={subExpense.id} className="bg-gray-50">
                         <td className="px-4 py-2 whitespace-nowrap pl-8">
-                          {format(new Date(subExpense.date), 'dd/MM/yyyy')}
+                        {safeFormatDate(subExpense.date)}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap">{subExpense.category}</td>
                         <td className="px-4 py-2">{subExpense.description}</td>
