@@ -524,14 +524,7 @@ const BoatLocationQRManager = () => {
         </button>
       </div>
 
-      <div className="mb-6 p-4 bg-blue-50 rounded-md">
-        <div className="flex items-start">
-          <MapPin className="text-blue-600 mr-2 mt-1 flex-shrink-0" size={18} />
-          <p className="text-sm text-blue-700">
-            These QR codes will redirect users directly to your yacht rental page at justenjoyibizaboats.com. Each scan is tracked for analytics.
-          </p>
-        </div>
-      </div>
+      
 
       {locations.length === 0 ? (
         <div className="bg-white rounded-lg shadow-md p-6 text-center">
