@@ -26,7 +26,6 @@ import NotificationsCenter from './components/notifications/NotificationsCenter'
 import InvoiceGenerator from './components/InvoiceGenerator';
 import SanAntonioBookingsAdmin from './components/SanAntonioBookingsAdmin';
 import PlaceQRManager from './components/PlaceQRManager';
-import QRRedirect from './components/QRRedirect';
 import FinancialDashboard from './components/FinancialDashboard';
 import PricingManager from './components/PricingManager';
 import ExpenseTracker from './components/ExpenseTracker';
@@ -274,16 +273,16 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
-   <Route
-    path="/catering-expenses"
-    element={
-        <ProtectedRoute>
-            <ProtectedLayout>
-                <CateringExpensesTracker />
-            </ProtectedLayout>
-        </ProtectedRoute>
-    }
-/>
+                            <Route
+                                path="/catering-expenses"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <CateringExpensesTracker />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
                             <Route
                                 path="/pricing-manager"
                                 element={
@@ -345,12 +344,6 @@ function App() {
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }
-                            />
-
-
-                            <Route
-                                path="/scan/:id"
-                                element={<QRRedirect />}
                             />
 
                             {/* Directory Routes */}

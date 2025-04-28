@@ -396,46 +396,135 @@ exports.testEmail = onCall({
 
 
 // ────────── NEW! ──────────
-// This onRequest endpoint logs the scan and then redirects to wa.me
+
 exports.trackAndRedirect = onRequest({
   region: 'us-central1',
-  cors: ALLOWED_ORIGINS
+  cors: ALLOWED_ORIGINS,
+  maxInstances: 10
 }, async (req, res) => {
   try {
-    const placeId = req.query.placeId;
-    if (!placeId) {
-      return res.status(400).send('Missing placeId');
+    // Accept locationId parameter
+    const locationId = req.query.locationId || 'DEFAULT';
+    console.log('QR SCAN - Received locationId:', locationId);
+    
+    // Generate a promo code based on the location
+    const promoCode = `CAVA-${locationId.toUpperCase()}`;
+    console.log('Generated promo code:', promoCode);
+    
+    // Optional: Log scan event to Firestore
+    try {
+      await db.collection('locationScanEvents').add({
+        locationId: locationId,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        promoCode: promoCode
+      });
+    } catch (dbError) {
+      console.error('Error logging scan event:', dbError);
+      // Continue with redirect regardless of database error
     }
-
-    const placeRef = db.collection('places').doc(placeId);
-    const snap     = await placeRef.get();
-    if (!snap.exists) {
-      return res.status(404).send('Place not found');
-    }
-    const place = snap.data();
-
-    await placeRef.update({
-      scanCount: admin.firestore.FieldValue.increment(1)
-    });
-    await db.collection('placeScanEvents').add({
-      placeId,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-      userAgent: req.get('User-Agent') || null,
-      referrer:  req.get('Referer')   || null
-    });
-
-    const cleanNumber = place.whatsappNumber.replace(/\D/g, '');
-    const text        = encodeURIComponent(place.whatsappMessage);
-    const waUrl       = `https://wa.me/${cleanNumber}?text=${text}`;
-    return res.redirect(302, waUrl);
-
-  } catch (err) {
-    console.error('trackAndRedirect error:', err);
-    // send back the real error message
-    return res.status(500).send(`Error: ${err.message}`);
+    
+    // Build a simple redirect URL with the promo code
+    const redirectUrl = `https://www.justenjoyibizaboats.com/yacht-rental.html?promo=${promoCode}`;
+    console.log('Redirecting to:', redirectUrl);
+    
+    // Use HTML page for more reliable redirect
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Redirecting to Just Enjoy Ibiza Boats</title>
+        <meta http-equiv="refresh" content="0;url=${redirectUrl}">
+        <script>
+          window.location.href = "${redirectUrl}";
+        </script>
+      </head>
+      <body>
+        <p>Redirecting you to special offer...</p>
+        <p>If you are not redirected, <a href="${redirectUrl}">click here</a>.</p>
+      </body>
+      </html>
+    `);
+    
+  } catch (error) {
+    console.error('REDIRECT - Unhandled error:', error);
+    
+    // Even on error, redirect to the main site
+    res.redirect(302, 'https://www.justenjoyibizaboats.com/yacht-rental.html');
   }
 });
 
+// Function to track when users interact with the yacht rental page
+exports.recordPlaceConversion = onCall({
+  cors: ALLOWED_ORIGINS,
+  region: "us-central1",
+  maxInstances: 10
+}, async (request) => {
+  try {
+    const data = request.data;
+    
+    if (!data?.placeId) {
+      throw new HttpsError('invalid-argument', 'Missing place ID');
+    }
+
+    const placeId = data.placeId;
+    const boatName = data.boatName || null; // Which boat they're interested in
+    const userInfo = data.userInfo || {}; // Optional - collect name, email, etc.
+    
+    // Get the place data
+    const placeRef = db.collection('boatCatalogs').doc(placeId);
+    const place = await placeRef.get();
+    
+    if (!place.exists) {
+      throw new HttpsError('not-found', 'Place not found');
+    }
+    
+    // Record the conversion event
+    await db.collection('placeConversionEvents').add({
+      placeId: placeId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      userAgent: request.rawRequest.headers['user-agent'] || 'Unknown',
+      boatName: boatName,
+      userInfo: userInfo,
+      source: 'yacht-rental-website'
+    });
+    
+    // Update conversion count on the place document
+    await placeRef.update({
+      conversionCount: admin.firestore.FieldValue.increment(1)
+    });
+    
+    // Update the most recent scan event for this catalog to mark it as converted
+    const recentScanQuery = db.collection('catalogScanEvents')
+      .where('catalogId', '==', placeId)
+      .orderBy('timestamp', 'desc')
+      .limit(1);
+    
+    const scanEvents = await recentScanQuery.get();
+    if (!scanEvents.empty) {
+      await scanEvents.docs[0].ref.update({
+        converted: true
+      });
+    }
+    
+    // Return the WhatsApp URL and message to the client
+    // If your yacht rental page handles this directly, you might not need this part
+    const placeData = place.data();
+    const cleanNumber = placeData.whatsappNumber ? placeData.whatsappNumber.replace(/\D/g, '') : '34123456789'; // Default if not set
+    const text = placeData.whatsappMessage ? 
+      encodeURIComponent(placeData.whatsappMessage) : 
+      encodeURIComponent(`Hello, I'm interested in renting a boat from Just Enjoy Ibiza Boats!`);
+    
+    const waUrl = `https://wa.me/${cleanNumber}?text=${text}`;
+    
+    return { 
+      success: true,
+      whatsappUrl: waUrl
+    };
+  } catch (error) {
+    throw new HttpsError('internal', error.message);
+  }
+});
 
 
 
