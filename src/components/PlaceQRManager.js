@@ -31,14 +31,12 @@ const LocationQRManager = () => {
   const [scanStats, setScanStats] = useState(null);
   const [viewMode, setViewMode] = useState('list'); // 'list', 'add', 'edit', 'stats'
 
-  // Form state
+  // Form state - removed WhatsApp fields
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     category: '',
-    address: '',
-    whatsappNumber: '',
-    whatsappMessage: 'Hello! I saw your QR code and I\'m interested in learning more.'
+    address: ''
   });
 
   useEffect(() => {
@@ -76,15 +74,11 @@ const LocationQRManager = () => {
     try {
       setLoading(true);
       
-      const cleanNumber = formData.whatsappNumber ? formData.whatsappNumber.replace(/\D/g, '') : '';
-      
       const docRef = await addDoc(collection(db, 'scanLocations'), {
         name: formData.name,
         description: formData.description || '',
         category: formData.category || '',
         address: formData.address || '',
-        whatsappNumber: cleanNumber,
-        whatsappMessage: formData.whatsappMessage,
         createdBy: user.uid,
         createdAt: serverTimestamp(),
         scanCount: 0,
@@ -99,8 +93,6 @@ const LocationQRManager = () => {
           description: formData.description || '',
           category: formData.category || '',
           address: formData.address || '',
-          whatsappNumber: cleanNumber,
-          whatsappMessage: formData.whatsappMessage,
           createdBy: user.uid,
           scanCount: 0,
           conversionCount: 0
@@ -111,9 +103,7 @@ const LocationQRManager = () => {
         name: '',
         description: '',
         category: '',
-        address: '',
-        whatsappNumber: '',
-        whatsappMessage: 'Hello! I saw your QR code and I\'m interested in learning more.'
+        address: ''
       });
       
       setViewMode('list');
@@ -132,15 +122,11 @@ const LocationQRManager = () => {
     try {
       setLoading(true);
       
-      const cleanNumber = formData.whatsappNumber ? formData.whatsappNumber.replace(/\D/g, '') : '';
-      
       await updateDoc(doc(db, 'scanLocations', selectedLocation), {
         name: formData.name,
         description: formData.description || '',
         category: formData.category || '',
-        address: formData.address || '',
-        whatsappNumber: cleanNumber,
-        whatsappMessage: formData.whatsappMessage
+        address: formData.address || ''
       });
       
       setLocations(prev =>
@@ -151,9 +137,7 @@ const LocationQRManager = () => {
                 name: formData.name,
                 description: formData.description || '',
                 category: formData.category || '',
-                address: formData.address || '',
-                whatsappNumber: cleanNumber,
-                whatsappMessage: formData.whatsappMessage
+                address: formData.address || ''
               }
             : loc
         )
@@ -190,9 +174,7 @@ const LocationQRManager = () => {
       name: location.name,
       description: location.description || '',
       category: location.category || '',
-      address: location.address || '',
-      whatsappNumber: location.whatsappNumber || '',
-      whatsappMessage: location.whatsappMessage || 'Hello! I saw your QR code and I\'m interested in learning more.'
+      address: location.address || ''
     });
     setSelectedLocation(location.id);
     setViewMode('edit');
@@ -381,9 +363,7 @@ const LocationQRManager = () => {
                 name: '',
                 description: '',
                 category: '',
-                address: '',
-                whatsappNumber: '',
-                whatsappMessage: 'Hello! I saw your QR code and I\'m interested in learning more.'
+                address: ''
               });
             }}
             className="px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300"
@@ -393,12 +373,7 @@ const LocationQRManager = () => {
         </div>
 
         <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="mb-4 p-4 bg-blue-50 rounded-md">
-            <p className="text-sm text-blue-700">
-              <strong>Note:</strong> QR codes will redirect users to your website with tracking analytics
-            </p>
-          </div>
-
+          
           <form onSubmit={viewMode === 'add' ? createLocation : updateLocation}>
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -454,7 +429,7 @@ const LocationQRManager = () => {
               </p>
             </div>
 
-            <div className="mb-4">
+            <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Address (optional)
               </label>
@@ -469,34 +444,6 @@ const LocationQRManager = () => {
               <p className="text-xs text-gray-500 mt-1">
                 Physical location where this QR code will be placed
               </p>
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                WhatsApp Contact Number (with country code)
-              </label>
-              <input
-                type="text"
-                name="whatsappNumber"
-                className="w-full p-2 border border-gray-300 rounded-md"
-                placeholder="e.g., +1234567890"
-                value={formData.whatsappNumber}
-                onChange={handleInputChange}
-              />
-            </div>
-
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Default WhatsApp Message
-              </label>
-              <textarea
-                name="whatsappMessage"
-                className="w-full p-2 border border-gray-300 rounded-md"
-                placeholder="Message that will be pre-filled when users click 'Contact Us'"
-                rows="3"
-                value={formData.whatsappMessage}
-                onChange={handleInputChange}
-              />
             </div>
 
             <button
