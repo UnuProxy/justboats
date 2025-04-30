@@ -16,11 +16,12 @@ import { db } from "../firebase/firebaseConfig";
 import PaymentDetails from "./PaymentDetails.js";
 import { useNavigate } from 'react-router-dom';
 
-const BookingDetails = ({ booking, onClose, onDelete }) => {
+const BookingDetails = ({ booking, onClose }) => {
   const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
   const modalRef = useRef(null);  
   const [linkedExpenses, setLinkedExpenses] = useState([]);
+  const [copySuccess, setCopySuccess] = useState('');
   const [editedBooking, setEditedBooking] = useState(() => {
     console.log("Raw booking data:", booking);
     
@@ -56,12 +57,104 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
       paymentStatus: booking?.pricing?.paymentStatus || 'No Payment',
     };
   });
+
   const handleEditInSanAntonio = () => {
     onClose(); // Close the modal first
     navigate('/san-antonio-tours', { state: { editBookingId: booking.id } });
   };
 
   const isSanAntonioBooking = booking?.location === 'San Antonio';
+
+  // New function to handle booking cancellation
+  const handleCancelBooking = async () => {
+    if (window.confirm("Are you sure you want to cancel this booking? This action can be reversed later.")) {
+      try {
+        // Update the booking with cancelled status
+        await updateDoc(doc(db, "bookings", booking.id), {
+          isCancelled: true,
+          cancellationDate: new Date().toISOString(),
+          cancellationReason: window.prompt("Please provide a reason for cancellation (optional):", ""),
+          lastUpdated: serverTimestamp()
+        });
+        
+        // Refresh booking data
+        const updatedDoc = await getDoc(doc(db, "bookings", booking.id));
+        if (updatedDoc.exists()) {
+          setEditedBooking({
+            ...editedBooking,
+            ...updatedDoc.data()
+          });
+        }
+        
+        alert("Booking has been cancelled successfully.");
+      } catch (error) {
+        console.error("Error cancelling booking:", error);
+        alert("Failed to cancel booking. Please try again.");
+      }
+    }
+  };
+
+  // New function to handle undoing cancellation
+  const handleUndoCancel = async () => {
+    if (window.confirm("Are you sure you want to restore this cancelled booking?")) {
+      try {
+        await updateDoc(doc(db, "bookings", booking.id), {
+          isCancelled: false,
+          cancellationDate: null,
+          cancellationReason: null,
+          lastUpdated: serverTimestamp()
+        });
+        
+        // Refresh booking data
+        const updatedDoc = await getDoc(doc(db, "bookings", booking.id));
+        if (updatedDoc.exists()) {
+          setEditedBooking({
+            ...editedBooking,
+            ...updatedDoc.data()
+          });
+        }
+        
+        alert("Booking has been restored successfully.");
+      } catch (error) {
+        console.error("Error restoring booking:", error);
+        alert("Failed to restore booking. Please try again.");
+      }
+    }
+  };
+
+  // Function to copy text to clipboard
+  const copyToClipboard = (text, field) => {
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        setCopySuccess(`${field} copied!`);
+        setTimeout(() => setCopySuccess(''), 2000);
+      })
+      .catch(() => {
+        setCopySuccess('Failed to copy!');
+        setTimeout(() => setCopySuccess(''), 2000);
+      });
+  };
+
+  // Function to copy all client information at once
+  const copyAllClientInfo = () => {
+    const clientInfo = `Client Name: ${editedBooking.clientName || 'N/A'}
+Client Type: ${editedBooking.clientType || 'N/A'}
+Phone: ${editedBooking.clientPhone || 'N/A'}
+Email: ${editedBooking.clientEmail || 'N/A'}
+Passport: ${editedBooking.clientPassport || 'N/A'}
+Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A'}`;
+
+    navigator.clipboard.writeText(clientInfo)
+      .then(() => {
+        setCopySuccess('All client info copied!');
+        setTimeout(() => setCopySuccess(''), 2000);
+      })
+      .catch(() => {
+        setCopySuccess('Failed to copy!');
+        setTimeout(() => setCopySuccess(''), 2000);
+      });
+  };
+
   const handleExpensePaymentStatusChange = async (expenseId, newStatus) => {
     console.log("Changing expense:", expenseId, "to", newStatus);
     try {
@@ -100,9 +193,6 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
   };
 
   // LinkedOrdersSection Component
-
-
-  // Complete replacement for the LinkedOrdersSection component
   const LinkedOrdersSection = () => {
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -606,6 +696,7 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
       };
     });
   };
+
   const ExpensesSection = () => {
     const calculateTotal = () => {
       return linkedExpenses.reduce((sum, expense) => {
@@ -729,71 +820,71 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
     );
   };
 
-    /**
+  /**
    * 1) Focus the modal when it opens
    */
   useEffect(() => {
-  if (modalRef.current) {
-        modalRef.current.focus();
-      }
+    if (modalRef.current) {
+      modalRef.current.focus();
+    }
   }, []);
   
-    /**
-     * 2) Real-time listener for expenses
-     */
-    useEffect(() => {
-      if (!booking) return;
-      console.log("Raw booking data:", booking);
-      // Extract payments array - ONLY THIS LINE CHANGES
-      const payments = Array.isArray(booking?.payments) ? booking.payments : 
-                       Array.isArray(booking?.pricing?.payments) ? booking.pricing.payments : [];
-      // Get first and second payments
-      const firstPayment = payments.find((p) => p.type === "first") || {
-        amount: 0,
-        method: "cash",
-        received: false,
-        date: "",
-        type: "first",
-      };
-      const secondPayment = payments.find((p) => p.type === "second") || {
-        amount: 0,
-        method: "pos",
-        received: false,
-        date: "",
-        type: "second",
-      };
-      // Debug payments
-      console.log("First payment:", firstPayment);
-      console.log("Second payment:", secondPayment);
-      // Set edited booking state
-      setEditedBooking({
-        ...booking,
-        firstPayment,
-        secondPayment,
-        finalPrice: booking?.pricing?.agreedPrice || 0,
-        paymentStatus: booking?.pricing?.paymentStatus || "No Payment",
-      });
-      // Firestore collection and query setup for expenses
-      const expensesRef = collection(db, "expenses");
-      const q = query(expensesRef, where("bookingId", "==", booking.id));
-      // Real-time listener for expenses
-      const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const allExpenses = querySnapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-        }));
-        console.log("Fetched Expenses:", allExpenses);
-        // Process and set linked expenses
-        const parentExpenses = allExpenses.filter((exp) => !exp.parentId);
-        const childExpenses = allExpenses.filter((exp) => exp.parentId);
-        const combinedExpenses = parentExpenses.map((parent) => ({
-          ...parent,
-          subExpenses: childExpenses.filter((child) => child.parentId === parent.id),
-        }));
-        setLinkedExpenses(combinedExpenses);
-      });
-      return () => unsubscribe(); // Clean up listener on unmount
-    }, [booking]);
+  /**
+   * 2) Real-time listener for expenses
+   */
+  useEffect(() => {
+    if (!booking) return;
+    console.log("Raw booking data:", booking);
+    // Extract payments array - ONLY THIS LINE CHANGES
+    const payments = Array.isArray(booking?.payments) ? booking.payments : 
+                     Array.isArray(booking?.pricing?.payments) ? booking.pricing.payments : [];
+    // Get first and second payments
+    const firstPayment = payments.find((p) => p.type === "first") || {
+      amount: 0,
+      method: "cash",
+      received: false,
+      date: "",
+      type: "first",
+    };
+    const secondPayment = payments.find((p) => p.type === "second") || {
+      amount: 0,
+      method: "pos",
+      received: false,
+      date: "",
+      type: "second",
+    };
+    // Debug payments
+    console.log("First payment:", firstPayment);
+    console.log("Second payment:", secondPayment);
+    // Set edited booking state
+    setEditedBooking({
+      ...booking,
+      firstPayment,
+      secondPayment,
+      finalPrice: booking?.pricing?.agreedPrice || 0,
+      paymentStatus: booking?.pricing?.paymentStatus || "No Payment",
+    });
+    // Firestore collection and query setup for expenses
+    const expensesRef = collection(db, "expenses");
+    const q = query(expensesRef, where("bookingId", "==", booking.id));
+    // Real-time listener for expenses
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const allExpenses = querySnapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      }));
+      console.log("Fetched Expenses:", allExpenses);
+      // Process and set linked expenses
+      const parentExpenses = allExpenses.filter((exp) => !exp.parentId);
+      const childExpenses = allExpenses.filter((exp) => exp.parentId);
+      const combinedExpenses = parentExpenses.map((parent) => ({
+        ...parent,
+        subExpenses: childExpenses.filter((child) => child.parentId === parent.id),
+      }));
+      setLinkedExpenses(combinedExpenses);
+    });
+    return () => unsubscribe(); // Clean up listener on unmount
+  }, [booking]);
     
     
   if (!booking) return null;
@@ -833,15 +924,7 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
     });
   };
   
-  const handleDeleteBooking = () => {
-    if (
-      window.confirm(
-        "Are you sure you want to delete this booking? This action cannot be undone."
-      )
-    ) {
-      onDelete(booking.id);
-    }
-  };
+  // No longer using handleDeleteBooking since we're using Cancel instead
 
   const handleSaveBooking = async () => {
     if (!editedBooking.clientName?.trim()) {
@@ -884,6 +967,20 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
     e.stopPropagation();
   };
 
+  // Helper for copy buttons
+  const CopyButton = ({ text, field }) => (
+    <button 
+      onClick={() => copyToClipboard(text, field)}
+      className="ml-2 text-gray-400 hover:text-blue-500 focus:outline-none"
+      aria-label={`Copy ${field}`}
+      title={`Copy ${field}`}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+      </svg>
+    </button>
+  );
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center px-4 py-6 sm:py-12 bg-black bg-opacity-50 overflow-y-auto"
@@ -897,13 +994,21 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
         onClick={handleModalClick}
         ref={modalRef}
       >
-        <div className="bg-gray-100 p-4 flex justify-between items-center rounded-t-lg">
-          <h3
-            id="booking-details-title"
-            className="text-xl font-bold text-gray-800"
-          >
-            Booking Details
-          </h3>
+        {/* Booking header with cancellation indicator if needed */}
+        <div className={`p-4 flex justify-between items-center rounded-t-lg ${editedBooking.isCancelled ? 'bg-red-100' : 'bg-gray-100'}`}>
+          <div className="flex items-center">
+            <h3
+              id="booking-details-title"
+              className="text-xl font-bold text-gray-800"
+            >
+              Booking Details
+            </h3>
+            {editedBooking.isCancelled && (
+              <span className="ml-3 px-2 py-1 bg-red-200 text-red-800 rounded-md text-sm font-medium">
+                CANCELLED
+              </span>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="text-gray-600 hover:text-gray-800 focus:outline-none"
@@ -926,14 +1031,61 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
           </button>
         </div>
 
+        {/* Display cancellation details if booking is cancelled */}
+        {editedBooking.isCancelled && (
+          <div className="bg-red-50 p-4 border-t border-b border-red-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-medium text-red-800">Cancellation Details</h4>
+                <p className="text-sm text-red-700 mt-1">
+                  {editedBooking.cancellationDate ? (
+                    <span>Cancelled on: {formatDateTime(editedBooking.cancellationDate)}</span>
+                  ) : (
+                    <span>Cancellation date not recorded</span>
+                  )}
+                </p>
+                {editedBooking.cancellationReason && (
+                  <p className="text-sm text-red-700 mt-1">Reason: {editedBooking.cancellationReason}</p>
+                )}
+              </div>
+              <button
+                onClick={handleUndoCancel}
+                className="px-3 py-1 bg-white text-red-700 rounded border border-red-300 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 text-sm"
+              >
+                Restore Booking
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="p-6 overflow-y-auto" style={{ maxHeight: "calc(100vh - 16rem)" }}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <div className="p-4 border rounded-lg">
-                <h4 className="text-lg font-bold mb-3">Client Information</h4>
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="text-lg font-bold">Client Information</h4>
+                  <button
+                    onClick={copyAllClientInfo}
+                    className="text-blue-600 hover:text-blue-800 text-sm flex items-center"
+                    title="Copy all client information"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    Copy All
+                  </button>
+                </div>
+                {copySuccess && (
+                  <div className="bg-green-100 text-green-800 px-3 py-1 rounded mb-3 text-sm">
+                    {copySuccess}
+                  </div>
+                )}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
                     Client Name:
+                    {!isEditing && (
+                      <CopyButton text={editedBooking.clientName || ""} field="Client Name" />
+                    )}
                   </label>
                   {isEditing ? (
                     <input
@@ -949,14 +1101,20 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   )}
                 </div>
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
                     Client Type:
+                    {!isEditing && (
+                      <CopyButton text={editedBooking.clientType || ""} field="Client Type" />
+                    )}
                   </label>
                   <p className="mt-1">{editedBooking.clientType || "N/A"}</p>
                 </div>
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
                     Phone:
+                    {!isEditing && (
+                      <CopyButton text={editedBooking.clientPhone || ""} field="Phone" />
+                    )}
                   </label>
                   {isEditing ? (
                     <input
@@ -972,8 +1130,11 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   )}
                 </div>
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
                     Email:
+                    {!isEditing && (
+                      <CopyButton text={editedBooking.clientEmail || ""} field="Email" />
+                    )}
                   </label>
                   {isEditing ? (
                     <input
@@ -989,8 +1150,11 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   )}
                 </div>
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
                     Passport:
+                    {!isEditing && (
+                      <CopyButton text={editedBooking.clientPassport || ""} field="Passport" />
+                    )}
                   </label>
                   {isEditing ? (
                     <input
@@ -1008,34 +1172,43 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   )}
                 </div>
                 <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700">
-                Address:
-              </label>
-              {isEditing ? (
-                <textarea
-                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  value={editedBooking.clientDetails?.address || editedBooking.address || ""}
-                  onChange={(e) =>
-                    handleInputChange("address", e.target.value)
-                  }
-                  rows="3"
-                  placeholder="Enter client's address"
-                />
-              ) : (
-                <p className="mt-1 whitespace-pre-line">
-                  {editedBooking.clientDetails?.address || editedBooking.address || "N/A"}
-                </p>
-              )}
-            </div>
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
+                    Address:
+                    {!isEditing && (
+                      <CopyButton 
+                        text={editedBooking.clientDetails?.address || editedBooking.address || ""} 
+                        field="Address" 
+                      />
+                    )}
+                  </label>
+                  {isEditing ? (
+                    <textarea
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={editedBooking.clientDetails?.address || editedBooking.address || ""}
+                      onChange={(e) =>
+                        handleInputChange("address", e.target.value)
+                      }
+                      rows="3"
+                      placeholder="Enter client's address"
+                    />
+                  ) : (
+                    <p className="mt-1 whitespace-pre-line">
+                      {editedBooking.clientDetails?.address || editedBooking.address || "N/A"}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
-              
+            
             <div>
               <div className="p-4 border rounded-lg mb-4">
                 <h4 className="text-lg font-bold mb-3">Booking Details</h4>
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
                     Boat Name:
+                    {!isEditing && (
+                      <CopyButton text={editedBooking.boatName || ""} field="Boat Name" />
+                    )}
                   </label>
                   {isEditing ? (
                     <input
@@ -1051,8 +1224,11 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   )}
                 </div>
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
                     Company:
+                    {!isEditing && (
+                      <CopyButton text={editedBooking.boatCompanyName || ""} field="Company" />
+                    )}
                   </label>
                   {isEditing ? (
                     <input
@@ -1095,23 +1271,26 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   )}
                 </div>
                 <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700">
-                  Restaurant Name:
-                </label>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    value={editedBooking.restaurantName || ''}
-                    onChange={(e) =>
-                      handleInputChange("restaurantName", e.target.value)
-                    }
-                    placeholder="Enter restaurant name"
-                  />
-                ) : (
-                  <p className="mt-1">{editedBooking.restaurantName || 'N/A'}</p>
-                )}
-              </div>
+                  <label className="text-sm font-medium text-gray-700 flex items-center">
+                    Restaurant Name:
+                    {!isEditing && (
+                      <CopyButton text={editedBooking.restaurantName || ""} field="Restaurant Name" />
+                    )}
+                  </label>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={editedBooking.restaurantName || ''}
+                      onChange={(e) =>
+                        handleInputChange("restaurantName", e.target.value)
+                      }
+                      placeholder="Enter restaurant name"
+                    />
+                  ) : (
+                    <p className="mt-1">{editedBooking.restaurantName || 'N/A'}</p>
+                  )}
+                </div>
               </div>
 
               {editedBooking.privateTransfer && (
@@ -1120,27 +1299,31 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <h5 className="font-medium">Pickup</h5>
-                      <p>
+                      <p className="flex items-center">
                         <span className="font-semibold">Location:</span>{" "}
                         {editedBooking.pickupLocation || "N/A"}
+                        <CopyButton text={editedBooking.pickupLocation || ""} field="Pickup Location" />
                       </p>
                       {editedBooking.pickupAddress && (
-                        <p>
+                        <p className="flex items-center">
                           <span className="font-semibold">Address:</span>{" "}
-                          {editedBooking.pickupAddress}
+                          <span className="break-words">{editedBooking.pickupAddress}</span>
+                          <CopyButton text={editedBooking.pickupAddress || ""} field="Pickup Address" />
                         </p>
                       )}
                     </div>
                     <div>
                       <h5 className="font-medium">Drop-off</h5>
-                      <p>
+                      <p className="flex items-center">
                         <span className="font-semibold">Location:</span>{" "}
                         {editedBooking.dropoffLocation || "N/A"}
+                        <CopyButton text={editedBooking.dropoffLocation || ""} field="Dropoff Location" />
                       </p>
                       {editedBooking.dropoffAddress && (
-                        <p>
+                        <p className="flex items-center">
                           <span className="font-semibold">Address:</span>{" "}
-                          {editedBooking.dropoffAddress}
+                          <span className="break-words">{editedBooking.dropoffAddress}</span>
+                          <CopyButton text={editedBooking.dropoffAddress || ""} field="Dropoff Address" />
                         </p>
                       )}
                     </div>
@@ -1149,7 +1332,7 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
               )}
             </div>
 
-    <div className="col-span-full">
+            <div className="col-span-full">
               <div className="p-4 border rounded-lg">
                 <h4 className="text-lg font-bold mb-3">Booking Time</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1208,32 +1391,32 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   </div>
                 </div>
               </div>
-    </div>
+            </div>
 
-    <div className="col-span-full">
-      <PaymentDetails 
-        payments={editedBooking?.pricing?.payments || []}
-        pricingType={editedBooking?.pricing?.pricingType}
-        agreedPrice={editedBooking?.pricing?.agreedPrice}
-        totalPaid={editedBooking?.pricing?.totalPaid}
-        paymentStatus={editedBooking?.pricing?.paymentStatus}
-        isEditing={isEditing}
-        onPaymentChange={handlePaymentChange}
-      />
-    </div>
+            <div className="col-span-full">
+              <PaymentDetails 
+                payments={editedBooking?.pricing?.payments || []}
+                pricingType={editedBooking?.pricing?.pricingType}
+                agreedPrice={editedBooking?.pricing?.agreedPrice}
+                totalPaid={editedBooking?.pricing?.totalPaid}
+                paymentStatus={editedBooking?.pricing?.paymentStatus}
+                isEditing={isEditing}
+                onPaymentChange={handlePaymentChange}
+              />
+            </div>
     
-    {/* Linked Orders Section */}
-    <div className="col-span-full mt-6">
-      <LinkedOrdersSection />
-    </div>
+            {/* Linked Orders Section */}
+            <div className="col-span-full mt-6">
+              <LinkedOrdersSection />
+            </div>
    
-    {/* Expenses Link */}
-    <div className="col-span-full mt-6">
-      <ExpensesSection />
-    </div>
+            {/* Expenses Link */}
+            <div className="col-span-full mt-6">
+              <ExpensesSection />
+            </div>
     
-    {/*Additional Information*/}    
-    <div className="col-span-full">
+            {/*Additional Information*/}    
+            <div className="col-span-full">
               <div className="p-4 border rounded-lg">
                 <h4 className="text-lg font-bold mb-3">
                   Additional Information
@@ -1290,62 +1473,67 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
                   </div>
                 </div>
               </div>
-    </div>
-    </div>
-    </div>
+            </div>
+          </div>
+        </div>
 
-    <div className="bg-gray-100 p-4 flex justify-end space-x-2 rounded-b-lg">
-          {isEditing ? (
-            <>
+        <div className="bg-gray-100 p-4 flex justify-between space-x-2 rounded-b-lg">
+          <div className="flex space-x-2">
+            {/* Left-side buttons */}
+            {isSanAntonioBooking && (
               <button
-                onClick={handleSaveBooking}
+                onClick={handleEditInSanAntonio}
+                className="px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                aria-label="Edit in San Antonio Tours"
+              >
+                Edit in San Antonio Tours
+              </button>
+            )}
+          </div>
+          
+          <div className="flex space-x-2">
+            {/* Right-side buttons */}
+            {isEditing ? (
+              <>
+                <button
+                  onClick={handleSaveBooking}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  aria-label="Save Changes"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                  aria-label="Cancel Editing"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setIsEditing(true)}
                 className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
-                aria-label="Save Changes"
+                aria-label="Edit Booking"
               >
-                Save
+                Edit
               </button>
-              
-    
-    
-    {isSanAntonioBooking && (
-      <button
-        onClick={handleEditInSanAntonio}
-        className="px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-300 mr-auto"
-        aria-label="Edit in San Antonio Tours"
-      >
-        Edit in San Antonio Tours
-      </button>
-    )}
-  
+            )}
+            
+            {/* Cancel booking button (only show if not already cancelled) */}
+            {!editedBooking.isCancelled && (
               <button
-                onClick={() => setIsEditing(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
-                aria-label="Cancel Editing"
+                type="button"
+                className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-300"
+                onClick={handleCancelBooking}
+                aria-label="Cancel Booking"
               >
-                Cancel
+                Cancel Booking
               </button>
-            </>
-          ) : (
-            <button
-              onClick={() => setIsEditing(true)}
-              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
-              aria-label="Edit Booking"
-            >
-              Edit
-            </button>
-          )}
-          {!booking.isCancelled && (
-            <button
-              type="button"
-              className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-300"
-              onClick={handleDeleteBooking}
-              aria-label="Delete Booking"
-            >
-              Delete
-            </button>
-          )}
-    </div>
-    </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1353,7 +1541,6 @@ const BookingDetails = ({ booking, onClose, onDelete }) => {
 BookingDetails.propTypes = {
   booking: PropTypes.object.isRequired,
   onClose: PropTypes.func.isRequired,
-  onDelete: PropTypes.func.isRequired,
 };
 
 export default BookingDetails;

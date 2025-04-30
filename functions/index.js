@@ -403,31 +403,103 @@ exports.trackAndRedirect = onRequest({
   maxInstances: 10
 }, async (req, res) => {
   try {
-    // Accept locationId parameter
+    // Accept parameters from QR code
     const locationId = req.query.locationId || 'DEFAULT';
+    const category = req.query.category || '';
+    const location = req.query.location || '';
+    const directName = req.query.name || '';
+    
     console.log('QR SCAN - Received locationId:', locationId);
+    console.log('QR SCAN - Category:', category);
+    console.log('QR SCAN - Direct name from URL:', directName);
     
-    // Generate a promo code based on the location
-    const promoCode = `CAVA-${locationId.toUpperCase()}`;
-    console.log('Generated promo code:', promoCode);
+    // Initialize variables
+    let locationName = directName; // Start with the name from URL
+    let promoCode = '';
     
-    // Optional: Log scan event to Firestore
     try {
-      await db.collection('locationScanEvents').add({
-        locationId: locationId,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        promoCode: promoCode
-      });
-    } catch (dbError) {
-      console.error('Error logging scan event:', dbError);
-      // Continue with redirect regardless of database error
+      // CRITICAL FIX: Lookup the location document to get its name
+      console.log('Fetching location document from scanLocations collection with id:', locationId);
+      
+      const locationDoc = await db.collection('scanLocations').doc(locationId).get();
+      
+      if (locationDoc.exists) {
+        // Document exists, get the name field
+        const docData = locationDoc.data();
+        console.log('Document data retrieved:', docData);
+        
+        // Use the name from database if available
+        if (docData.name) {
+          locationName = docData.name;
+          console.log('Using location name from database:', locationName);
+        } else {
+          console.log('Location document exists but has no name field');
+        }
+        
+        // Update scan count
+        await db.collection('scanLocations').doc(locationId).update({
+          scanCount: admin.firestore.FieldValue.increment(1)
+        });
+        console.log('Updated scan count for location');
+      } else {
+        console.log('No document found with that ID in scanLocations collection');
+      }
+    } catch (fetchError) {
+      console.error('Error fetching location document:', fetchError);
     }
     
-    // Build a simple redirect URL with the promo code
-    const redirectUrl = `https://www.justenjoyibizaboats.com/yacht-rental.html?promo=${promoCode}`;
+    // Ensure we have a location name even if lookup failed
+    if (!locationName) {
+      locationName = 'our QR code';
+      console.log('Using default location name after failed lookup');
+    }
+    
+    // Generate promo code based on location name
+    try {
+      const cleanName = locationName.toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')  // Remove any non-alphanumeric chars
+        .slice(0, 8);  // Take up to 8 chars to keep code reasonable length
+      
+      const randomDigits = Math.floor(100 + Math.random() * 900); // 100-999
+      promoCode = `CAVA-${cleanName}${randomDigits}`;
+      console.log('Generated promo code:', promoCode);
+    } catch (codeError) {
+      // Fallback for promo code
+      const shortId = locationId.slice(0, 5).toUpperCase();
+      promoCode = `CAVA-${shortId}${Math.floor(100 + Math.random() * 900)}`;
+      console.log('Used fallback promo code generation:', promoCode);
+    }
+    
+    // Log the scan event WITH the location name
+    try {
+      const eventData = {
+        locationId: locationId,
+        locationName: locationName, // CRITICAL: Include the name we found
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        promoCode: promoCode,
+        userAgent: req.headers['user-agent'] || '',
+        category: category,
+        location: location
+      };
+      
+      console.log('Logging scan event with data:', eventData);
+      await db.collection('locationScanEvents').add(eventData);
+      console.log('Successfully logged scan event with location name');
+    } catch (logError) {
+      console.error('Error logging scan event:', logError);
+    }
+    
+    // Build redirect URL with the promo code and location name
+    let redirectUrl = `https://www.justenjoyibizaboats.com/yacht-rental.html?promo=${promoCode}`;
+    redirectUrl += `&placeName=${encodeURIComponent(locationName)}`;
+    
+    if (category) {
+      redirectUrl += `&category=${encodeURIComponent(category)}`;
+    }
+    
     console.log('Redirecting to:', redirectUrl);
     
-    // Use HTML page for more reliable redirect
+    // Use HTML page for redirect
     res.setHeader('Content-Type', 'text/html');
     res.send(`
       <!DOCTYPE html>
@@ -445,11 +517,8 @@ exports.trackAndRedirect = onRequest({
       </body>
       </html>
     `);
-    
   } catch (error) {
     console.error('REDIRECT - Unhandled error:', error);
-    
-    // Even on error, redirect to the main site
     res.redirect(302, 'https://www.justenjoyibizaboats.com/yacht-rental.html');
   }
 });
