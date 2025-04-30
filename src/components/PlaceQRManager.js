@@ -23,7 +23,7 @@ import {
 import { db } from '../firebase/firebaseConfig';
 import { useAuth } from '../context/AuthContext';
 
-const BoatLocationQRManager = () => {
+const LocationQRManager = () => {
   const { user } = useAuth();
   const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,14 +31,14 @@ const BoatLocationQRManager = () => {
   const [scanStats, setScanStats] = useState(null);
   const [viewMode, setViewMode] = useState('list'); // 'list', 'add', 'edit', 'stats'
 
-  // Simplified form state
+  // Form state
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     category: '',
-    specificBoatId: '',
+    address: '',
     whatsappNumber: '',
-    whatsappMessage: 'Hello! I saw your boat QR code and I\'m interested in learning more.'
+    whatsappMessage: 'Hello! I saw your QR code and I\'m interested in learning more.'
   });
 
   useEffect(() => {
@@ -82,7 +82,7 @@ const BoatLocationQRManager = () => {
         name: formData.name,
         description: formData.description || '',
         category: formData.category || '',
-        specificBoatId: formData.specificBoatId || '',
+        address: formData.address || '',
         whatsappNumber: cleanNumber,
         whatsappMessage: formData.whatsappMessage,
         createdBy: user.uid,
@@ -98,7 +98,7 @@ const BoatLocationQRManager = () => {
           name: formData.name,
           description: formData.description || '',
           category: formData.category || '',
-          specificBoatId: formData.specificBoatId || '',
+          address: formData.address || '',
           whatsappNumber: cleanNumber,
           whatsappMessage: formData.whatsappMessage,
           createdBy: user.uid,
@@ -111,9 +111,9 @@ const BoatLocationQRManager = () => {
         name: '',
         description: '',
         category: '',
-        specificBoatId: '',
+        address: '',
         whatsappNumber: '',
-        whatsappMessage: 'Hello! I saw your boat QR code and I\'m interested in learning more.'
+        whatsappMessage: 'Hello! I saw your QR code and I\'m interested in learning more.'
       });
       
       setViewMode('list');
@@ -138,7 +138,7 @@ const BoatLocationQRManager = () => {
         name: formData.name,
         description: formData.description || '',
         category: formData.category || '',
-        specificBoatId: formData.specificBoatId || '',
+        address: formData.address || '',
         whatsappNumber: cleanNumber,
         whatsappMessage: formData.whatsappMessage
       });
@@ -151,7 +151,7 @@ const BoatLocationQRManager = () => {
                 name: formData.name,
                 description: formData.description || '',
                 category: formData.category || '',
-                specificBoatId: formData.specificBoatId || '',
+                address: formData.address || '',
                 whatsappNumber: cleanNumber,
                 whatsappMessage: formData.whatsappMessage
               }
@@ -190,9 +190,9 @@ const BoatLocationQRManager = () => {
       name: location.name,
       description: location.description || '',
       category: location.category || '',
-      specificBoatId: location.specificBoatId || '',
+      address: location.address || '',
       whatsappNumber: location.whatsappNumber || '',
-      whatsappMessage: location.whatsappMessage || 'Hello! I saw your boat QR code and I\'m interested in learning more.'
+      whatsappMessage: location.whatsappMessage || 'Hello! I saw your QR code and I\'m interested in learning more.'
     });
     setSelectedLocation(location.id);
     setViewMode('edit');
@@ -224,12 +224,15 @@ const BoatLocationQRManager = () => {
   const getQrCodeUrl = location => {
     let url = `${TRACK_FN_URL}?locationId=${location.id}`;
     
+    // Always include the location name
+    url += `&name=${encodeURIComponent(location.name)}`;
+    
     if (location.category) {
       url += `&category=${encodeURIComponent(location.category)}`;
     }
     
-    if (location.specificBoatId) {
-      url += `&boat=${encodeURIComponent(location.specificBoatId)}`;
+    if (location.address) {
+      url += `&location=${encodeURIComponent(location.address)}`;
     }
     
     return url;
@@ -378,9 +381,9 @@ const BoatLocationQRManager = () => {
                 name: '',
                 description: '',
                 category: '',
-                specificBoatId: '',
+                address: '',
                 whatsappNumber: '',
-                whatsappMessage: 'Hello! I saw your boat QR code and I\'m interested in learning more.'
+                whatsappMessage: 'Hello! I saw your QR code and I\'m interested in learning more.'
               });
             }}
             className="px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300"
@@ -392,7 +395,7 @@ const BoatLocationQRManager = () => {
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="mb-4 p-4 bg-blue-50 rounded-md">
             <p className="text-sm text-blue-700">
-              <strong>Note:</strong> QR codes will redirect users to the yacht rental page on justenjoyibizaboats.com
+              <strong>Note:</strong> QR codes will redirect users to your website with tracking analytics
             </p>
           </div>
 
@@ -405,7 +408,7 @@ const BoatLocationQRManager = () => {
                 type="text"
                 name="name"
                 className="w-full p-2 border border-gray-300 rounded-md"
-                placeholder="e.g., Marina Botafoch, Avenida Restaurant, Ibiza Town Kiosk"
+                placeholder="e.g., City Restaurant, Downtown Shop, Main Street Billboard"
                 value={formData.name}
                 onChange={handleInputChange}
                 required
@@ -428,35 +431,43 @@ const BoatLocationQRManager = () => {
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Boat Category (optional)
+                Category (optional)
               </label>
-              <input
-                type="text"
+              <select
                 name="category"
                 className="w-full p-2 border border-gray-300 rounded-md"
-                placeholder="e.g., yacht, speedboat, sailboat"
                 value={formData.category}
                 onChange={handleInputChange}
-              />
+              >
+                <option value="">Select a category</option>
+                <option value="restaurant">Restaurant</option>
+                <option value="cafe">Café</option>
+                <option value="shop">Shop</option>
+                <option value="hotel">Hotel</option>
+                <option value="billboard">Billboard</option>
+                <option value="business">Business</option>
+                <option value="event">Event</option>
+                <option value="other">Other</option>
+              </select>
               <p className="text-xs text-gray-500 mt-1">
-                Will be used as a filter parameter on the yacht rental page
+                Will be used as a parameter to customize the landing page
               </p>
             </div>
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Specific Boat ID (optional)
+                Address (optional)
               </label>
               <input
                 type="text"
-                name="specificBoatId"
+                name="address"
                 className="w-full p-2 border border-gray-300 rounded-md"
-                placeholder="e.g., sunseeker-predator-55"
-                value={formData.specificBoatId}
+                placeholder="e.g., 123 Main St, New York, NY"
+                value={formData.address}
                 onChange={handleInputChange}
               />
               <p className="text-xs text-gray-500 mt-1">
-                If provided, this specific boat will be highlighted on the yacht rental page
+                Physical location where this QR code will be placed
               </p>
             </div>
 
@@ -468,7 +479,7 @@ const BoatLocationQRManager = () => {
                 type="text"
                 name="whatsappNumber"
                 className="w-full p-2 border border-gray-300 rounded-md"
-                placeholder="e.g., +34612345678"
+                placeholder="e.g., +1234567890"
                 value={formData.whatsappNumber}
                 onChange={handleInputChange}
               />
@@ -524,14 +535,12 @@ const BoatLocationQRManager = () => {
         </button>
       </div>
 
-      
-
       {locations.length === 0 ? (
         <div className="bg-white rounded-lg shadow-md p-6 text-center">
           <MapPin size={48} className="mx-auto mb-4 text-gray-400" />
           <h2 className="text-xl font-medium mb-2">No QR Codes Yet</h2>
           <p className="text-gray-500 mb-4">
-            Create QR codes for different locations to track visits to your yacht rental page.
+            Create QR codes for different locations to track visits to your website.
           </p>
           <button
             onClick={() => setViewMode('add')}
@@ -553,6 +562,11 @@ const BoatLocationQRManager = () => {
                     <h3 className="font-semibold text-lg">{location.name}</h3>
                     {location.description && (
                       <p className="text-sm text-gray-500 mt-1">{location.description}</p>
+                    )}
+                    {location.category && (
+                      <span className="inline-block px-2 py-1 mt-2 text-xs bg-blue-100 text-blue-800 rounded-full">
+                        {location.category}
+                      </span>
                     )}
                   </div>
                   <div className="text-sm text-gray-500">
@@ -576,7 +590,7 @@ const BoatLocationQRManager = () => {
               <div className="p-4 bg-white border-t border-gray-100">
                 <div className="mb-3">
                   <a
-                    href={`https://www.justenjoyibizaboats.com/yacht-rental.html`}
+                    href={getQrCodeUrl(location)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center text-sm text-blue-600 hover:text-blue-800"
@@ -625,5 +639,5 @@ const BoatLocationQRManager = () => {
   );
 };
 
-export default BoatLocationQRManager;
+export default LocationQRManager;
 

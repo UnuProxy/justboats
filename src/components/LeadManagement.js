@@ -88,63 +88,71 @@ const LeadManagement = () => {
 
  
   // Fetch leads in real-time
-useEffect(() => {
-  let unsubscribeLeads;
-  // Add this flag to track initial load
-  let isInitialLoad = true;
-  
-  try {
-    console.log('Setting up leads listener...');
+  useEffect(() => {
+    let unsubscribeLeads;
+    // Add this flag to track initial load
+    let isInitialLoad = true;
     
-    // Create a query for the inquiries collection
-    const inquiriesQuery = query(
-      collection(db, 'inquiries'),
-      orderBy('timestamp', 'desc')
-    );
+    try {
+      console.log('Setting up leads listener...');
+      
+      // Create a query for the inquiries collection
+      const inquiriesQuery = query(
+        collection(db, 'inquiries'),
+        orderBy('timestamp', 'desc')
+      );
 
-    unsubscribeLeads = onSnapshot(inquiriesQuery, 
-      (snapshot) => {
-        console.log(`Received ${snapshot.docs.length} leads from Firestore`);
-        
-        const leadData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          status: doc.data().status || 'new'
-        }));
-        
-        setLeads(leadData);
-        setLoading(false);
-        
-        // Check for new leads since last update
-        const newLeads = snapshot.docChanges()
-          .filter(change => change.type === 'added');
-        
-        // Only show notifications if it's not the initial load
-        if (newLeads.length > 0 && !isInitialLoad) {
-          const latestLead = newLeads[0].doc.data();
-          const vesselName = latestLead.boatName || latestLead.yachtName || 'a yacht';
-          showNotification('New Lead', `${latestLead.name || 'Someone'} inquired about ${vesselName}`);
+      unsubscribeLeads = onSnapshot(inquiriesQuery, 
+        (snapshot) => {
+          console.log(`Received ${snapshot.docs.length} leads from Firestore`);
+          
+          const leadData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            status: doc.data().status || 'new'
+          }));
+          
+          setLeads(leadData);
+          setLoading(false);
+          
+          // Check for new leads since last update
+          const newLeads = snapshot.docChanges()
+            .filter(change => change.type === 'added');
+          
+          // Only show notifications if it's not the initial load
+          if (newLeads.length > 0 && !isInitialLoad) {
+            const latestLead = newLeads[0].doc.data();
+            const vesselName = latestLead.boatName || latestLead.yachtName || 'a yacht';
+            
+            // Check if lead has a promo code (from QR scan)
+            const promoMessage = latestLead.promoCode ? 
+              ` (with promo: ${latestLead.promoCode})` : '';
+            
+            showNotification(
+              'New Lead', 
+              `${latestLead.name || 'Someone'} inquired about ${vesselName}${promoMessage}`
+            );
+          }
+          
+          // Mark initial load as complete after first snapshot
+          isInitialLoad = false;
+        }, 
+        (error) => {
+          console.error("Error fetching inquiries:", error);
+          setLoading(false);
         }
-        
-        // Mark initial load as complete after first snapshot
-        isInitialLoad = false;
-      }, 
-      (error) => {
-        console.error("Error fetching inquiries:", error);
-        setLoading(false);
-      }
-    );
-  } catch (error) {
-    console.error("Error setting up inquiries listener:", error);
-    setLoading(false);
-  }
-
-  return () => {
-    if (unsubscribeLeads) {
-      unsubscribeLeads();
+      );
+    } catch (error) {
+      console.error("Error setting up inquiries listener:", error);
+      setLoading(false);
     }
-  };
-}, [db]);
+
+    return () => {
+      if (unsubscribeLeads) {
+        unsubscribeLeads();
+      }
+    };
+  }, [db]);
 
   // Fetch users
   useEffect(() => {
@@ -172,6 +180,8 @@ useEffect(() => {
       }
     };
   }, [db]);
+
+  
 
   // Fetch boats
   useEffect(() => {
@@ -558,8 +568,19 @@ useEffect(() => {
     if (!lead || !lead.email) return;
     
     const vesselName = getVesselName(lead);
+    const leadName = (lead.firstName && lead.lastName) 
+      ? `${lead.firstName} ${lead.lastName}` 
+      : (lead.firstName || lead.lastName || lead.name || 'Customer');
+    
     const subject = `Regarding your inquiry about ${vesselName}`;
-    const body = `Hello ${lead.name},\n\nThank you for your interest in ${vesselName}. I'd like to provide you with more information and answer any questions you might have.\n\nBest regards,`;
+    let body = `Hello ${leadName},\n\nThank you for your interest in ${vesselName}. I'd like to provide you with more information and answer any questions you might have.`;
+    
+    // Add promo code information if available
+    if (lead.promoCode) {
+      body += `\n\nI see you used the promo code: ${lead.promoCode}. We'll make sure this is applied to your booking.`;
+    }
+    
+    body += `\n\nBest regards,`;
     
     window.location.href = `mailto:${lead.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     
@@ -568,6 +589,7 @@ useEffect(() => {
       updateLeadStatus(lead.id, 'contacted');
     }
   };
+  
 
   // Contact via phone
   const contactViaPhone = (phone) => {
@@ -630,8 +652,6 @@ useEffect(() => {
     }
   };
 
-  
-
   // Get boat details - checks both boatName and yachtName
   const getBoatDetails = (boatName) => {
     if (!boatName) return null;
@@ -662,6 +682,8 @@ useEffect(() => {
     return Math.floor((new Date() - lastContactNote.timestamp.toDate()) / (1000 * 60 * 60 * 24));
   };
 
+ 
+
   // Filtered leads
   const filteredLeads = useMemo(() => {
     return leads.filter(lead => {
@@ -670,7 +692,9 @@ useEffect(() => {
         (lead.email && lead.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (lead.boatName && lead.boatName.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (lead.yachtName && lead.yachtName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (lead.phone && lead.phone.includes(searchTerm));
+        (lead.phone && lead.phone.includes(searchTerm)) ||
+        // Add promo code to searchable fields
+        (lead.promoCode && lead.promoCode.toLowerCase().includes(searchTerm.toLowerCase()));
       
       const matchesStatus = filterStatus === '' || lead.status === filterStatus;
       
@@ -715,6 +739,18 @@ useEffect(() => {
       counts[status] = leads.filter(lead => lead.status === status).length;
     });
     counts.all = leads.length;
+    return counts;
+  }, [leads]);
+
+  // Count leads by promo source 
+  const promoSourceCounts = useMemo(() => {
+    const counts = {};
+    leads.forEach(lead => {
+      if (lead.promoCode) {
+        const source = lead.promoSource || 'QR code';
+        counts[source] = (counts[source] || 0) + 1;
+      }
+    });
     return counts;
   }, [leads]);
 
@@ -778,7 +814,21 @@ useEffect(() => {
                 </h3>
                 <QualificationBadge level={qualification} />
               </div>
-              <p className="text-sm text-gray-600">{lead.name || 'No name provided'}</p>
+              <p className="text-sm text-gray-600">
+  {(lead.firstName && lead.lastName) 
+    ? `${lead.firstName} ${lead.lastName}` 
+    : (lead.firstName || lead.lastName || lead.name || 'No name provided')}
+</p>
+              
+              {/* Add promo code badge if exists */}
+              {lead.promoCode && (
+                <span className="inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-medium bg-indigo-100 text-indigo-800">
+                  <svg className="mr-1.5 h-2 w-2 text-indigo-400" fill="currentColor" viewBox="0 0 8 8">
+                    <circle cx="4" cy="4" r="3" />
+                  </svg>
+                  Promo: {lead.promoCode}
+                </span>
+              )}
             </div>
             <StatusBadge status={lead.status} />
           </div>
@@ -889,10 +939,13 @@ useEffect(() => {
               {formatDateOnly(reminder.reminderDate)} at {formatTime(reminder.reminderDate)}
             </div>
             {lead && (
-              <div className="text-xs text-gray-500 mt-1">
-                Lead: {lead.name} ({getVesselName(lead)})
-              </div>
-            )}
+            <div className="text-xs text-gray-500 mt-1">
+              Lead: {(lead.firstName && lead.lastName) 
+                ? `${lead.firstName} ${lead.lastName}` 
+                : (lead.firstName || lead.lastName || lead.name || 'Unnamed lead')} 
+              ({getVesselName(lead)})
+            </div>
+          )}
           </div>
           <div className="flex space-x-1">
             <button
@@ -929,6 +982,12 @@ useEffect(() => {
     const convertedLeadsCount = leads.filter(lead => lead.status === 'converted').length;
     const conversionRate = leads.length > 0 
       ? ((convertedLeadsCount / leads.length) * 100).toFixed(1) 
+      : 0;
+    
+    // Promotional analytics
+    const promoLeadsCount = leads.filter(lead => lead.promoCode).length;
+    const promoConversionRate = promoLeadsCount > 0
+      ? (leads.filter(lead => lead.promoCode && lead.status === 'converted').length / promoLeadsCount * 100).toFixed(1)
       : 0;
     
     return (
@@ -1032,6 +1091,50 @@ useEffect(() => {
           </div>
         </div>
 
+        {/* Promo stats */}
+        {promoLeadsCount > 0 && (
+          <div className="bg-indigo-50 shadow overflow-hidden sm:rounded-lg border border-indigo-100">
+            <div className="px-4 py-5 border-b border-indigo-100 sm:px-6">
+              <h3 className="text-lg leading-6 font-medium text-indigo-900">
+                Promotional Stats
+              </h3>
+            </div>
+            <div className="px-4 py-5 sm:p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-indigo-500">Leads from Promotions</p>
+                  <p className="mt-1 text-3xl font-semibold text-indigo-900">{promoLeadsCount}</p>
+                  <p className="mt-1 text-sm text-indigo-600">
+                    {((promoLeadsCount / leads.length) * 100).toFixed(1)}% of total leads
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-indigo-500">Promo Conversion Rate</p>
+                  <p className="mt-1 text-3xl font-semibold text-indigo-900">{promoConversionRate}%</p>
+                  <p className="mt-1 text-sm text-indigo-600">
+                    {leads.filter(lead => lead.promoCode && lead.status === 'converted').length} converted leads
+                  </p>
+                </div>
+              </div>
+
+              {/* Promo sources */}
+              {Object.keys(promoSourceCounts).length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-medium text-indigo-700 mb-2">Leads by Promo Source</h4>
+                  <div className="grid gap-2">
+                    {Object.entries(promoSourceCounts).map(([source, count]) => (
+                      <div key={source} className="flex justify-between bg-white p-2 rounded-md">
+                        <span className="text-sm font-medium">{source}</span>
+                        <span className="text-sm">{count} leads</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Today's reminders */}
         <div className="bg-white shadow overflow-hidden sm:rounded-lg">
           <div className="px-4 py-5 border-b border-gray-200 sm:px-6">
@@ -1096,21 +1199,30 @@ useEffect(() => {
               <div className="space-y-3">
                 {leads.slice(0, 5).map(lead => (
                   <div key={lead.id} className="flex justify-between items-center p-3 border border-gray-100 rounded-lg">
-                    <div>
-                      <p className="font-medium">{lead.name}</p>
-                      <p className="text-sm text-gray-500">{getVesselName(lead)}</p>
-                      {lead.price && <p className="text-xs text-gray-500">{lead.price}</p>}
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <StatusBadge status={lead.status} />
-                      <button
-                        onClick={() => openLeadDetails(lead)}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        View
-                      </button>
-                    </div>
+                  <div>
+                    <p className="font-medium">
+                      {(lead.firstName && lead.lastName) 
+                        ? `${lead.firstName} ${lead.lastName}` 
+                        : (lead.firstName || lead.lastName || lead.name || 'No name provided')}
+                    </p>
+                    <p className="text-sm text-gray-500">{getVesselName(lead)}</p>
+                    {lead.price && <p className="text-xs text-gray-500">{lead.price}</p>}
+                    {lead.promoCode && (
+                      <span className="inline-block mt-1 px-2 py-0.5 text-xs bg-indigo-100 text-indigo-800 rounded-full">
+                        {lead.promoCode}
+                      </span>
+                    )}
                   </div>
+                  <div className="flex items-center space-x-3">
+                    <StatusBadge status={lead.status} />
+                    <button
+                      onClick={() => openLeadDetails(lead)}
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      View
+                    </button>
+                  </div>
+                </div>
                 ))}
               </div>
             )}
@@ -1138,18 +1250,21 @@ useEffect(() => {
                   Lead
                 </label>
                 <select
-                  id="reminder-lead"
-                  value={newReminder.leadId}
-                  onChange={(e) => setNewReminder({...newReminder, leadId: e.target.value})}
-                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                >
-                  <option value="">Select a lead</option>
-                  {leads.map(lead => (
-                    <option key={lead.id} value={lead.id}>
-                      {lead.name} - {lead.yachtName || 'No yacht'}
-                    </option>
-                  ))}
-                </select>
+                id="reminder-lead"
+                value={newReminder.leadId}
+                onChange={(e) => setNewReminder({...newReminder, leadId: e.target.value})}
+                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+              >
+                <option value="">Select a lead</option>
+                {leads.map(lead => (
+                  <option key={lead.id} value={lead.id}>
+                    {(lead.firstName && lead.lastName) 
+                      ? `${lead.firstName} ${lead.lastName}` 
+                      : (lead.firstName || lead.lastName || lead.name || 'Unnamed lead')} 
+                    - {getVesselName(lead)} {lead.promoCode ? `(${lead.promoCode})` : ''}
+                  </option>
+                ))}
+              </select>
               </div>
 
               <div className="sm:col-span-2">
@@ -1490,6 +1605,10 @@ useEffect(() => {
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Qualification
                         </th>
+                        {/* Add promo code column */}
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Promo
+                        </th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Assigned
                         </th>
@@ -1502,16 +1621,20 @@ useEffect(() => {
                       {filteredLeads.map(lead => (
                         <tr key={lead.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <div>
-                                <div className="text-sm font-medium text-gray-900">{lead.name || 'No name provided'}</div>
-                                <div className="text-sm text-gray-500">{lead.email || 'No email provided'}</div>
-                                {lead.phone && (
-                                  <div className="text-sm text-gray-500">{lead.phone}</div>
-                                )}
+                          <div className="flex items-center">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">
+                                {(lead.firstName && lead.lastName) 
+                                  ? `${lead.firstName} ${lead.lastName}` 
+                                  : (lead.firstName || lead.lastName || lead.name || 'No name provided')}
                               </div>
+                              <div className="text-sm text-gray-500">{lead.email || 'No email provided'}</div>
+                              {lead.phone && (
+                                <div className="text-sm text-gray-500">{lead.phone}</div>
+                              )}
                             </div>
-                          </td>
+                          </div>
+                        </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm text-gray-900">{getVesselName(lead)}</div>
                             {lead.date && (
@@ -1529,6 +1652,16 @@ useEffect(() => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <QualificationBadge level={getLeadQualification(lead.id)} />
+                          </td>
+                          {/* Promo code cell */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {lead.promoCode ? (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                                {lead.promoCode}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 text-sm">—</span>
+                            )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             <select
@@ -1616,12 +1749,15 @@ useEffect(() => {
                 <div className="px-4 py-5 border-b border-gray-200 sm:px-6">
                   <div className="flex justify-between items-start">
                     <div>
-                      <h3 className="text-lg leading-6 font-medium text-gray-900">
-                        Lead Details
-                      </h3>
-                      <p className="mt-1 text-sm text-gray-500">
-                        {selectedLead.name} • {formatDate(selectedLead.timestamp)}
-                      </p>
+                    <h3 className="text-lg leading-6 font-medium text-gray-900">
+                      Lead Details
+                    </h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {(selectedLead.firstName && selectedLead.lastName) 
+                        ? `${selectedLead.firstName} ${selectedLead.lastName}` 
+                        : (selectedLead.firstName || selectedLead.lastName || selectedLead.name || 'No name provided')}
+                      • {formatDate(selectedLead.timestamp)}
+                    </p>
                     </div>
                     <button
                       className="rounded-md text-gray-400 hover:text-gray-500 focus:outline-none"
@@ -1642,10 +1778,14 @@ useEffect(() => {
                       <div className="bg-gray-50 rounded-lg p-4 mb-4">
                         <h4 className="text-sm font-medium text-gray-500 mb-3">Lead Information</h4>
                         <div className="space-y-3">
-                          <div>
-                            <p className="text-xs text-gray-500">Name</p>
-                            <p className="text-sm font-medium">{selectedLead.name || 'Not provided'}</p>
-                          </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Name</p>
+                          <p className="text-sm font-medium">
+                            {(selectedLead.firstName && selectedLead.lastName) 
+                              ? `${selectedLead.firstName} ${selectedLead.lastName}` 
+                              : (selectedLead.firstName || selectedLead.lastName || selectedLead.name || 'Not provided')}
+                          </p>
+                        </div>
                           <div>
                             <p className="text-xs text-gray-500">Email</p>
                             <p className="text-sm font-medium">{selectedLead.email || 'Not provided'}</p>
@@ -1666,6 +1806,26 @@ useEffect(() => {
                             <p className="text-xs text-gray-500">Last Updated</p>
                             <p className="text-sm font-medium">{formatDate(selectedLead.lastUpdated) || 'Not updated'}</p>
                           </div>
+                          
+                          {/* Add promo code information */}
+                          {selectedLead.promoCode && (
+                            <div>
+                              <p className="text-xs text-gray-500">Promo Code</p>
+                              <div className="flex items-center">
+                                <span 
+                                  className="text-sm font-medium text-indigo-700 bg-indigo-50 px-2 py-1 rounded"
+                                >
+                                  {selectedLead.promoCode}
+                                </span>
+                                {selectedLead.promoSource && (
+                                  <span className="text-xs text-gray-500 ml-2">
+                                    from {selectedLead.promoSource}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          
                           <div>
                             <p className="text-xs text-gray-500">Assigned To</p>
                             <select
