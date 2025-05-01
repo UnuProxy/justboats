@@ -47,6 +47,7 @@ const PaymentDetails = ({
               <p className="mt-1 capitalize">{payments[0]?.method || 'N/A'}</p>
             )}
           </div>
+          
 
           <div>
             <label className="block text-sm font-medium text-gray-700">Payment Date:</label>
