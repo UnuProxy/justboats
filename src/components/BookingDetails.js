@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
-import { formatDateDDMMYYYY, formatDateTime } from "../utils/date.js";
+import { formatDateTime } from "../utils/date.js";
 import { 
   collection, 
   query, 
@@ -16,6 +16,58 @@ import { db } from "../firebase/firebaseConfig";
 import PaymentDetails from "./PaymentDetails.js";
 import { useNavigate } from 'react-router-dom';
 
+// Format a date from YYYY-MM-DD to DD/MM/YYYY for display
+const formatDateForDisplay = (dateString) => {
+  if (!dateString) return '';
+  
+  try {
+    // Check if the date is already in DD/MM/YYYY format
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
+      return dateString;
+    }
+    
+    // Handle YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      const parts = dateString.split('-');
+      if (parts.length === 3) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+    }
+    
+    // Fall back to original string if format is unknown
+    return dateString;
+  } catch (error) {
+    console.error("Error formatting date for display:", error);
+    return dateString;
+  }
+};
+
+// Format a date from DD/MM/YYYY to YYYY-MM-DD for storage
+const formatDateForStorage = (dateString) => {
+  if (!dateString) return '';
+  
+  try {
+    // Check if the date is in DD/MM/YYYY format
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
+      const parts = dateString.split('/');
+      if (parts.length === 3) {
+        return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+    }
+    
+    // Handle YYYY-MM-DD format (already correct)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      return dateString;
+    }
+    
+    // Fall back to original string if format is unknown
+    return dateString;
+  } catch (error) {
+    console.error("Error formatting date for storage:", error);
+    return dateString;
+  }
+};
+
 const BookingDetails = ({ booking, onClose }) => {
   const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
@@ -24,6 +76,10 @@ const BookingDetails = ({ booking, onClose }) => {
   const [copySuccess, setCopySuccess] = useState('');
   const [editedBooking, setEditedBooking] = useState(() => {
     console.log("Raw booking data:", booking);
+    
+    // Format the booking date for display
+    const displayDate = formatDateForDisplay(booking?.bookingDate);
+    console.log("Formatted date for display:", displayDate);
     
     // Only change is here - ensure payments is always an array
     const payments = Array.isArray(booking?.payments) ? booking.payments : 
@@ -50,6 +106,7 @@ const BookingDetails = ({ booking, onClose }) => {
     
     return {
       ...booking,
+      bookingDate: displayDate, // Use the correctly formatted date
       payments,
       firstPayment,
       secondPayment,
@@ -57,6 +114,174 @@ const BookingDetails = ({ booking, onClose }) => {
       paymentStatus: booking?.pricing?.paymentStatus || 'No Payment',
     };
   });
+
+  /**
+   * Focus the modal when it opens
+   */
+  useEffect(() => {
+    if (modalRef.current) {
+      modalRef.current.focus();
+    }
+  }, [modalRef]);
+
+  /**
+   * Handle setting edited booking from the fresh booking data
+   */
+  useEffect(() => {
+    if (!booking) return;
+    
+    const fetchLatestBookingData = async () => {
+      try {
+        // Get fresh data directly from Firestore
+        const bookingRef = doc(db, "bookings", booking.id);
+        const bookingDoc = await getDoc(bookingRef);
+        
+        if (bookingDoc.exists()) {
+          const freshData = bookingDoc.data();
+          console.log("Fresh booking data fetched directly:", freshData);
+          console.log("Fresh booking date:", freshData.bookingDate);
+          
+          // Format date for display
+          const displayDate = formatDateForDisplay(freshData.bookingDate);
+          console.log("Formatted date for display:", displayDate);
+          
+          // Set up booking data with proper date formatting
+          const bookingData = {
+            ...freshData,
+            id: booking.id,
+            bookingDate: displayDate // Use the correctly formatted date
+          };
+          
+          // Extract payments array
+          const payments = Array.isArray(bookingData?.payments) ? bookingData.payments : 
+                          Array.isArray(bookingData?.pricing?.payments) ? bookingData.pricing.payments : [];
+          
+          // Get first and second payments
+          const firstPayment = payments.find((p) => p.type === "first") || {
+            amount: 0,
+            method: "cash",
+            received: false,
+            date: "",
+            type: "first",
+          };
+          
+          const secondPayment = payments.find((p) => p.type === "second") || {
+            amount: 0,
+            method: "pos",
+            received: false,
+            date: "",
+            type: "second",
+          };
+          
+          // Set edited booking state
+          setEditedBooking({
+            ...bookingData,
+            firstPayment,
+            secondPayment,
+            finalPrice: bookingData?.pricing?.agreedPrice || 0,
+            paymentStatus: bookingData?.pricing?.paymentStatus || "No Payment",
+          });
+        }
+      } catch (error) {
+        console.error("Error fetching latest booking data:", error);
+      }
+    };
+    
+    fetchLatestBookingData();
+  }, [booking?.id]);
+  
+  /**
+   * Real-time listener for expenses and setup booking data
+   */
+  useEffect(() => {
+    if (!booking) return;
+    console.log("Raw booking data:", booking);
+    
+    // Refreshing booking data
+    const refreshBookingData = async () => {
+      try {
+        // Get fresh booking data directly from Firestore
+        const bookingRef = doc(db, "bookings", booking.id);
+        const bookingDoc = await getDoc(bookingRef);
+        
+        if (bookingDoc.exists()) {
+          const freshBookingData = bookingDoc.data();
+          console.log("Fresh booking data from Firestore:", freshBookingData);
+          console.log("Fresh booking date:", freshBookingData.bookingDate);
+          
+          // Format date for display
+          const displayDate = formatDateForDisplay(freshBookingData.bookingDate);
+          console.log("Formatted date for display:", displayDate);
+          
+          // Extract payments array
+          const payments = Array.isArray(freshBookingData?.payments) ? freshBookingData.payments : 
+                          Array.isArray(freshBookingData?.pricing?.payments) ? freshBookingData.pricing.payments : [];
+          
+          // Get first and second payments
+          const firstPayment = payments.find((p) => p.type === "first") || {
+            amount: 0,
+            method: "cash",
+            received: false,
+            date: "",
+            type: "first",
+          };
+          
+          const secondPayment = payments.find((p) => p.type === "second") || {
+            amount: 0,
+            method: "pos",
+            received: false,
+            date: "",
+            type: "second",
+          };
+          
+          // Debug payments
+          console.log("First payment:", firstPayment);
+          console.log("Second payment:", secondPayment);
+          
+          // Set edited booking state with fresh data
+          setEditedBooking({
+            ...freshBookingData,
+            id: booking.id, // Ensure ID is preserved
+            bookingDate: displayDate, // Use the correctly formatted date
+            firstPayment,
+            secondPayment,
+            finalPrice: freshBookingData?.pricing?.agreedPrice || 0,
+            paymentStatus: freshBookingData?.pricing?.paymentStatus || "No Payment",
+          });
+        }
+      } catch (error) {
+        console.error("Error refreshing booking data:", error);
+      }
+    };
+    
+    // Initially refresh booking data
+    refreshBookingData();
+    
+    // Firestore collection and query setup for expenses
+    const expensesRef = collection(db, "expenses");
+    const q = query(expensesRef, where("bookingId", "==", booking.id));
+    
+    // Real-time listener for expenses
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const allExpenses = querySnapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      }));
+      console.log("Fetched Expenses:", allExpenses);
+      
+      // Process and set linked expenses
+      const parentExpenses = allExpenses.filter((exp) => !exp.parentId);
+      const childExpenses = allExpenses.filter((exp) => exp.parentId);
+      const combinedExpenses = parentExpenses.map((parent) => ({
+        ...parent,
+        subExpenses: childExpenses.filter((child) => child.parentId === parent.id),
+      }));
+      
+      setLinkedExpenses(combinedExpenses);
+    });
+    
+    return () => unsubscribe(); // Clean up listener on unmount
+  }, [booking]);
 
   const handleEditInSanAntonio = () => {
     onClose(); // Close the modal first
@@ -192,7 +417,6 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
     }
   };
 
-  // LinkedOrdersSection Component
   const LinkedOrdersSection = () => {
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -666,25 +890,42 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
           received: false,
           date: '',
           excludeVAT: false,
-          percentage: paymentIndex === 0 ? 30 : 0,
+          percentage: paymentIndex === 0 ? 30 : 70,
           recordedAt: new Date().toISOString()
         };
       }
-  
-      updatedPayments[paymentIndex] = {
-        ...updatedPayments[paymentIndex],
-        ...updates
-      };
-  
+      
+      // Check if percentage is being updated
+      if (updates.percentage !== undefined) {
+        const finalPrice = Number(prev.finalPrice) || 0;
+        const newPercentage = Number(updates.percentage) || 0;
+        
+        // Update both percentage and amount based on percentage
+        updatedPayments[paymentIndex] = {
+          ...updatedPayments[paymentIndex],
+          ...updates,
+          percentage: newPercentage,
+          amount: ((finalPrice * newPercentage) / 100).toFixed(2)
+        };
+      } else {
+        // Normal updates without percentage change
+        updatedPayments[paymentIndex] = {
+          ...updatedPayments[paymentIndex],
+          ...updates
+        };
+      }
+    
+      // Calculate total paid amount
       const totalPaid = updatedPayments.reduce((sum, payment) => 
         sum + (payment.received ? (Number(payment.amount) || 0) : 0), 0
       );
-  
+    
+      // Update payment status
       let paymentStatus = 'No Payment';
       if (totalPaid > 0) {
         paymentStatus = totalPaid >= prev.pricing?.agreedPrice ? 'Completed' : 'Partial';
       }
-  
+    
       return {
         ...prev,
         pricing: {
@@ -820,76 +1061,6 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
     );
   };
 
-  /**
-   * 1) Focus the modal when it opens
-   */
-  useEffect(() => {
-    if (modalRef.current) {
-      modalRef.current.focus();
-    }
-  }, []);
-  
-  /**
-   * 2) Real-time listener for expenses
-   */
-  useEffect(() => {
-    if (!booking) return;
-    console.log("Raw booking data:", booking);
-    // Extract payments array - ONLY THIS LINE CHANGES
-    const payments = Array.isArray(booking?.payments) ? booking.payments : 
-                     Array.isArray(booking?.pricing?.payments) ? booking.pricing.payments : [];
-    // Get first and second payments
-    const firstPayment = payments.find((p) => p.type === "first") || {
-      amount: 0,
-      method: "cash",
-      received: false,
-      date: "",
-      type: "first",
-    };
-    const secondPayment = payments.find((p) => p.type === "second") || {
-      amount: 0,
-      method: "pos",
-      received: false,
-      date: "",
-      type: "second",
-    };
-    // Debug payments
-    console.log("First payment:", firstPayment);
-    console.log("Second payment:", secondPayment);
-    // Set edited booking state
-    setEditedBooking({
-      ...booking,
-      firstPayment,
-      secondPayment,
-      finalPrice: booking?.pricing?.agreedPrice || 0,
-      paymentStatus: booking?.pricing?.paymentStatus || "No Payment",
-    });
-    // Firestore collection and query setup for expenses
-    const expensesRef = collection(db, "expenses");
-    const q = query(expensesRef, where("bookingId", "==", booking.id));
-    // Real-time listener for expenses
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const allExpenses = querySnapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      }));
-      console.log("Fetched Expenses:", allExpenses);
-      // Process and set linked expenses
-      const parentExpenses = allExpenses.filter((exp) => !exp.parentId);
-      const childExpenses = allExpenses.filter((exp) => exp.parentId);
-      const combinedExpenses = parentExpenses.map((parent) => ({
-        ...parent,
-        subExpenses: childExpenses.filter((child) => child.parentId === parent.id),
-      }));
-      setLinkedExpenses(combinedExpenses);
-    });
-    return () => unsubscribe(); // Clean up listener on unmount
-  }, [booking]);
-    
-    
-  if (!booking) return null;
-
-
   const handleInputChange = (field, value) => {
     setEditedBooking((prev) => {
       if (field === 'firstPayment' || field === 'secondPayment') {
@@ -923,9 +1094,15 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
       return { ...prev, [field]: value };
     });
   };
-  
-  // No longer using handleDeleteBooking since we're using Cancel instead
 
+  // Function to handle agreed price changes
+  const handleFinalPriceChange = (newPrice) => {
+    setEditedBooking((prev) => ({
+      ...prev,
+      finalPrice: Number(newPrice) || 0
+    }));
+  };
+  
   const handleSaveBooking = async () => {
     if (!editedBooking.clientName?.trim()) {
       alert("Client name is required.");
@@ -936,30 +1113,75 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
       return;
     }
   
-    const bookingToSave = {
-      ...editedBooking,
-      clientDetails: {
-        ...editedBooking.clientDetails,
-        address: editedBooking.clientDetails?.address || ''
-      },
-      pricing: {
-        ...editedBooking.pricing,
-        agreedPrice: editedBooking.finalPrice,
-        lastUpdated: new Date().toISOString()
-      }
-    };
-    
-  
     try {
-      await updateDoc(doc(db, "bookings", booking.id), bookingToSave);
-      const updatedDoc = await getDoc(doc(db, "bookings", booking.id));
-      if (updatedDoc.exists()) {
-        setEditedBooking(updatedDoc.data());
-      }
-      setIsEditing(false);
+      // Format date for storage
+      const formattedDate = formatDateForStorage(editedBooking.bookingDate);
+      console.log("Original date value:", editedBooking.bookingDate);
+      console.log("Formatted date for storage:", formattedDate);
+      
+      const bookingRef = doc(db, "bookings", booking.id);
+      
+      // First, get current data to preserve existing fields
+      const currentDoc = await getDoc(bookingRef);
+      const currentData = currentDoc.exists() ? currentDoc.data() : {};
+      
+      // Create a complete bookingDetails object that preserves existing properties
+      const updatedBookingDetails = {
+        ...(currentData.bookingDetails || {}),
+        date: formattedDate,
+        boatName: editedBooking.boatName,
+        boatCompany: editedBooking.boatCompanyName,
+        passengers: Number(editedBooking.numberOfPassengers) || 0,
+        startTime: editedBooking.startTime,
+        endTime: editedBooking.endTime
+      };
+      
+      // Update complete document with proper data structure
+      const bookingToSave = {
+        // Data at root level
+        bookingDate: formattedDate, 
+        clientName: editedBooking.clientName,
+        clientPhone: editedBooking.clientPhone,
+        clientEmail: editedBooking.clientEmail,
+        clientPassport: editedBooking.clientPassport,
+        
+        // Properly structured bookingDetails
+        bookingDetails: updatedBookingDetails,
+        
+        // Client details
+        clientDetails: {
+          ...(currentData.clientDetails || {}),
+          name: editedBooking.clientName,
+          phone: editedBooking.clientPhone,
+          email: editedBooking.clientEmail,
+          passportNumber: editedBooking.clientPassport,
+          address: editedBooking.clientDetails?.address || editedBooking.address || ''
+        },
+        
+        // Pricing
+        pricing: {
+          ...(currentData.pricing || {}),
+          agreedPrice: Number(editedBooking.finalPrice) || 0,
+          lastUpdated: new Date().toISOString(),
+          payments: editedBooking.pricing?.payments || []
+        },
+        
+        // Timestamp always needed for triggers and sorting
+        lastUpdated: serverTimestamp()
+      };
+      
+      console.log("Saving complete booking object with updated date in both locations:", bookingToSave);
+      await updateDoc(bookingRef, bookingToSave);
+      
+      // Give Firestore a moment to update and propagate the change
+      setTimeout(() => {
+        setIsEditing(false);
+        alert("Booking updated successfully!");
+        onClose();
+      }, 500);
     } catch (error) {
       console.error("Error saving booking:", error);
-      alert("Failed to save booking. Please try again.");
+      alert("Failed to save booking. Please try again. Error: " + error.message);
     }
   };
   
@@ -980,6 +1202,8 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
       </svg>
     </button>
   );
+
+  if (!booking) return null;
 
   return (
     <div
@@ -1344,16 +1568,14 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
                       <input
                         type="date"
                         className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.bookingDate || ""}
+                        value={formatDateForStorage(editedBooking.bookingDate) || ""}
                         onChange={(e) =>
                           handleInputChange("bookingDate", e.target.value)
                         }
                       />
                     ) : (
                       <p className="mt-1">
-                        {editedBooking.bookingDate
-                          ? formatDateDDMMYYYY(editedBooking.bookingDate)
-                          : "N/A"}
+                        {editedBooking.bookingDate || "N/A"}
                       </p>
                     )}
                   </div>
@@ -1393,6 +1615,38 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
               </div>
             </div>
 
+            {/* Price Information Section */}
+            <div className="col-span-full">
+              <div className="p-4 border rounded-lg">
+                <h4 className="text-lg font-bold mb-3">Price Information</h4>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Agreed Price:
+                  </label>
+                  {isEditing ? (
+                    <div className="mt-1 relative rounded-md shadow-sm">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <span className="text-gray-500 sm:text-sm">€</span>
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="focus:ring-blue-500 focus:border-blue-500 block w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md"
+                        placeholder="0.00"
+                        value={editedBooking.finalPrice || ""}
+                        onChange={(e) => handleFinalPriceChange(e.target.value)}
+                      />
+                    </div>
+                  ) : (
+                    <p className="mt-1">
+                      €{Number(editedBooking.finalPrice).toFixed(2)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="col-span-full">
               <PaymentDetails 
                 payments={editedBooking?.pricing?.payments || []}
@@ -1403,6 +1657,67 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
                 isEditing={isEditing}
                 onPaymentChange={handlePaymentChange}
               />
+              
+              {isEditing && (
+  <div className="mt-4 p-4 border rounded-lg border-blue-200 bg-blue-50">
+    <h4 className="text-lg font-medium text-blue-800 mb-3">Set Payment Split</h4>
+    <div className="flex flex-wrap gap-3">
+      <button
+        type="button"
+        onClick={() => {
+          handlePaymentChange(0, { percentage: 25 });
+          handlePaymentChange(1, { percentage: 75 });
+        }}
+        className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+      >
+        25% / 75%
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          handlePaymentChange(0, { percentage: 30 });
+          handlePaymentChange(1, { percentage: 70 });
+        }}
+        className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+      >
+        30% / 70%
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          handlePaymentChange(0, { percentage: 50 });
+          handlePaymentChange(1, { percentage: 50 });
+        }}
+        className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+      >
+        50% / 50%
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          handlePaymentChange(0, { percentage: 70 });
+          handlePaymentChange(1, { percentage: 30 });
+        }}
+        className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+      >
+        70% / 30%
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          handlePaymentChange(0, { percentage: 100 });
+          handlePaymentChange(1, { percentage: 0 });
+        }}
+        className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+      >
+        100% / 0%
+      </button>
+    </div>
+    <p className="mt-3 text-sm text-blue-600">
+      Note: Setting the percentages will automatically calculate the payment amounts.
+    </p>
+  </div>
+)}
             </div>
     
             {/* Linked Orders Section */}
