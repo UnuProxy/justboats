@@ -474,7 +474,7 @@ exports.trackAndRedirect = onRequest({
     try {
       const eventData = {
         locationId: locationId,
-        locationName: locationName, // CRITICAL: Include the name we found
+        locationName: locationName, 
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         promoCode: promoCode,
         userAgent: req.headers['user-agent'] || '',
@@ -499,21 +499,49 @@ exports.trackAndRedirect = onRequest({
     
     console.log('Redirecting to:', redirectUrl);
     
-    // Use HTML page for redirect
+    // IMPROVED REDIRECT with better localStorage handling
     res.setHeader('Content-Type', 'text/html');
     res.send(`
       <!DOCTYPE html>
       <html>
       <head>
         <title>Redirecting to Just Enjoy Ibiza Boats</title>
-        <meta http-equiv="refresh" content="0;url=${redirectUrl}">
+        <meta http-equiv="refresh" content="2;url=${redirectUrl}">
         <script>
-          window.location.href = "${redirectUrl}";
+          // Store values in localStorage with an expiration date (7 days)
+          function setWithExpiry(key, value, ttl) {
+            const now = new Date();
+            const item = {
+              value: value,
+              expiry: now.getTime() + ttl,
+            };
+            localStorage.setItem(key, JSON.stringify(item));
+          }
+          
+          // Set promo code and source with 7-day expiration
+          setWithExpiry('autoPromoCode', '${promoCode}', 7 * 24 * 60 * 60 * 1000);
+          setWithExpiry('promoPlaceName', '${encodeURIComponent(locationName)}', 7 * 24 * 60 * 60 * 1000);
+          
+          // Also set as regular localStorage items for backward compatibility
+          localStorage.setItem('autoPromoCode', '${promoCode}');
+          localStorage.setItem('promoPlaceName', '${encodeURIComponent(locationName)}');
+          
+          // For debugging - this will show in console when user arrives
+          console.log('QR scan redirect: Storing promo code ${promoCode} from ${locationName}');
+          
+          // Redirect with a slight delay to ensure storage is complete
+          setTimeout(function() {
+            window.location.href = "${redirectUrl}";
+          }, 500);
         </script>
       </head>
       <body>
-        <p>Redirecting you to special offer...</p>
-        <p>If you are not redirected, <a href="${redirectUrl}">click here</a>.</p>
+        <div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif;">
+          <div style="text-align: center;">
+            <p>Loading your special offer...</p>
+            <p>If you are not redirected, <a href="${redirectUrl}">click here</a>.</p>
+          </div>
+        </div>
       </body>
       </html>
     `);
