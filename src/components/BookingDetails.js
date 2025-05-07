@@ -129,33 +129,27 @@ const BookingDetails = ({ booking, onClose }) => {
    */
   useEffect(() => {
     if (!booking) return;
-    
     const fetchLatestBookingData = async () => {
       try {
         // Get fresh data directly from Firestore
         const bookingRef = doc(db, "bookings", booking.id);
         const bookingDoc = await getDoc(bookingRef);
-        
         if (bookingDoc.exists()) {
           const freshData = bookingDoc.data();
           console.log("Fresh booking data fetched directly:", freshData);
           console.log("Fresh booking date:", freshData.bookingDate);
-          
           // Format date for display
           const displayDate = formatDateForDisplay(freshData.bookingDate);
           console.log("Formatted date for display:", displayDate);
-          
           // Set up booking data with proper date formatting
           const bookingData = {
             ...freshData,
             id: booking.id,
             bookingDate: displayDate // Use the correctly formatted date
           };
-          
           // Extract payments array
-          const payments = Array.isArray(bookingData?.payments) ? bookingData.payments : 
-                          Array.isArray(bookingData?.pricing?.payments) ? bookingData.pricing.payments : [];
-          
+          const payments = Array.isArray(bookingData?.payments) ? bookingData.payments :
+            Array.isArray(bookingData?.pricing?.payments) ? bookingData.pricing.payments : [];
           // Get first and second payments
           const firstPayment = payments.find((p) => p.type === "first") || {
             amount: 0,
@@ -164,7 +158,6 @@ const BookingDetails = ({ booking, onClose }) => {
             date: "",
             type: "first",
           };
-          
           const secondPayment = payments.find((p) => p.type === "second") || {
             amount: 0,
             method: "pos",
@@ -172,21 +165,24 @@ const BookingDetails = ({ booking, onClose }) => {
             date: "",
             type: "second",
           };
-          
-          // Set edited booking state
+          // Set edited booking state - ADD THE CLIENT FIELDS HERE
           setEditedBooking({
             ...bookingData,
             firstPayment,
             secondPayment,
             finalPrice: bookingData?.pricing?.agreedPrice || 0,
             paymentStatus: bookingData?.pricing?.paymentStatus || "No Payment",
+            // Add these lines for client information with fallbacks
+            clientName: bookingData.clientName || bookingData.clientDetails?.name || "",
+            clientPhone: bookingData.clientPhone || bookingData.clientDetails?.phone || "",
+            clientEmail: bookingData.clientEmail || bookingData.clientDetails?.email || "",
+            clientPassport: bookingData.clientPassport || bookingData.clientDetails?.passportNumber || ""
           });
         }
       } catch (error) {
         console.error("Error fetching latest booking data:", error);
       }
     };
-    
     fetchLatestBookingData();
   }, [booking?.id]);
   
@@ -239,6 +235,7 @@ const BookingDetails = ({ booking, onClose }) => {
           console.log("Second payment:", secondPayment);
           
           // Set edited booking state with fresh data
+          // Look for this part in your code - in the refreshBookingData function:
           setEditedBooking({
             ...freshBookingData,
             id: booking.id, // Ensure ID is preserved
@@ -247,6 +244,22 @@ const BookingDetails = ({ booking, onClose }) => {
             secondPayment,
             finalPrice: freshBookingData?.pricing?.agreedPrice || 0,
             paymentStatus: freshBookingData?.pricing?.paymentStatus || "No Payment",
+            
+            // Add these client information fields
+            clientName: freshBookingData.clientName || freshBookingData.clientDetails?.name || "",
+            clientPhone: freshBookingData.clientPhone || freshBookingData.clientDetails?.phone || "",
+            clientEmail: freshBookingData.clientEmail || freshBookingData.clientDetails?.email || "",
+            clientPassport: freshBookingData.clientPassport || freshBookingData.clientDetails?.passportNumber || "",
+            
+            // Add these boat detail fields 
+            boatName: freshBookingData.boatName || freshBookingData.bookingDetails?.boatName || "",
+            boatCompanyName: freshBookingData.boatCompanyName || freshBookingData.bookingDetails?.boatCompany || "",
+            numberOfPassengers: freshBookingData.numberOfPassengers || freshBookingData.bookingDetails?.passengers || "",
+            restaurantName: freshBookingData.restaurantName || "",
+            
+            // Add these time fields with proper fallbacks
+            startTime: freshBookingData.startTime || freshBookingData.bookingDetails?.startTime || "",
+            endTime: freshBookingData.endTime || freshBookingData.bookingDetails?.endTime || ""
           });
         }
       } catch (error) {
@@ -1112,6 +1125,14 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
       alert("Booking date is required.");
       return;
     }
+    
+    // Add email validation to prevent undefined values
+    if (editedBooking.clientEmail === undefined) {
+      setEditedBooking(prev => ({
+        ...prev,
+        clientEmail: ""
+      }));
+    }
   
     try {
       // Format date for storage
@@ -1127,23 +1148,37 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
       
       // Create a complete bookingDetails object that preserves existing properties
       const updatedBookingDetails = {
-        ...(currentData.bookingDetails || {}),
+        ...(currentData.bookingDetails || {}),  // Keep existing bookingDetails
         date: formattedDate,
-        boatName: editedBooking.boatName,
-        boatCompany: editedBooking.boatCompanyName,
+        // Add explicit fallbacks for all fields to prevent undefined values
+        boatName: editedBooking.boatName || currentData.bookingDetails?.boatName || "",
+        boatCompany: editedBooking.boatCompanyName || currentData.bookingDetails?.boatCompany || "",
         passengers: Number(editedBooking.numberOfPassengers) || 0,
-        startTime: editedBooking.startTime,
-        endTime: editedBooking.endTime
+        // Critical fix - ensure startTime and endTime are never undefined
+        startTime: editedBooking.startTime || currentData.bookingDetails?.startTime || "",
+        endTime: editedBooking.endTime || currentData.bookingDetails?.endTime || ""
       };
+      
+      // Calculate total paid amount from the payments array
+      const payments = editedBooking.pricing?.payments || [];
+      const totalPaid = payments.reduce((sum, payment) => 
+        sum + (payment.received ? (Number(payment.amount) || 0) : 0), 0
+      );
+      
+      // Determine payment status based on the calculated total
+      const paymentStatus = totalPaid === 0 ? 'No Payment' : 
+                           totalPaid >= Number(editedBooking.finalPrice) ? 'Completed' : 'Partial';
       
       // Update complete document with proper data structure
       const bookingToSave = {
         // Data at root level
-        bookingDate: formattedDate, 
-        clientName: editedBooking.clientName,
-        clientPhone: editedBooking.clientPhone,
-        clientEmail: editedBooking.clientEmail,
-        clientPassport: editedBooking.clientPassport,
+        bookingDate: formattedDate,
+        
+        // Only include client fields if they exist
+        ...(editedBooking.clientName ? { clientName: editedBooking.clientName } : {}),
+        ...(editedBooking.clientPhone ? { clientPhone: editedBooking.clientPhone } : {}),
+        ...(editedBooking.clientEmail ? { clientEmail: editedBooking.clientEmail } : {}),
+        ...(editedBooking.clientPassport ? { clientPassport: editedBooking.clientPassport } : {}),
         
         // Properly structured bookingDetails
         bookingDetails: updatedBookingDetails,
@@ -1151,20 +1186,25 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
         // Client details
         clientDetails: {
           ...(currentData.clientDetails || {}),
-          name: editedBooking.clientName,
-          phone: editedBooking.clientPhone,
-          email: editedBooking.clientEmail,
-          passportNumber: editedBooking.clientPassport,
-          address: editedBooking.clientDetails?.address || editedBooking.address || ''
+          name: editedBooking.clientName || currentData.clientDetails?.name || "",
+          phone: editedBooking.clientPhone || currentData.clientDetails?.phone || "",
+          email: editedBooking.clientEmail || currentData.clientDetails?.email || "",
+          passportNumber: editedBooking.clientPassport || currentData.clientDetails?.passportNumber || "",
+          address: editedBooking.clientDetails?.address || editedBooking.address || ""
         },
         
-        // Pricing
+        // Pricing with correct totalPaid and paymentStatus
         pricing: {
           ...(currentData.pricing || {}),
           agreedPrice: Number(editedBooking.finalPrice) || 0,
           lastUpdated: new Date().toISOString(),
-          payments: editedBooking.pricing?.payments || []
+          payments: editedBooking.pricing?.payments || [],
+          totalPaid: totalPaid,
+          paymentStatus: paymentStatus
         },
+        
+        // Preserve restaurant name
+        restaurantName: editedBooking.restaurantName,
         
         // Timestamp always needed for triggers and sorting
         lastUpdated: serverTimestamp()
