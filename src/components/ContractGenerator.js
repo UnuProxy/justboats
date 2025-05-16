@@ -2,34 +2,221 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   FileText, Ship, User, Calendar, Euro,
   Check, Trash2, Save, Printer, ChevronDown,
-  List, Download, XCircle, Search
+  List, Download, XCircle, Search, RefreshCw
 } from 'lucide-react';
+import { getFirestore, collection, addDoc, getDocs, query, orderBy, doc, getDoc } from "firebase/firestore";
+import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage";
+import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
 
-// Mock database functions – replace with your real implementation
-const db = {
+// Use the existing Firebase instance from your app
+const db = getFirestore();
+const storage = getStorage();
+
+// Firebase database functions - using the existing Firebase instance
+const firebaseDb = {
   saveContract: async (contractData) => {
-    const savedContracts = JSON.parse(localStorage.getItem('savedContracts') || '[]');
-    const contractId = `contract-${Date.now()}`;
-    const contractWithId = {
-      id: contractId,
-      ...contractData,
-      createdAt: new Date().toISOString(),
-      lessorSignature: 'SEA CHARTER IBIZA GESTIÓN Y SERVICIOS'
-    };
-    savedContracts.push(contractWithId);
-    localStorage.setItem('savedContracts', JSON.stringify(savedContracts));
-    return contractId;
+    try {
+      // Add contract to Firestore
+      const contractRef = await addDoc(collection(db, "contracts"), {
+        ...contractData,
+        createdAt: new Date().toISOString(),
+        lessorSignature: 'Alin Stefan Letca'
+      });
+      
+      return contractRef.id;
+    } catch (error) {
+      console.error("Error saving contract to Firebase:", error);
+      throw error;
+    }
   },
 
   getContracts: async () => {
-    const savedContracts = JSON.parse(localStorage.getItem('savedContracts') || '[]');
-    return savedContracts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    try {
+      const q = query(collection(db, "contracts"), orderBy("createdAt", "desc"));
+      const querySnapshot = await getDocs(q);
+      
+      const contracts = [];
+      querySnapshot.forEach((doc) => {
+        contracts.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+      
+      return contracts;
+    } catch (error) {
+      console.error("Error getting contracts from Firebase:", error);
+      throw error;
+    }
   },
 
   getContractById: async (id) => {
-    const savedContracts = JSON.parse(localStorage.getItem('savedContracts') || '[]');
-    return savedContracts.find(c => c.id === id);
+    try {
+      const docRef = doc(db, "contracts", id);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        return {
+          id: docSnap.id,
+          ...docSnap.data()
+        };
+      } else {
+        console.log("No such contract!");
+        return null;
+      }
+    } catch (error) {
+      console.error("Error getting contract by ID from Firebase:", error);
+      throw error;
+    }
+  },
+  
+  saveContractPDF: async (id, pdfBlob) => {
+    try {
+      // Create a reference to the PDF file location
+      const pdfRef = ref(storage, `contracts/${id}.pdf`);
+      
+      // Convert blob to base64 string for uploadString
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          try {
+            // Upload the file to Firebase Storage
+            await uploadString(pdfRef, reader.result, 'data_url');
+            
+            // Get the download URL
+            const downloadURL = await getDownloadURL(pdfRef);
+            resolve(downloadURL);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(pdfBlob);
+      });
+    } catch (error) {
+      console.error("Error saving PDF to Firebase Storage:", error);
+      throw error;
+    }
   }
+};
+
+const SignatureCanvas = ({ value, onChange, disabled = false }) => {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#000000';
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // If there's an existing signature image, draw it
+    if (value && !disabled) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0);
+      };
+      img.src = value;
+    }
+  }, [value, disabled]);
+  
+  const startDrawing = (e) => {
+    if (disabled) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    
+    // Get mouse position relative to canvas
+    let x, y;
+    if (e.type.includes('touch')) {
+      x = e.touches[0].clientX - rect.left;
+      y = e.touches[0].clientY - rect.top;
+    } else {
+      x = e.clientX - rect.left;
+      y = e.clientY - rect.top;
+    }
+    
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setIsDrawing(true);
+  };
+  
+  const draw = (e) => {
+    if (!isDrawing || disabled) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    
+    // Get mouse position relative to canvas
+    let x, y;
+    if (e.type.includes('touch')) {
+      x = e.touches[0].clientX - rect.left;
+      y = e.touches[0].clientY - rect.top;
+    } else {
+      x = e.clientX - rect.left;
+      y = e.clientY - rect.top;
+    }
+    
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+  
+  const stopDrawing = () => {
+    if (!isDrawing || disabled) return;
+    
+    setIsDrawing(false);
+    
+    // Save canvas as image data URL
+    const canvas = canvasRef.current;
+    const signature = canvas.toDataURL('image/png');
+    onChange(signature);
+  };
+  
+  const clearSignature = () => {
+    if (disabled) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    onChange(null);
+  };
+  
+  return (
+    <div className="w-full">
+      <div className="border-2 border-gray-300 rounded mb-2 bg-gray-50">
+        <canvas
+          ref={canvasRef}
+          width={400}
+          height={150}
+          className={`w-full ${disabled ? 'cursor-not-allowed' : 'cursor-crosshair'}`}
+          onMouseDown={startDrawing}
+          onMouseMove={draw}
+          onMouseUp={stopDrawing}
+          onMouseLeave={stopDrawing}
+          onTouchStart={startDrawing}
+          onTouchMove={draw}
+          onTouchEnd={stopDrawing}
+        />
+      </div>
+      {!disabled && (
+        <div className="flex justify-end">
+          <button
+            onClick={clearSignature}
+            type="button"
+            className="text-red-600 text-sm hover:text-red-800"
+          >
+            Clear Signature
+          </button>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const ContractGenerator = () => {
@@ -41,6 +228,19 @@ const ContractGenerator = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [contractSaved, setContractSaved] = useState(false);
   const [contractSaveId, setContractSaveId] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [withoutSkipper, setWithoutSkipper] = useState(false);
+
+  // Default skipper information
+  const defaultSkipper = {
+    name: 'Daniel Valverde',
+    address: 'Ibiza',
+    addressDuringTrip: 'Ibiza',
+    identification: '12408416P',
+    phone: '+34 642 453 952',
+    navigationTitle: 'PPER',
+    navigationNumber: '3698'
+  };
 
   // Boat options
   const boatOptions = [
@@ -67,16 +267,45 @@ const ContractGenerator = () => {
     date: formatDate(new Date()),
     selectedBoat: boatOptions[0],
     lessee: { name: '', address: '', addressDuringTrip: '', identification: '', phone: '' },
-    skipper: {
-      name: '', address: '', addressDuringTrip: '',
-      identification: '', phone: '', navigationTitle: '', navigationNumber: ''
-    },
+    skipper: { ...defaultSkipper },
     checkIn: { date: formatDate(new Date()), time: '10:00' },
     checkOut: { date: formatDate(new Date(Date.now() + 86400000)), time: '18:00' },
-    price: { rental: '', otherServices: [], total: '', deposit: '' }
+    price: { rental: '', otherServices: [], total: '' },
+    withoutSkipper: false,
+    lesseeSignature: null
   });
 
   const [otherService, setOtherService] = useState({ name: '', price: '' });
+
+  // Calculate total price whenever rental price or services change
+  useEffect(() => {
+    const rentalPrice = parseFloat(contractData.price.rental) || 0;
+    const servicesTotal = contractData.price.otherServices.reduce(
+      (sum, service) => sum + (parseFloat(service.price) || 0), 0
+    );
+    
+    const total = (rentalPrice + servicesTotal).toFixed(2);
+    setContractData(prev => ({
+      ...prev,
+      price: { ...prev.price, total }
+    }));
+  }, [contractData.price.rental, contractData.price.otherServices]);
+
+  // Reset skipper to default when without skipper option changes
+  useEffect(() => {
+    if (!withoutSkipper) {
+      setContractData(prev => ({
+        ...prev,
+        skipper: { ...defaultSkipper },
+        withoutSkipper: false
+      }));
+    } else {
+      setContractData(prev => ({
+        ...prev,
+        withoutSkipper: true
+      }));
+    }
+  }, [withoutSkipper]);
 
   // Load saved contracts when requested
   useEffect(() => {
@@ -84,48 +313,80 @@ const ContractGenerator = () => {
   }, [showSavedContracts]);
 
   const loadSavedContracts = async () => {
+    setIsLoading(true);
     try {
-      const contracts = await db.getContracts();
+      const contracts = await firebaseDb.getContracts();
       setSavedContracts(contracts);
     } catch (err) {
       console.error('Error loading saved contracts:', err);
+      alert('Error loading contracts. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const loadContract = async (id) => {
+    setIsLoading(true);
     try {
-      const c = await db.getContractById(id);
+      const c = await firebaseDb.getContractById(id);
       if (c) {
         setContractData(c);
+        setWithoutSkipper(c.withoutSkipper || false);
         setShowSavedContracts(false);
         setContractSaved(true);
         setContractSaveId(id);
       }
     } catch (err) {
       console.error('Error loading contract:', err);
+      alert('Error loading contract. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const saveContract = async () => {
-    if (!contractData.lessee.name || !contractData.price.rental || !contractData.price.deposit) {
-      alert('Please fill in required fields: Lessee Name, Rental Price and Deposit');
+    if (!contractData.lessee.name || !contractData.price.rental) {
+      alert('Please fill in required fields: Lessee Name and Rental Price');
       return;
     }
+    
+    if (!contractData.lesseeSignature) {
+      alert('Please add the lessee signature');
+      return;
+    }
+    
+    setIsLoading(true);
     try {
       const toSave = {
         ...contractData,
         lessorSignature: 'SEA CHARTER IBIZA GESTIÓN Y SERVICIOS',
         createdAt: new Date().toISOString()
       };
-      const id = await db.saveContract(toSave);
+      
+      const id = await firebaseDb.saveContract(toSave);
       setContractSaved(true);
       setContractSaveId(id);
-      alert('Contract saved successfully!');
+      
+      // Generate and save PDF after contract is saved
+      setTimeout(() => {
+        generatePDF(id);
+      }, 500);
+      
+      alert('Contract saved successfully to Firebase!');
       if (showSavedContracts) loadSavedContracts();
     } catch (err) {
       console.error('Error saving contract:', err);
       alert('Error saving contract. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  const resetSkipperToDefault = () => {
+    setContractData(prev => ({
+      ...prev,
+      skipper: { ...defaultSkipper }
+    }));
   };
 
   const handleChange = (section, field, value) => {
@@ -163,29 +424,128 @@ const ContractGenerator = () => {
     }));
   };
 
-  const handlePrint = () => {
+  const generatePDF = async (contractId) => {
     if (!contractRef.current) return;
-    const printContents = contractRef.current.innerHTML;
-    const original = document.body.innerHTML;
-    document.body.innerHTML = `
-      <html>
-        <head>
-          <title>Boat Rental Contract - ${contractData.contractNumber}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: .5in; }
-            h1 { text-align: center; }
-            .page-break { page-break-before: always; }
-            table { width:100%; border-collapse:collapse; }
-            th,td { text-align:left; padding:8px; border-bottom:1px solid #ddd; }
-            @media print { .no-print { display:none; } }
-          </style>
-        </head>
-        <body>${printContents}</body>
-      </html>
-    `;
-    window.print();
-    document.body.innerHTML = original;
-    setTimeout(() => window.location.reload(), 100);
+    
+    try {
+      const element = contractRef.current;
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false
+      });
+      
+      const imgData = canvas.toDataURL('image/jpeg', 1.0);
+      
+      // Create PDF
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+      const imgX = (pdfWidth - imgWidth * ratio) / 2;
+      
+      pdf.addImage(imgData, 'JPEG', imgX, 0, imgWidth * ratio, imgHeight * ratio);
+      
+      // Generate second page for terms and conditions
+      pdf.addPage();
+      pdf.setFontSize(14);
+      pdf.text('GENERAL RENTAL CONDITIONS', pdfWidth / 2, 20, { align: 'center' });
+      
+      pdf.setFontSize(9);
+      const termsText = [
+        '1- This contract is only for navigation up to 12 miles from the coasts of Ibiza and Formentera.',
+        '2- It is desire of the lessor to deliver the rental boat and it is desire of the lessee to receive it for rent.',
+        '3- Deception by the lessee in any of the particular specifications of the contract will lead to the immediate cancellation of the contract, losing the lessee the amounts delivered.',
+        '4- This contract will not be valid until the lessor has received the payment for the agreed reservation and provided that payment before the date specified in this document.',
+        '5- Before the delivery of the boat, the lessor must have received the totality of the established price, as well as the corresponding deposit. Payment can be made by bank transfer, card payment or cash.',
+        '6- If the lessee, for any reason, cancels this contract, will have to pay the lessor the following percentages of the total amount of the contract: More than one month before the start date, 25%; with less than a month and up to seven days before the start date, 50%; less than 7 days before the start date, 100%.',
+        '7- The lessor undertakes to deliver the boat in perfect working order and cleanliness at the agreed place, date and time. In the event that, due to force majeure, such as a possible breakdown of the boat, it cannot be delivered, the lessor undertakes to inform the lessee immediately as well as to put all possible means of solving the problem and try to find another boat of the same or higher category. In the event that the agreed conditions cannot definitely be met, the lessor will return the amounts received to the lessee. The lessee agrees not to make an additional claim.',
+        '8- The lessee will use and take care of the boat received and all its accessories following good seafaring practices and will use all means to prevent losses, accidents or breakdowns.',
+        '9- If the lessor, during the rental period, observes that the skipper performs dangerous maneuvers or shows inexperience, he may cancel the rental contract in advance, returning to the lessee 50% of the rent for the unused days without implying refund on the day the cancellation occurs, or the lesse may change to another skipper that could be provided by the lessor.',
+        '10- In the event of an accident or breakdown, the lessee must contact the lessor as soon as possible and in the event of not being able to do so and requiring immediate attention, he will do what is recommended by good seafaring practices, thinking of the safety of those in their charge and of the boat. In the event that the possible breakdown is not due to misuse of the lessor and cannot be solved in a short time, the lessor will return to the lessee the proportional part of the rent not enjoyed, without the lessee being able to make any claim for damages and losses. However, the lessor will carry out all possible procedures, aimed at finding another boat so that the lessee can continue to enjoy the reservation.',
+        '11- The boat has an insurance policy with accident coverage, both for the boat itself and for civil liability and occupants with the limitations specified in the general and particular conditions of the policy.',
+        '12- In the event that there is an accident and the insurance company is not responsible for all or part of the damages, expenses or civil liability produced, the lessee must deal with all of them, expressly releasing the lessor from any liability.',
+        '13- The delay in the return of the boat on the day and time indicated will have a penalty which the lessee will pay to the lessor 50€ for each hour of delay. In the event that the boat is left in a different place than the agreed one, the lessee will pay the lessor all the expenses, damages and losses that this may cause.',
+        '14- In the event that children are going to board, he lessee must notify the lessor in advance so that the lessor can replace the adult life jackets with those appropriate for their size.',
+        '15- The deposit received by the lessor before the boarding serves to answer for any damage, loss, robbery or theft of any object not covered by the insurance company or delay in the return of the boat. However, if the amount resulting from any of the cases indicated is greater than the amount of the deposit, the lessee is obliged to pay the difference. The deposit will be returned to the lessee once the condition of the boat and the repair have been verified. In the event that the rental has been made without a deposit, the lessee will bear the cost of any loss of object and accessory as well as any damage caused by the rental.',
+        '16- At the time set in this contract for the return of the boat, the lessee and all luggage must be off the boat, leaving the boat ready for the lessor\'s review.',
+        '17- Provisioning, fuel, mooring and crew costs if any, are responsibility of the lessee. The mooring in the port of departure is included in the price.',
+        '18- The fuel consumption costs will be borne by the lessee. They will be calculated from the consumption of liters per hour of navigation of the rented boat. The lessee acknowledges having been informed of the consumption of the boat.',
+        '19- The lessee acknowledges having been informed in relation to the use of navigation systems present in the boat, used in order to provide help or assitance, prevent the client from navigating or anchoring through prohibited sites or calculating fuel consumption.',
+        '20- It is totally prohibited to ship weapons, narcotics, contraband, merchandise, paying passengers and animals, as well as to participate in regattas, commercial fishing and any activity sanctioned by current legislation.',
+        '21- Any cost derived from the misuse of the equipment and security systems (flares, vests, smoke canister, beacon and more) will be borne by the lessee.',
+        '22- Subcontracting or subletting are not allowed, committing the lessee to use the boat only for himself, family or friends, which in total may not exceed the maximum number for which the boat is designated. It is not allowed to embark and disembark outside the established schedules or at the base port.',
+        '23- In case of non-compliance with the rules established by the maritime authorities or customs, the person responsible will be the skipper of the boat subsidiarily the lessee, expressly releasing the lessor from any responsibility. In the event that, for reasons attributable to the lessee, the skipper or the crew, the boat is retained or sealed by any type of authority and consequently the boat is not returned to the lessor on the date set out in the contract, the lessee will pay as a penalty the amounts that the lessee must pay to the lessor for delay that are specified in clause 13. Any fine received by the lessor and referred to the use of the rented boat for the duration of the lease will be borne by the lessee.',
+        '24- The lessee acknowledges having been informed of the areas considered dangerous and undertakes not to navigate near them, being the reason for collecting the deposit deposited what is included in this clause. The following are recognized as dangerous areas: "es freu mitja i es freu petit", "sa barqueta", "es gorrinets", "es pas" "illa d\'es porcs" and passage between "illa d\'es bosc" and "cales of compte" as well as the rest othe areas marked in red on the navigation chart given to the lessee at the time of check-in.',
+        '25- In the event that the payment by the lessee is made using a credit or debit card that does not belong to the European Union or Amex, an extra charge of 2.5% will be applied to the total rental price.',
+        '26- If the boat is rented without a skipper and the driver consumes alcohol while operating the vessel, they will forfeit their right to any deposit refund and may be subject to additional penalties.',
+        '27- The intervening parties agree that any litigation, discrepancy, question or claim resulting from the execution or interpretation of this contract or related to the rental specified therein, will be definitively resolved by arbitration within the framework of the Court of Arbitration of the Balearic Islands of the Official Chamber of Commerce entrusted with the administration of the arbitration and the appointment of arbitrators in accordance with its regulations and statutes. Likewise, both expressly state their commitment to comply with the arbitration award that is issued.'
+      ];
+      
+      let yPosition = 30;
+      const lineHeight = 5;
+      
+      termsText.forEach(line => {
+        // Check if we need to add a new page
+        if (yPosition > 270) {
+          pdf.addPage();
+          yPosition = 20;
+        }
+        
+        // Split long lines
+        const splitLines = pdf.splitTextToSize(line, pdfWidth - 40);
+        pdf.text(splitLines, 20, yPosition);
+        yPosition += lineHeight * splitLines.length;
+      });
+      
+      // Convert PDF to blob
+      const pdfBlob = pdf.output('blob');
+      
+      // Save PDF to Firebase Storage
+      const id = contractId || contractSaveId;
+      if (id) {
+        const downloadURL = await firebaseDb.saveContractPDF(id, pdfBlob);
+        console.log('PDF saved to Firebase Storage:', downloadURL);
+        
+        // Update contract with PDF URL
+        // In a real implementation, you'd update the Firestore document with the PDF URL
+      }
+      
+      return pdfBlob;
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      throw error;
+    }
+  };
+
+  const handlePrint = async () => {
+    setIsLoading(true);
+    try {
+      const pdfBlob = await generatePDF();
+      
+      // Create a URL for the blob
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      
+      // Open PDF in new tab
+      window.open(pdfUrl, '_blank');
+      
+      // Clean up
+      setTimeout(() => {
+        URL.revokeObjectURL(pdfUrl);
+      }, 100);
+    } catch (error) {
+      console.error('Error handling print:', error);
+      alert('Error generating PDF. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Filter logic for saved contracts
@@ -201,6 +561,14 @@ const ContractGenerator = () => {
 
   return (
     <div className="flex flex-col w-full p-6 bg-gray-50">
+      {isLoading && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg">
+            <p className="text-lg">Loading...</p>
+          </div>
+        </div>
+      )}
+      
       <h1 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
         <FileText className="mr-2" /> Boat Rental Contract Generator
       </h1>
@@ -254,6 +622,27 @@ const ContractGenerator = () => {
             </div>
           </div>
 
+          {/* Without skipper option */}
+          <div className="mb-4">
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="withoutSkipper"
+                checked={withoutSkipper}
+                onChange={(e) => setWithoutSkipper(e.target.checked)}
+                className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <label htmlFor="withoutSkipper" className="ml-2 block text-sm font-medium text-red-600">
+                Rental without skipper (client will drive the boat)
+              </label>
+            </div>
+            {withoutSkipper && (
+              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md text-xs text-red-600">
+                Note: If the client operates the boat under the influence of alcohol, they will forfeit their deposit and face potential additional penalties.
+              </div>
+            )}
+          </div>
+
           {/* Lessee Info */}
           <div className="mb-6">
             <h3 className="text-md font-medium text-gray-700 mb-2 flex items-center">
@@ -280,9 +669,21 @@ const ContractGenerator = () => {
 
           {/* Skipper Info */}
           <div className="mb-6">
-            <h3 className="text-md font-medium text-gray-700 mb-2 flex items-center">
-              <Ship size={16} className="mr-2" /> Skipper Information
-            </h3>
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-md font-medium text-gray-700 flex items-center">
+                <Ship size={16} className="mr-2" /> Skipper Information
+              </h3>
+              <div className="flex space-x-2">
+                <button
+                  onClick={resetSkipperToDefault}
+                  className="text-blue-600 hover:text-blue-800 text-sm flex items-center"
+                  title="Reset to default skipper"
+                >
+                  <RefreshCw size={14} className="mr-1" /> Reset
+                </button>
+              </div>
+            </div>
+            
             {[
               ['Name', 'name'],
               ['Address', 'address'],
@@ -299,6 +700,7 @@ const ContractGenerator = () => {
                   value={contractData.skipper[field]}
                   onChange={(e) => handleChange('skipper', field, e.target.value)}
                   className="mt-1 p-2 w-full border border-gray-300 rounded-md"
+                  disabled={withoutSkipper}
                 />
               </div>
             ))}
@@ -415,15 +817,6 @@ const ContractGenerator = () => {
                 className="mt-1 p-2 w-full bg-gray-100 border border-gray-300 rounded-md font-semibold"
               />
             </div>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-600">Deposit (€)</label>
-              <input
-                type="number"
-                value={contractData.price.deposit}
-                onChange={(e) => handleChange('price', 'deposit', e.target.value)}
-                className="mt-1 p-2 w-full border border-gray-300 rounded-md"
-              />
-            </div>
           </div>
 
           {/* Signatures */}
@@ -432,20 +825,15 @@ const ContractGenerator = () => {
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-600 mb-1">Lessor Signature</label>
               <div className="border border-gray-300 rounded-md bg-white p-3 text-center">
-                <p className="font-semibold text-blue-800">SEA CHARTER IBIZA GESTIÓN Y SERVICIOS</p>
+                <p className="font-semibold text-blue-800">Alin Stefan Letca</p>
               </div>
             </div>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-600 mb-1">Lessee Signature</label>
-              <div className="border border-gray-300 rounded-md bg-white">
-                <input
-                  type="text"
-                  placeholder="Enter lessee full name as signature"
-                  value={contractData.lesseeSignature || ''}
-                  onChange={(e) => setContractData({ ...contractData, lesseeSignature: e.target.value })}
-                  className="mt-1 p-3 w-full border-0 focus:ring-0"
-                />
-              </div>
+              <label className="block text-sm font-medium text-gray-600 mb-1">Lessee Signature (Draw Below)</label>
+              <SignatureCanvas
+                value={contractData.lesseeSignature}
+                onChange={(signature) => setContractData({ ...contractData, lesseeSignature: signature })}
+              />
             </div>
           </div>
 
@@ -454,18 +842,21 @@ const ContractGenerator = () => {
             <button
               onClick={handlePrint}
               className="flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex-1"
+              disabled={isLoading}
             >
               <Printer size={18} className="mr-2" /> Print/Download
             </button>
             <button
               onClick={saveContract}
               className="flex items-center justify-center px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 flex-1"
+              disabled={isLoading}
             >
               <Save size={18} className="mr-2" /> Save
             </button>
             <button
               onClick={() => setShowSavedContracts(true)}
               className="flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex-1"
+              disabled={isLoading}
             >
               <List size={18} className="mr-2" /> View Saved
             </button>
@@ -587,14 +978,14 @@ const ContractGenerator = () => {
                 </div>
 
                 {/* LESSOR */}
-                <section className="mb-6 border-b pb-4">
+                  <section className="mb-6 border-b pb-4">
                   <h2 className="text-lg font-semibold mb-2">LESSOR</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                    <p><strong>Company:</strong> SEA CHARTER IBIZA GESTIÓN Y SERVICIOS</p>
-                    <p><strong>Phone:</strong> 0034 699198065</p>
-                    <p><strong>Address:</strong> C/ Agapito Llobet, 20 Bajos</p>
-                    <p><strong>Email:</strong> info@seacharteribiza.com</p>
-                    <p><strong>NIF:</strong> B16665580</p>
+                    <p><strong>Name:</strong> Alin Stefan Letca</p>
+                    <p><strong>Phone:</strong> +34 642 453 952</p>
+                    <p><strong>Address:</strong> Carrer del suit, n24, San Jordi</p>
+                    <p><strong>Email:</strong> info@justenjoyibiza.com</p>
+                    <p><strong>NIF:</strong> Y1347185C</p>
                   </div>
                 </section>
 
@@ -612,18 +1003,27 @@ const ContractGenerator = () => {
 
                 {/* SKIPPER */}
                 <section className="mb-6 border-b pb-4">
-                  <h2 className="text-lg font-semibold mb-2">SKIPPER</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                    <p><strong>Name:</strong> {contractData.skipper.name}</p>
-                    <p><strong>Phone:</strong> {contractData.skipper.phone}</p>
-                    <p><strong>Address:</strong> {contractData.skipper.address}</p>
-                    <p><strong>Address during the trip:</strong> {contractData.skipper.addressDuringTrip}</p>
-                    <p><strong>DNI / NIF / Passport:</strong> {contractData.skipper.identification}</p>
-                    <div className="col-span-2">
-                      <p><strong>Navigation Title:</strong> {contractData.skipper.navigationTitle}</p>
-                      <p><strong>Number:</strong> {contractData.skipper.navigationNumber}</p>
+                  <h2 className="text-lg font-semibold mb-2">
+                    {withoutSkipper ? "RENTAL WITHOUT SKIPPER" : "SKIPPER"}
+                  </h2>
+                  {withoutSkipper ? (
+                    <div className="text-sm text-red-600 font-medium mb-2">
+                      <p>The lessee will operate the boat directly without a skipper provided by the lessor.</p>
+                      <p className="mt-2">According to clause 26, if the driver consumes alcohol while operating the vessel, they will forfeit their right to any deposit refund and may face additional penalties.</p>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                      <p><strong>Name:</strong> {contractData.skipper.name}</p>
+                      <p><strong>Phone:</strong> {contractData.skipper.phone}</p>
+                      <p><strong>Address:</strong> {contractData.skipper.address}</p>
+                      <p><strong>Address during the trip:</strong> {contractData.skipper.addressDuringTrip}</p>
+                      <p><strong>DNI / NIF / Passport:</strong> {contractData.skipper.identification}</p>
+                      <div className="col-span-2">
+                        <p><strong>Navigation Title:</strong> {contractData.skipper.navigationTitle}</p>
+                        <p><strong>Number:</strong> {contractData.skipper.navigationNumber}</p>
+                      </div>
+                    </div>
+                  )}
                 </section>
 
                 {/* BOAT */}
@@ -664,7 +1064,6 @@ const ContractGenerator = () => {
                   )}
                   <div className="mt-4">
                     <p><strong>Total:</strong> {contractData.price.total && `${parseFloat(contractData.price.total).toFixed(2)} €`}</p>
-                    <p><strong>Deposit:</strong> {contractData.price.deposit && `${parseFloat(contractData.price.deposit).toFixed(2)} €`}</p>
                     <p><strong>Estimated fuel consumption per hour:</strong> {contractData.selectedBoat.fuelConsumption}</p>
                   </div>
                 </section>
@@ -678,41 +1077,23 @@ const ContractGenerator = () => {
                   </p>
                 </div>
 
-                {/* Signatures */}
                 <div className="flex justify-between items-center mt-8">
                   <div className="text-center">
                     <div className="border-b border-black pb-2 mb-2 h-24 w-48 flex items-center justify-center">
-                      <p className="font-bold">SEA CHARTER IBIZA GESTIÓN Y SERVICIOS</p>
+                      <p className="font-bold">Alin Stefan Letca</p>
                     </div>
                     <p><strong>The lessor</strong></p>
                   </div>
                   <div className="text-center">
                     <div className="border-b border-black pb-2 mb-2 h-24 w-48 flex items-center justify-center">
-                      {contractData.lesseeSignature
-                        ? <p className="font-bold">{contractData.lesseeSignature}</p>
-                        : <p className="text-gray-400 italic">Lessee Signature</p>
-                      }
+                      {contractData.lesseeSignature ? (
+                        <img src={contractData.lesseeSignature} alt="Lessee Signature" className="max-h-20" />
+                      ) : (
+                        <p className="text-gray-400 italic">Lessee Signature</p>
+                      )}
                     </div>
                     <p><strong>The lessee</strong></p>
                   </div>
-                </div>
-
-                {/* General Conditions (backside) */}
-                <div className="mt-12 page-break-before text-xs">
-                  <h2 className="text-xl font-bold text-center mb-4">GENERAL RENTAL CONDITIONS</h2>
-                  <ol className="pl-6 list-decimal space-y-1">
-                    <li>Navigation is limited to 12 miles from the coasts of Ibiza and Formentera.</li>
-                    <li>The lessor agrees to rent and the lessee agrees to charter the vessel under these terms.</li>
-                    <li>Misrepresentation by the lessee invalidates the contract and forfeits any payments.</li>
-                    <li>This contract is binding once the lessor has received full payment and deposit.</li>
-                    <li>Payment must be made by bank transfer, card or cash prior to embarkation.</li>
-                    {/* …add any further clauses here… */}
-                    <li>
-                      Any dispute arising from this contract shall be finally settled by arbitration
-                      under the Court of Arbitration of the Balearic Islands of the Official Chamber
-                      of Commerce, whose award is binding.
-                    </li>
-                  </ol>
                 </div>
               </div>
             </>
