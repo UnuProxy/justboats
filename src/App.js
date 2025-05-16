@@ -30,6 +30,7 @@ import FinancialDashboard from './components/FinancialDashboard';
 import PricingManager from './components/PricingManager';
 import ExpenseTracker from './components/ExpenseTracker';
 import CateringExpensesTracker from './components/CateringExpensesTracker';
+import ContractGenerator from './components/ContractGenerator';
 
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -187,6 +188,7 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
+ 
                             
                             {/* San Antonio Tours */}
                             <Route
@@ -199,6 +201,11 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
+                             <Route path="/contract-generator" element={
+                                <ProtectedRoute adminOnly={true}>
+                                    <ContractGenerator />
+                                </ProtectedRoute>
+                                } />
 
                             {/* Financial Routes */}
                             <Route

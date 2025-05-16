@@ -160,6 +160,12 @@ const Sidebar = () => {
                         icon: Ship,
                         path: '/san-antonio-tours',
                         allowed: true
+                    },
+                    {
+                        name: 'Generate Contract',
+                        icon: FileText,
+                        path: '/contract-generator',
+                        allowed: true
                     }
                 ]
             },
@@ -197,7 +203,7 @@ const Sidebar = () => {
                         name: 'Financial Dashboard',
                         icon: BarChart3,
                         path: '/financial-dashboard',
-                        allowed: true
+                        allowed: false
                     }
                 ]
             },
@@ -313,7 +319,7 @@ const Sidebar = () => {
                         name: 'Chatbot Settings',
                         icon: MessageSquare,
                         path: '/chatbot-settings',
-                        allowed: true
+                        allowed: false
                     }
                 ]
             },
