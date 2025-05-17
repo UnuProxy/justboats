@@ -14,122 +14,169 @@ const db = getFirestore();
 const storage = getStorage();
 
 const SignatureCanvas = ({ value, onChange, disabled = false }) => {
-  const canvasRef = useRef(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#000000';
+    const canvasRef = useRef(null);
+    const [isDrawing, setIsDrawing] = useState(false);
+    const lastPositionRef = useRef({ x: 0, y: 0 });
     
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // If there's an existing signature image, draw it
-    if (value && !disabled) {
-      const img = new Image();
-      img.onload = () => {
-        ctx.drawImage(img, 0, 0);
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const ctx = canvas.getContext('2d');
+      
+      // Set canvas size with fixed dimensions for consistent drawing
+      canvas.width = 400;
+      canvas.height = 150;
+      
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#000000';
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // If there's an existing signature image, draw it
+      if (value && !disabled) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        };
+        img.src = value;
+      }
+      
+      // Functions for handling drawing
+      const getPosition = (event) => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        if (event.type.includes('touch')) {
+          const touch = event.touches[0];
+          return {
+            x: (touch.clientX - rect.left) * scaleX,
+            y: (touch.clientY - rect.top) * scaleY
+          };
+        } else {
+          return {
+            x: (event.clientX - rect.left) * scaleX,
+            y: (event.clientY - rect.top) * scaleY
+          };
+        }
       };
-      img.src = value;
-    }
-  }, [value, disabled]);
-  
-  const startDrawing = (e) => {
-    if (disabled) return;
+      
+      const startDrawing = (event) => {
+        if (disabled) return;
+        
+        const position = getPosition(event);
+        lastPositionRef.current = position;
+        
+        ctx.beginPath();
+        ctx.moveTo(position.x, position.y);
+        
+        setIsDrawing(true);
+        console.log('Start drawing:', position);
+      };
+      
+      const draw = (event) => {
+        if (!isDrawing || disabled) return;
+        
+        // Prevent default behavior for touch events
+        if (event.cancelable) {
+          event.preventDefault();
+        }
+        
+        const position = getPosition(event);
+        
+        // Draw line from last position to current position
+        ctx.beginPath();
+        ctx.moveTo(lastPositionRef.current.x, lastPositionRef.current.y);
+        ctx.lineTo(position.x, position.y);
+        ctx.stroke();
+        
+        lastPositionRef.current = position;
+        console.log('Drawing:', position);
+      };
+      
+      const stopDrawing = () => {
+        if (!isDrawing || disabled) return;
+        
+        setIsDrawing(false);
+        
+        try {
+          // Save canvas as image data URL
+          const signature = canvas.toDataURL('image/png');
+          onChange(signature);
+          console.log('Signature saved');
+        } catch (err) {
+          console.error('Error saving signature:', err);
+        }
+      };
+      
+      // Add event listeners
+      canvas.addEventListener('mousedown', startDrawing, { passive: false });
+      canvas.addEventListener('mousemove', draw, { passive: false });
+      window.addEventListener('mouseup', stopDrawing, { passive: false });
+      
+      // Touch event listeners
+      canvas.addEventListener('touchstart', startDrawing, { passive: false });
+      canvas.addEventListener('touchmove', draw, { passive: false });
+      window.addEventListener('touchend', stopDrawing, { passive: false });
+      
+      // Clean up event listeners on component unmount
+      return () => {
+        canvas.removeEventListener('mousedown', startDrawing);
+        canvas.removeEventListener('mousemove', draw);
+        window.removeEventListener('mouseup', stopDrawing);
+        
+        canvas.removeEventListener('touchstart', startDrawing);
+        canvas.removeEventListener('touchmove', draw);
+        window.removeEventListener('touchend', stopDrawing);
+      };
+    }, [value, disabled, isDrawing, onChange]);
     
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
+    const clearSignature = () => {
+      if (disabled) return;
+      
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      onChange(null);
+      console.log('Signature cleared');
+    };
     
-    // Get mouse position relative to canvas
-    let x, y;
-    if (e.type.includes('touch')) {
-      x = e.touches[0].clientX - rect.left;
-      y = e.touches[0].clientY - rect.top;
-    } else {
-      x = e.clientX - rect.left;
-      y = e.clientY - rect.top;
-    }
-    
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    setIsDrawing(true);
-  };
-  
-  const draw = (e) => {
-    if (!isDrawing || disabled) return;
-    
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    
-    // Get mouse position relative to canvas
-    let x, y;
-    if (e.type.includes('touch')) {
-      x = e.touches[0].clientX - rect.left;
-      y = e.touches[0].clientY - rect.top;
-    } else {
-      x = e.clientX - rect.left;
-      y = e.clientY - rect.top;
-    }
-    
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-  
-  const stopDrawing = () => {
-    if (!isDrawing || disabled) return;
-    
-    setIsDrawing(false);
-    
-    // Save canvas as image data URL
-    const canvas = canvasRef.current;
-    const signature = canvas.toDataURL('image/png');
-    onChange(signature);
-  };
-  
-  const clearSignature = () => {
-    if (disabled) return;
-    
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    onChange(null);
-  };
-  
-  return (
-    <div className="w-full">
-      <div className="border-2 border-gray-300 rounded mb-2 bg-gray-50">
-        <canvas
-          ref={canvasRef}
-          width={400}
-          height={150}
-          className={`w-full ${disabled ? 'cursor-not-allowed' : 'cursor-crosshair'}`}
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={stopDrawing}
-          onMouseLeave={stopDrawing}
-          onTouchStart={startDrawing}
-          onTouchMove={draw}
-          onTouchEnd={stopDrawing}
-        />
-      </div>
-      {!disabled && (
-        <div className="flex justify-end">
-          <button
-            onClick={clearSignature}
-            type="button"
-            className="text-red-600 text-sm hover:text-red-800"
-          >
-            Clear Signature
-          </button>
+    return (
+      <div className="w-full">
+        <div className="border-2 border-gray-300 rounded mb-2 bg-gray-50">
+          <canvas
+            ref={canvasRef}
+            className="w-full h-40"
+            style={{ 
+              touchAction: 'none',
+              msTouchAction: 'none',
+              WebkitTouchCallout: 'none',
+              WebkitUserSelect: 'none',
+              KhtmlUserSelect: 'none',
+              MozUserSelect: 'none',
+              msUserSelect: 'none',
+              userSelect: 'none'
+            }}
+          />
         </div>
-      )}
-    </div>
-  );
-};
+        {!disabled && (
+          <div className="flex justify-end">
+            <button
+              onClick={clearSignature}
+              type="button"
+              className="text-red-600 text-sm hover:text-red-800"
+            >
+              Clear Signature
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
 const ContractGenerator = () => {
   const contractRef = useRef(null);
@@ -454,7 +501,7 @@ const ContractGenerator = () => {
   };
 
  
-const generatePDF = async (contractId) => {
+  const generatePDF = async (contractId) => {
     try {
       // Create a proper PDF directly rather than converting from HTML
       const pdf = new jsPDF({
@@ -569,7 +616,7 @@ const generatePDF = async (contractId) => {
       pdf.text(`Rental Price: ${parseFloat(contractData.price.rental).toFixed(2)} €`, 20, priceY);
       priceY += 6;
       
-      // FIX 1: Add the "Other services" properly
+      // Add the "Other services" properly
       if (contractData.price.otherServices.length > 0) {
         pdf.text("Other services:", 20, priceY);
         priceY += 6;
@@ -583,7 +630,9 @@ const generatePDF = async (contractId) => {
       
       pdf.text(`Total: ${contractData.price.total} €`, 20, priceY);
       priceY += 6;
-     
+      
+      pdf.text(`Estimated fuel consumption per hour: ${contractData.selectedBoat.fuelConsumption}`, 20, priceY);
+      priceY += 6;
       
       // Acceptance text
       pdf.setFontSize(10);
@@ -596,64 +645,62 @@ const generatePDF = async (contractId) => {
       // Signatures
       const signatureY = acceptanceY + 30;
       
-      // Lessor signature
+      // Lessor signature - Create a consistent text-based signature
       pdf.setFont("helvetica", "normal");
       pdf.text("Alin Stefan Letca", 40, signatureY);
       pdf.line(20, signatureY + 5, 80, signatureY + 5);
       pdf.setFont("helvetica", "bold");
       pdf.text("The lessor", 40, signatureY + 12);
       
-      // FIX 2: Improved Lessee signature handling
+      // Lessee signature - Improved handling
       pdf.setFont("helvetica", "normal");
+      
       if (contractData.lesseeSignature) {
         try {
-          // Convert signature to image and add to PDF
+          // Create a new image to handle the signature
           const img = new Image();
           img.src = contractData.lesseeSignature;
           
-          // We'll handle this asynchronously
+          // Wait for the image to load before continuing
           await new Promise((resolve) => {
             img.onload = () => {
               try {
-                // Calculate aspect ratio with safety check for zero height
+                // Calculate aspect ratio and position
                 const aspectRatio = img.width / (img.height || 1);
                 const targetWidth = 60; // Width in mm
                 const targetHeight = targetWidth / aspectRatio;
                 
-                // Add image in proper position
+                // Add signature image to PDF at the correct position
                 pdf.addImage(
                   contractData.lesseeSignature, 
                   'PNG', 
-                  pdfWidth - 80, // X position
-                  signatureY - targetHeight + 5, // Y position 
+                  pdfWidth - 80, // X position from right side
+                  signatureY - 20, // Fixed Y position, higher up
                   targetWidth, 
-                  targetHeight
+                  Math.min(targetHeight, 25) // Limit height to avoid overflow
                 );
-                console.log("Signature added successfully");
+                console.log("Lessee signature added successfully");
                 resolve();
               } catch (err) {
                 console.error("Error adding signature to PDF:", err);
-                resolve();
+                resolve(); // Continue even if there's an error
               }
             };
             
-            // Add error handler
             img.onerror = () => {
               console.error("Failed to load signature image");
-              resolve();
+              resolve(); // Continue even if there's an error
             };
             
-            // Set a timeout in case the image never loads
-            setTimeout(() => {
-              console.log("Signature load timeout - continuing anyway");
-              resolve();
-            }, 3000);
+            // Set a shorter timeout in case the image never loads
+            setTimeout(resolve, 2000);
           });
         } catch (err) {
           console.error("Error in signature processing:", err);
         }
       }
       
+      // Add the lessee signature line and label
       pdf.line(pdfWidth - 80, signatureY + 5, pdfWidth - 20, signatureY + 5);
       pdf.setFont("helvetica", "bold");
       pdf.text("The lessee", pdfWidth - 60, signatureY + 12);
