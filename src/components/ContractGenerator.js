@@ -453,7 +453,8 @@ const ContractGenerator = () => {
     }
   };
 
-  const generatePDF = async (contractId) => {
+ 
+const generatePDF = async (contractId) => {
     try {
       // Create a proper PDF directly rather than converting from HTML
       const pdf = new jsPDF({
@@ -568,16 +569,21 @@ const ContractGenerator = () => {
       pdf.text(`Rental Price: ${parseFloat(contractData.price.rental).toFixed(2)} €`, 20, priceY);
       priceY += 6;
       
+      // FIX 1: Add the "Other services" properly
       if (contractData.price.otherServices.length > 0) {
         pdf.text("Other services:", 20, priceY);
         priceY += 6;
         
-        
+        // Add each service with its price
+        contractData.price.otherServices.forEach((service) => {
+          pdf.text(`${service.name}: ${parseFloat(service.price).toFixed(2)} €`, 30, priceY);
+          priceY += 6;
+        });
       }
       
       pdf.text(`Total: ${contractData.price.total} €`, 20, priceY);
       priceY += 6;
-      pdf.text(`Estimated fuel consumption per hour: ${contractData.selectedBoat.fuelConsumption}`, 20, priceY);
+     
       
       // Acceptance text
       pdf.setFontSize(10);
@@ -597,35 +603,55 @@ const ContractGenerator = () => {
       pdf.setFont("helvetica", "bold");
       pdf.text("The lessor", 40, signatureY + 12);
       
-      // Lessee signature
+      // FIX 2: Improved Lessee signature handling
       pdf.setFont("helvetica", "normal");
       if (contractData.lesseeSignature) {
-        // Convert signature to image and add to PDF
-        const img = new Image();
-        img.src = contractData.lesseeSignature;
-        
-        // We'll handle this asynchronously
-        await new Promise((resolve) => {
-          img.onload = () => {
-            // Calculate aspect ratio
-            const aspectRatio = img.width / img.height;
-            const targetWidth = 60; // Width in mm
-            const targetHeight = targetWidth / aspectRatio;
+        try {
+          // Convert signature to image and add to PDF
+          const img = new Image();
+          img.src = contractData.lesseeSignature;
+          
+          // We'll handle this asynchronously
+          await new Promise((resolve) => {
+            img.onload = () => {
+              try {
+                // Calculate aspect ratio with safety check for zero height
+                const aspectRatio = img.width / (img.height || 1);
+                const targetWidth = 60; // Width in mm
+                const targetHeight = targetWidth / aspectRatio;
+                
+                // Add image in proper position
+                pdf.addImage(
+                  contractData.lesseeSignature, 
+                  'PNG', 
+                  pdfWidth - 80, // X position
+                  signatureY - targetHeight + 5, // Y position 
+                  targetWidth, 
+                  targetHeight
+                );
+                console.log("Signature added successfully");
+                resolve();
+              } catch (err) {
+                console.error("Error adding signature to PDF:", err);
+                resolve();
+              }
+            };
             
-            // Add image in proper position
-            pdf.addImage(
-              contractData.lesseeSignature, 
-              'PNG', 
-              pdfWidth - 80, // X position
-              signatureY - targetHeight + 5, // Y position 
-              targetWidth, 
-              targetHeight
-            );
-            resolve();
-          };
-          // If there's an error, just continue
-          img.onerror = () => resolve();
-        });
+            // Add error handler
+            img.onerror = () => {
+              console.error("Failed to load signature image");
+              resolve();
+            };
+            
+            // Set a timeout in case the image never loads
+            setTimeout(() => {
+              console.log("Signature load timeout - continuing anyway");
+              resolve();
+            }, 3000);
+          });
+        } catch (err) {
+          console.error("Error in signature processing:", err);
+        }
       }
       
       pdf.line(pdfWidth - 80, signatureY + 5, pdfWidth - 20, signatureY + 5);
