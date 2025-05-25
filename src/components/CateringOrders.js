@@ -6,13 +6,15 @@ import {
   orderBy,
   onSnapshot,
   updateDoc,
-  deleteDoc,
+ 
   doc,
   limit,
   startAfter,
   getDocs,
+  where,
+  documentId,
 } from 'firebase/firestore';
-import { CheckCircle, XCircle, Search, X, Printer, Plus, Trash2 } from 'lucide-react';
+import { CheckCircle, XCircle, Search, X, Printer, Plus } from 'lucide-react';
 import ManualOrderEntry from './ManualEntryOrder';
 
 const ORDERS_PER_PAGE = 10;
@@ -26,6 +28,257 @@ const CateringOrders = () => {
   const [hasMore, setHasMore] = useState(true);
   const [activeTab, setActiveTab] = useState('today-tomorrow');
   const [showManualOrderForm, setShowManualOrderForm] = useState(false);
+
+  // Enhanced data fetching functions
+  const fetchRelatedData = async (orders) => {
+    if (!orders || orders.length === 0) return orders;
+
+    try {
+      // Extract all unique IDs for batch fetching
+      const productIds = new Set();
+      const userIds = new Set();
+      const sessionIds = [];
+      
+      orders.forEach(order => {
+        // Extract product IDs from items
+        if (order.items && Array.isArray(order.items)) {
+          order.items.forEach(item => {
+            if (item.id) productIds.add(item.id);
+          });
+        }
+        
+        // Extract session IDs for payment data
+        if (order.sessionId) {
+          sessionIds.push(order.sessionId);
+        }
+        
+        // Extract user-related IDs if available
+        if (order.userId) {
+          userIds.add(order.userId);
+        }
+      });
+
+      // Fetch products data
+      const productsData = await fetchProductsData([...productIds]);
+      
+      // Fetch payments data
+      const paymentsData = await fetchPaymentsData(sessionIds);
+      
+      // Fetch users data
+      const usersData = await fetchUsersData([...userIds]);
+      
+      // Fetch places data (if there are location references)
+      const placesData = await fetchPlacesData(orders);
+      
+      // Fetch pricing items
+      const pricingItemsData = await fetchPricingItemsData([...productIds]);
+
+      // Combine all data with orders
+      const enrichedOrders = orders.map(order => ({
+        ...order,
+        enrichedItems: order.items ? order.items.map(item => ({
+          ...item,
+          productDetails: productsData[item.id] || null,
+          pricingDetails: pricingItemsData[item.id] || null,
+        })) : [],
+        paymentDetails: paymentsData[order.sessionId] || null,
+        userDetails: usersData[order.userId] || null,
+        locationDetails: placesData[order.boatLocation] || null,
+      }));
+
+      return enrichedOrders;
+    } catch (error) {
+      console.error('Error fetching related data:', error);
+      return orders; // Return original orders if enrichment fails
+    }
+  };
+
+  const fetchProductsData = async (productIds) => {
+    if (productIds.length === 0) return {};
+    
+    try {
+      // Firestore 'in' queries are limited to 10 items, so we need to batch
+      const batches = [];
+      for (let i = 0; i < productIds.length; i += 10) {
+        const batch = productIds.slice(i, i + 10);
+        batches.push(batch);
+      }
+      
+      const allProducts = {};
+      
+      for (const batch of batches) {
+        const productsQuery = query(
+          collection(db, 'products'),
+          where(documentId(), 'in', batch)
+        );
+        
+        const snapshot = await getDocs(productsQuery);
+        snapshot.docs.forEach(doc => {
+          allProducts[doc.id] = { id: doc.id, ...doc.data() };
+        });
+      }
+      
+      return allProducts;
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      return {};
+    }
+  };
+
+  const fetchPaymentsData = async (sessionIds) => {
+    if (sessionIds.length === 0) return {};
+    
+    try {
+      const paymentsData = {};
+      
+      // Batch fetch payments by session ID
+      const batches = [];
+      for (let i = 0; i < sessionIds.length; i += 10) {
+        const batch = sessionIds.slice(i, i + 10);
+        batches.push(batch);
+      }
+      
+      for (const batch of batches) {
+        const paymentsQuery = query(
+          collection(db, 'payments'),
+          where('sessionId', 'in', batch)
+        );
+        
+        const snapshot = await getDocs(paymentsQuery);
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          paymentsData[data.sessionId] = { id: doc.id, ...data };
+        });
+      }
+      
+      return paymentsData;
+    } catch (error) {
+      console.error('Error fetching payments:', error);
+      return {};
+    }
+  };
+
+  const fetchUsersData = async (userIds) => {
+    if (userIds.length === 0) return {};
+    
+    try {
+      const usersData = {};
+      
+      const batches = [];
+      for (let i = 0; i < userIds.length; i += 10) {
+        const batch = userIds.slice(i, i + 10);
+        batches.push(batch);
+      }
+      
+      for (const batch of batches) {
+        const usersQuery = query(
+          collection(db, 'users'),
+          where(documentId(), 'in', batch)
+        );
+        
+        const snapshot = await getDocs(usersQuery);
+        snapshot.docs.forEach(doc => {
+          usersData[doc.id] = { id: doc.id, ...doc.data() };
+        });
+      }
+      
+      return usersData;
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      return {};
+    }
+  };
+
+  const fetchPlacesData = async (orders) => {
+    try {
+      const locationNames = new Set();
+      orders.forEach(order => {
+        if (order.boatLocation && order.boatLocation !== 'Not specified') {
+          locationNames.add(order.boatLocation);
+        }
+      });
+      
+      if (locationNames.size === 0) return {};
+      
+      const placesData = {};
+      
+      // Fetch places by name or other identifier
+      const placesQuery = query(collection(db, 'places'));
+      const snapshot = await getDocs(placesQuery);
+      
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (locationNames.has(data.name) || locationNames.has(doc.id)) {
+          placesData[data.name || doc.id] = { id: doc.id, ...data };
+        }
+      });
+      
+      return placesData;
+    } catch (error) {
+      console.error('Error fetching places:', error);
+      return {};
+    }
+  };
+
+  const fetchPricingItemsData = async (productIds) => {
+    if (productIds.length === 0) return {};
+    
+    try {
+      const pricingData = {};
+      
+      const batches = [];
+      for (let i = 0; i < productIds.length; i += 10) {
+        const batch = productIds.slice(i, i + 10);
+        batches.push(batch);
+      }
+      
+      for (const batch of batches) {
+        const pricingQuery = query(
+          collection(db, 'pricingItems'),
+          where('productId', 'in', batch)
+        );
+        
+        const snapshot = await getDocs(pricingQuery);
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          pricingData[data.productId] = { id: doc.id, ...data };
+        });
+      }
+      
+      return pricingData;
+    } catch (error) {
+      console.error('Error fetching pricing items:', error);
+      return {};
+    }
+  };
+
+  // Fetch reminders for orders
+  const fetchReminders = async (orderIds) => {
+    if (orderIds.length === 0) return {};
+    
+    try {
+      const remindersData = {};
+      
+      const remindersQuery = query(
+        collection(db, 'reminders'),
+        where('orderId', 'in', orderIds)
+      );
+      
+      const snapshot = await getDocs(remindersQuery);
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (!remindersData[data.orderId]) {
+          remindersData[data.orderId] = [];
+        }
+        remindersData[data.orderId].push({ id: doc.id, ...data });
+      });
+      
+      return remindersData;
+    } catch (error) {
+      console.error('Error fetching reminders:', error);
+      return {};
+    }
+  };
 
   useEffect(() => {
     loadInitialOrders();
@@ -41,12 +294,32 @@ const CateringOrders = () => {
 
     const unsubscribe = onSnapshot(
       ordersQuery,
-      (snapshot) => {
+      async (snapshot) => {
         const ordersData = snapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
-        setOrders(ordersData);
+        
+        // Debug: Log all available fields in orders
+        if (ordersData.length > 0) {
+          console.log('Available order fields:', Object.keys(ordersData[0]));
+          console.log('Sample order data:', ordersData[0]);
+        }
+        
+        // Fetch all related data
+        const enrichedOrders = await fetchRelatedData(ordersData);
+        
+        // Fetch reminders
+        const orderIds = ordersData.map(order => order.id);
+        const reminders = await fetchReminders(orderIds);
+        
+        // Add reminders to orders
+        const ordersWithReminders = enrichedOrders.map(order => ({
+          ...order,
+          reminders: reminders[order.id] || []
+        }));
+        
+        setOrders(ordersWithReminders);
         setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
         setHasMore(snapshot.docs.length === ORDERS_PER_PAGE);
         setLoading(false);
@@ -71,19 +344,32 @@ const CateringOrders = () => {
     );
 
     const snapshot = await getDocs(ordersQuery);
-    const newOrders = snapshot.docs.map((doc) => ({
+    const newOrdersData = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
 
-    setOrders([...orders, ...newOrders]);
+    // Enrich new orders with related data
+    const enrichedNewOrders = await fetchRelatedData(newOrdersData);
+    
+    // Fetch reminders for new orders
+    const orderIds = newOrdersData.map(order => order.id);
+    const reminders = await fetchReminders(orderIds);
+    
+    const newOrdersWithReminders = enrichedNewOrders.map(order => ({
+      ...order,
+      reminders: reminders[order.id] || []
+    }));
+
+    setOrders([...orders, ...newOrdersWithReminders]);
     setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
     setHasMore(snapshot.docs.length === ORDERS_PER_PAGE);
   };
 
-  const handleManualOrderAdded = (newOrder) => {
-    // Refresh orders list or add the new order to the top
-    setOrders([newOrder, ...orders]);
+  const handleManualOrderAdded = async (newOrder) => {
+    // Enrich the new order with related data
+    const enrichedOrder = await fetchRelatedData([newOrder]);
+    setOrders([enrichedOrder[0], ...orders]);
   };
 
   const updateOrderStatus = async (orderId, newStatus) => {
@@ -97,25 +383,13 @@ const CateringOrders = () => {
     }
   };
   
-  const deleteOrder = async (orderId) => {
-    if (window.confirm('Are you sure you want to delete this order? This action cannot be undone.')) {
-      try {
-        await deleteDoc(doc(db, 'orders', orderId));
-        // Remove the order from local state
-        setOrders(orders.filter(order => order.id !== orderId));
-      } catch (error) {
-        console.error('Error deleting order:', error);
-        alert('Failed to delete order. Please try again.');
-      }
-    }
-  };
+  
 
   const getOrderStatus = (order) => order.status || order.paymentStatus || 'unknown';
 
   const filterOrders = () => {
     let filtered = orders;
 
-    // Search filter
     if (searchQuery.trim()) {
       filtered = filtered.filter(order => 
         (order.orderId && order.orderId.toLowerCase().includes(searchQuery.toLowerCase())) ||
@@ -125,14 +399,12 @@ const CateringOrders = () => {
       );
     }
 
-    // Status filter
     if (selectedStatus !== 'all') {
       filtered = filtered.filter(
         order => getOrderStatus(order).toLowerCase() === selectedStatus.toLowerCase()
       );
     }
 
-    // Date filtering based on active tab
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -170,7 +442,7 @@ const CateringOrders = () => {
     return filtered;
   };
 
-  // Print Order Component
+  // Enhanced Print Order Component with full details
   const PrintOrder = ({ order }) => {
     return (
       <div className="p-8 print-only">
@@ -191,12 +463,89 @@ const CateringOrders = () => {
             <div><strong>Boat:</strong> {order.boatName}</div>
             <div><strong>Company:</strong> {order.rentalCompany}</div>
             <div><strong>Phone:</strong> {order.phoneNumber}</div>
-            <div><strong>Email:</strong> {order.customerEmail}</div>
+            <div className="col-span-2"><strong>Email:</strong> {order.customerEmail}</div>
             <div><strong>Order Date:</strong> {order.orderDate}</div>
+            <div><strong>Payment:</strong> {order.paymentMethod}</div>
           </div>
         </div>
 
-        {order.items && order.items.length > 0 && (
+        {/* Delivery Information */}
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold mb-2">Delivery Information</h2>
+          <div className="grid grid-cols-2 gap-2">
+            <div><strong>Marina:</strong> {order.marina || order.boatLocation || 'Not specified'}</div>
+            {order.berthNumber && (
+              <div><strong>Berth:</strong> {order.berthNumber}{order.berthName ? ` (${order.berthName})` : ''}</div>
+            )}
+            {order.deliveryTime && (
+              <div><strong>Delivery Time:</strong> {order.deliveryTime}</div>
+            )}
+            {order.deliveryDate && (
+              <div><strong>Delivery Date:</strong> {order.deliveryDate}</div>
+            )}
+            {order.requestedDeliveryTime && order.requestedDeliveryTime !== order.deliveryTime && (
+              <div><strong>Requested Time:</strong> {order.requestedDeliveryTime}</div>
+            )}
+            {order.contactPerson && order.contactPerson !== order.fullName && (
+              <div><strong>Contact Person:</strong> {order.contactPerson}</div>
+            )}
+            {order.emergencyContact && (
+              <div><strong>Emergency Contact:</strong> {order.emergencyContact}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Instructions & Notes */}
+        {(order.specialNotes || order.deliveryInstructions || order.notes || order.allergyInfo || order.dietaryRequirements) && (
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold mb-2">Instructions & Notes</h2>
+            <div className="bg-yellow-50 p-3 rounded">
+              {order.allergyInfo && (
+                <div className="mb-2 p-2 bg-red-100 rounded">
+                  <strong className="text-red-800">⚠️ ALLERGY ALERT:</strong>
+                  <span className="ml-2 text-red-700 font-medium">{order.allergyInfo}</span>
+                </div>
+              )}
+              {order.specialNotes && (
+                <div className="mb-2">
+                  <strong>Notes:</strong> {order.specialNotes}
+                </div>
+              )}
+              {order.deliveryInstructions && (
+                <div className="mb-2">
+                  <strong>Delivery Instructions:</strong> {order.deliveryInstructions}
+                </div>
+              )}
+              {order.notes && order.notes !== order.specialNotes && (
+                <div className="mb-2">
+                  <strong>Additional Notes:</strong> {order.notes}
+                </div>
+              )}
+              {order.dietaryRequirements && (
+                <div>
+                  <strong>Dietary Requirements:</strong> {order.dietaryRequirements}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Payment Details */}
+        {order.paymentDetails && (
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold mb-2">Payment Details</h2>
+            <div className="grid grid-cols-2 gap-2">
+              <div><strong>Method:</strong> {order.paymentMethod}</div>
+              <div><strong>Status:</strong> {order.paymentStatus}</div>
+              <div><strong>Currency:</strong> {order.currency?.toUpperCase()}</div>
+              {order.paymentDetails.transactionId && (
+                <div><strong>Transaction:</strong> {order.paymentDetails.transactionId}</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {order.enrichedItems && order.enrichedItems.length > 0 && (
           <div className="mb-6">
             <h2 className="text-xl font-semibold mb-2">Order Items</h2>
             <table className="w-full">
@@ -209,9 +558,18 @@ const CateringOrders = () => {
                 </tr>
               </thead>
               <tbody>
-                {order.items.map((item, index) => (
+                {order.enrichedItems.map((item, index) => (
                   <tr key={index} className="border-b">
-                    <td className="py-2">{item.name}</td>
+                    <td className="py-2">
+                      <div>
+                        <div className="font-medium">{item.name}</div>
+                        {item.productDetails && (
+                          <div className="text-sm text-gray-600">
+                            {item.productDetails.description}
+                          </div>
+                        )}
+                      </div>
+                    </td>
                     <td className="text-center py-2">{item.quantity}</td>
                     <td className="text-right py-2">€{item.price.toFixed(2)}</td>
                     <td className="text-right py-2">€{(item.price * item.quantity).toFixed(2)}</td>
@@ -223,6 +581,26 @@ const CateringOrders = () => {
                 </tr>
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Reminders */}
+        {order.reminders && order.reminders.length > 0 && (
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold mb-2">Reminders</h2>
+            <div className="space-y-2">
+              {order.reminders.map((reminder, index) => (
+                <div key={index} className="bg-yellow-50 p-2 rounded">
+                  <div className="font-medium">{reminder.title}</div>
+                  <div className="text-sm text-gray-600">{reminder.message}</div>
+                  {reminder.scheduledFor && (
+                    <div className="text-xs text-gray-500">
+                      Scheduled: {new Date(reminder.scheduledFor).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -313,18 +691,57 @@ const CateringOrders = () => {
             </span>
           </div>
 
-          {/* Products Section */}
-          {order.items && order.items.length > 0 && (
+          {/* Delivery Summary - Only show if there are meaningful delivery details */}
+          {(order.berthNumber || order.deliveryTime || order.requestedDeliveryTime || order.contactPerson || order.allergyInfo) && (
+            <div className="mb-3 p-3 bg-blue-50 rounded-lg">
+              <h4 className="font-medium text-blue-800 mb-2">📍 Delivery Details</h4>
+              <div className="text-sm text-blue-700 space-y-1">
+                {(order.boatLocation || order.marina) && (
+                  <div>🏊 <strong>Marina:</strong> {order.marina || order.boatLocation}</div>
+                )}
+                {order.berthNumber && (
+                  <div>📍 <strong>Berth:</strong> {order.berthNumber}{order.berthName ? ` (${order.berthName})` : ''}</div>
+                )}
+                {order.deliveryTime && (
+                  <div>🕐 <strong>Delivery Time:</strong> {order.deliveryTime}</div>
+                )}
+                {order.requestedDeliveryTime && order.requestedDeliveryTime !== order.deliveryTime && (
+                  <div>⏰ <strong>Requested Time:</strong> {order.requestedDeliveryTime}</div>
+                )}
+                {order.contactPerson && order.contactPerson !== order.fullName && (
+                  <div>👤 <strong>Contact Person:</strong> {order.contactPerson}</div>
+                )}
+                {order.allergyInfo && (
+                  <div>⚠️ <strong className="text-red-700">Allergies:</strong> <span className="text-red-700 font-medium">{order.allergyInfo}</span></div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Enhanced Products Section with enriched data */}
+          {order.enrichedItems && order.enrichedItems.length > 0 && (
             <div className="mt-3 border-t pt-3">
               <h4 className="font-medium mb-2">Products Ordered:</h4>
               <div className="space-y-2">
-                {order.items.map((item, index) => (
-                  <div key={index} className="flex justify-between items-center bg-gray-50 p-2 rounded">
+                {order.enrichedItems.map((item, index) => (
+                  <div key={index} className="flex justify-between items-start bg-gray-50 p-3 rounded">
                     <div className="flex-1 min-w-0 mr-2">
-                      <span className="font-medium block truncate">{item.name}</span>
-                      <span className="text-gray-500 text-sm">x{item.quantity}</span>
+                      <span className="font-medium block">{item.name}</span>
+                      {item.productDetails && (
+                        <span className="text-gray-500 text-sm block mt-1">
+                          {item.productDetails.description}
+                        </span>
+                      )}
+                      <div className="flex items-center gap-4 mt-1">
+                        <span className="text-gray-500 text-sm">x{item.quantity}</span>
+                        {item.productDetails && item.productDetails.category && (
+                          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                            {item.productDetails.category}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-gray-700 whitespace-nowrap">
+                    <span className="text-gray-700 whitespace-nowrap font-medium">
                       €{(item.price * item.quantity).toFixed(2)}
                     </span>
                   </div>
@@ -337,18 +754,60 @@ const CateringOrders = () => {
             </div>
           )}
 
+          {/* Special Notes & Instructions - Only show unique information */}
+          {(order.specialNotes || order.deliveryInstructions || order.notes || order.dietaryRequirements) && (
+            <div className="mt-3 border-t pt-3">
+              <h4 className="font-medium mb-2">📝 Special Instructions:</h4>
+              <div className="bg-yellow-50 p-3 rounded">
+                {order.specialNotes && (
+                  <div className="mb-2">
+                    <span className="font-medium text-yellow-800">Notes:</span>
+                    <span className="ml-2 text-yellow-700">{order.specialNotes}</span>
+                  </div>
+                )}
+                {order.deliveryInstructions && (
+                  <div className="mb-2">
+                    <span className="font-medium text-yellow-800">Delivery Instructions:</span>
+                    <span className="ml-2 text-yellow-700">{order.deliveryInstructions}</span>
+                  </div>
+                )}
+                {order.notes && order.notes !== order.specialNotes && (
+                  <div className="mb-2">
+                    <span className="font-medium text-yellow-800">Additional Notes:</span>
+                    <span className="ml-2 text-yellow-700">{order.notes}</span>
+                  </div>
+                )}
+                {order.dietaryRequirements && (
+                  <div>
+                    <span className="font-medium text-green-800">🥗 Dietary Requirements:</span>
+                    <span className="ml-2 text-green-700">{order.dietaryRequirements}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Reminders Section */}
+          {order.reminders && order.reminders.length > 0 && (
+            <div className="mt-3 border-t pt-3">
+              <h4 className="font-medium mb-2">Reminders:</h4>
+              <div className="space-y-1">
+                {order.reminders.map((reminder, index) => (
+                  <div key={index} className="bg-yellow-50 p-2 rounded text-sm">
+                    <div className="font-medium text-yellow-800">{reminder.title}</div>
+                    {reminder.message && (
+                      <div className="text-yellow-700">{reminder.message}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Action Buttons */}
           <div className="flex flex-wrap justify-end gap-2 mt-4">
-            {/* Delete Button */}
-            <button
-              onClick={() => deleteOrder(order.id)}
-              className="flex items-center px-3 py-1.5 bg-red-700 text-white rounded hover:bg-red-800 text-sm"
-            >
-              <Trash2 className="w-4 h-4 mr-1" />
-              Delete
-            </button>
+          
             
-            {/* Print Button */}
             <button
               onClick={() => handlePrint(order)}
               className="flex items-center px-3 py-1.5 bg-gray-500 text-white rounded hover:bg-gray-600 text-sm"
@@ -357,7 +816,6 @@ const CateringOrders = () => {
               Print
             </button>
 
-            {/* Status Update Buttons */}
             {getOrderStatus(order).toLowerCase() !== 'preparing' &&
              getOrderStatus(order).toLowerCase() !== 'delivered' &&
              getOrderStatus(order).toLowerCase() !== 'cancelled' && (
@@ -422,7 +880,6 @@ const CateringOrders = () => {
           </div>
         </div>
         
-        {/* Hidden print template */}
         <div className="hidden">
           <div ref={printRef}>
             <PrintOrder order={order} />
@@ -444,7 +901,6 @@ const CateringOrders = () => {
 
   return (
     <div className="container mx-auto px-4 py-6">
-      {/* Modal for manual order entry */}
       {showManualOrderForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto">
           <div className="max-w-4xl w-full mx-auto">
@@ -456,13 +912,11 @@ const CateringOrders = () => {
         </div>
       )}
       
-      {/* Header section with search and filters */}
       <div className="space-y-4 mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <h1 className="text-2xl font-bold">Orders Dashboard</h1>
           
           <div className="flex flex-col sm:flex-row gap-2">
-            {/* Add Manual Order Button */}
             <button
               onClick={() => setShowManualOrderForm(true)}
               className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
@@ -471,11 +925,10 @@ const CateringOrders = () => {
               Add Manual Order
             </button>
             
-            {/* Search bar */}
             <div className="w-full sm:w-auto relative">
               <input
                 type="text"
-                placeholder="Search order #, boat, client..."
+                placeholder="Search order #, boat, client, berth, notes..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full sm:w-64 border rounded-lg px-4 py-2 pl-10 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -494,7 +947,6 @@ const CateringOrders = () => {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-4">
-          {/* Status Filter */}
           <select
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
@@ -509,7 +961,6 @@ const CateringOrders = () => {
             <option value="cancelled">Cancelled</option>
           </select>
 
-          {/* Date filter tabs */}
           <div className="flex border rounded-lg overflow-hidden">
             {['today-tomorrow', 'future', 'past'].map((tab) => (
               <button
@@ -532,7 +983,6 @@ const CateringOrders = () => {
         </div>
       </div>
 
-      {/* Orders List */}
       {filteredOrders.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-gray-500">No orders found</p>
