@@ -22,22 +22,27 @@ const ExpenseTracker = () => {
   // Ref for form scroll
   const formRef = useRef(null);
 
-  // State for entries
+  // State for entries - updated structure
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [showPastEntries, setShowPastEntries] = useState(false);
+  const [showFutureEntries, setShowFutureEntries] = useState(false); // New state for distant future
   const [pastEntries, setPastEntries] = useState([]);
-  const [futureEntries, setFutureEntries] = useState([]);
+  const [currentEntries, setCurrentEntries] = useState([]); // Today + Tomorrow
+  const [futureEntries, setFutureEntries] = useState([]); // Day after tomorrow onwards
   
   // Mobile menu state
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   // Track expanded state for mobile cards
   const [expandedEntryId, setExpandedEntryId] = useState(null);
   
-  // New state for bookings
+  // New state for bookings - split into categories like entries
   const [pendingBookings, setPendingBookings] = useState([]);
+  const [pastPendingBookings, setPastPendingBookings] = useState([]);
+  const [currentPendingBookings, setCurrentPendingBookings] = useState([]);
+  const [futurePendingBookings, setFuturePendingBookings] = useState([]);
   const [showPendingBookings, setShowPendingBookings] = useState(true);
   
   // Search state
@@ -169,13 +174,19 @@ const ExpenseTracker = () => {
         
         const fetchedEntries = [];
         const past = [];
-        const future = [];
+        const current = []; // Today + Tomorrow
+        const future = []; // Day after tomorrow onwards
         const expenseBookingIds = new Set(); // To track which bookings already have expense entries
         
         // Get today's date at midnight for comparison
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const todayTimestamp = today.getTime();
+        
+        // Get day after tomorrow's date
+        const dayAfterTomorrow = new Date(today);
+        dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+        const dayAfterTomorrowTimestamp = dayAfterTomorrow.getTime();
         
         expensesSnapshot.forEach((doc) => {
           const data = doc.data();
@@ -204,20 +215,25 @@ const ExpenseTracker = () => {
             expenseBookingIds.add(data.bookingId);
           }
           
-          // Sort into past and future based on date
+          // Sort into past, current (today+tomorrow), and future based on date
           if (dataDate) {
             const entryDate = new Date(dataDate);
             entryDate.setHours(0, 0, 0, 0);
+            const entryTimestamp = entryDate.getTime();
             
-            // Change to include today in the "current" view rather than "past"
-            if (entryDate.getTime() >= todayTimestamp) {
-              future.push(entry);
-            } else {
+            if (entryTimestamp < todayTimestamp) {
+              // Past entries (before today)
               past.push(entry);
+            } else if (entryTimestamp >= todayTimestamp && entryTimestamp < dayAfterTomorrowTimestamp) {
+              // Current entries (today + tomorrow)
+              current.push(entry);
+            } else {
+              // Future entries (day after tomorrow onwards)
+              future.push(entry);
             }
           } else {
-            // If no date, consider it as future
-            future.push(entry);
+            // If no date, consider it as current
+            current.push(entry);
           }
         });
         
@@ -226,7 +242,10 @@ const ExpenseTracker = () => {
         const bookingsQuery = query(bookingsRef, orderBy('bookingDate', 'desc'));
         const bookingsSnapshot = await getDocs(bookingsQuery);
         
-        const pendingBookingsList = [];
+        const allPendingBookings = [];
+        const pastPendingBookings = [];
+        const currentPendingBookings = [];
+        const futurePendingBookings = [];
         
         bookingsSnapshot.forEach((doc) => {
           const bookingData = doc.data();
@@ -240,7 +259,28 @@ const ExpenseTracker = () => {
           
           // If this booking doesn't have an expense entry yet and is active, add to pending
           if (!expenseBookingIds.has(doc.id) && bookingData.status === 'active') {
-            pendingBookingsList.push(booking);
+            allPendingBookings.push(booking);
+            
+            // Categorize pending bookings by date like expense entries
+            if (booking.bookingDate) {
+              const bookingDate = new Date(booking.bookingDate);
+              bookingDate.setHours(0, 0, 0, 0);
+              const bookingTimestamp = bookingDate.getTime();
+              
+              if (bookingTimestamp < todayTimestamp) {
+                // Past pending bookings
+                pastPendingBookings.push(booking);
+              } else if (bookingTimestamp >= todayTimestamp && bookingTimestamp < dayAfterTomorrowTimestamp) {
+                // Current pending bookings (today + tomorrow)
+                currentPendingBookings.push(booking);
+              } else {
+                // Future pending bookings (day after tomorrow onwards)
+                futurePendingBookings.push(booking);
+              }
+            } else {
+              // If no date, consider it as current
+              currentPendingBookings.push(booking);
+            }
           }
         });
         
@@ -257,29 +297,39 @@ const ExpenseTracker = () => {
         };
         
         past.sort(sortByDateAscending);
+        current.sort(sortByDateAscending);
         future.sort(sortByDateAscending);
         
         // Sort pending bookings by date (closest first)
-        pendingBookingsList.sort((a, b) => {
+        const sortBookingsByDate = (a, b) => {
           const aDate = a.bookingDate ? new Date(a.bookingDate).getTime() : 0;
           const bDate = b.bookingDate ? new Date(b.bookingDate).getTime() : 0;
           return aDate - bDate;
-        });
+        };
+        
+        allPendingBookings.sort(sortBookingsByDate);
+        pastPendingBookings.sort(sortBookingsByDate);
+        currentPendingBookings.sort(sortBookingsByDate);
+        futurePendingBookings.sort(sortBookingsByDate);
         
         setEntries(fetchedEntries);
         setPastEntries(past);
+        setCurrentEntries(current);
         setFutureEntries(future);
-        setPendingBookings(pendingBookingsList);
+        setPendingBookings(allPendingBookings);
+        setPastPendingBookings(pastPendingBookings);
+        setCurrentPendingBookings(currentPendingBookings);
+        setFuturePendingBookings(futurePendingBookings);
         
-        // Show only future entries and pending bookings by default
+        // Show only current entries and current pending bookings by default
         const combinedDisplayList = showPendingBookings 
-          ? [...future] 
-          : future;
+          ? [...current, ...currentPendingBookings] 
+          : current;
         
         setFilteredEntries(combinedDisplayList);
         
-        // Calculate summary based on visible entries
-        calculateSummary(future);
+        // Calculate summary based on visible entries (current entries)
+        calculateSummary(current);
         
         setError(null);
       } catch (err) {
@@ -305,8 +355,14 @@ const ExpenseTracker = () => {
     try {
       const query = searchQuery.toLowerCase().trim();
       
-      // Determine which entries to search in based on past entries toggle
-      const entriesToSearch = showPastEntries ? entries : futureEntries;
+      // Determine which entries to search in based on toggle states
+      let entriesToSearch = [...currentEntries]; // Always include current
+      if (showPastEntries) {
+        entriesToSearch = [...pastEntries, ...entriesToSearch];
+      }
+      if (showFutureEntries) {
+        entriesToSearch = [...entriesToSearch, ...futureEntries];
+      }
       
       const results = entriesToSearch.filter(entry => {
         // Search in detalii field
@@ -343,7 +399,16 @@ const ExpenseTracker = () => {
       // Also search in pending bookings if they're shown
       let bookingResults = [];
       if (showPendingBookings) {
-        bookingResults = pendingBookings.filter(booking => {
+        // Search in the appropriate pending booking categories based on toggle states
+        let bookingsToSearch = [...currentPendingBookings]; // Always include current
+        if (showPastEntries) {
+          bookingsToSearch = [...pastPendingBookings, ...bookingsToSearch];
+        }
+        if (showFutureEntries) {
+          bookingsToSearch = [...bookingsToSearch, ...futurePendingBookings];
+        }
+        
+        bookingResults = bookingsToSearch.filter(booking => {
           // Search in client name
           if (booking.clientName && booking.clientName.toLowerCase().includes(query)) {
             return true;
@@ -383,25 +448,31 @@ const ExpenseTracker = () => {
   const clearSearch = () => {
     setSearchQuery("");
     
-    // Reset to either all entries or just future entries based on toggle state
+    // Reset to current view based on toggle states
+    let displayEntries = [...currentEntries]; // Always show current
     if (showPastEntries) {
-      // Show all entries in chronological order
-      const allEntries = [...pastEntries, ...futureEntries];
-      const combinedResults = showPendingBookings 
-        ? [...allEntries, ...pendingBookings] 
-        : allEntries;
-      
-      setFilteredEntries(combinedResults);
-      calculateSummary(allEntries);
-    } else {
-      // Only show future entries
-      const combinedResults = showPendingBookings 
-        ? [...futureEntries, ...pendingBookings] 
-        : futureEntries;
-      
-      setFilteredEntries(combinedResults);
-      calculateSummary(futureEntries);
+      displayEntries = [...pastEntries, ...displayEntries];
     }
+    if (showFutureEntries) {
+      displayEntries = [...displayEntries, ...futureEntries];
+    }
+    
+    // Add appropriate pending bookings
+    let displayBookings = [];
+    if (showPendingBookings) {
+      displayBookings = [...currentPendingBookings]; // Always show current
+      if (showPastEntries) {
+        displayBookings = [...pastPendingBookings, ...displayBookings];
+      }
+      if (showFutureEntries) {
+        displayBookings = [...displayBookings, ...futurePendingBookings];
+      }
+    }
+    
+    const combinedResults = [...displayEntries, ...displayBookings];
+    
+    setFilteredEntries(combinedResults);
+    calculateSummary(displayEntries);
   };
   
   // Toggle search panel
@@ -415,28 +486,66 @@ const ExpenseTracker = () => {
   
   // Toggle past entries visibility
   const handleTogglePastEntries = () => {
-    if (showPastEntries) {
-      // Hide past entries
-      setShowPastEntries(false);
-      
-      const combinedResults = showPendingBookings 
-        ? [...futureEntries, ...pendingBookings] 
-        : futureEntries;
-      
-      setFilteredEntries(combinedResults);
-      calculateSummary(futureEntries);
-    } else {
-      // Show past entries - chronological order (past then future)
-      setShowPastEntries(true);
-      
-      const allEntries = [...pastEntries, ...futureEntries];
-      const combinedResults = showPendingBookings 
-        ? [...allEntries, ...pendingBookings] 
-        : allEntries;
-      
-      setFilteredEntries(combinedResults);
-      calculateSummary(allEntries);
+    const newShowPastEntries = !showPastEntries;
+    setShowPastEntries(newShowPastEntries);
+    
+    // Build display list based on new state
+    let displayEntries = [...currentEntries]; // Always show current
+    if (newShowPastEntries) {
+      displayEntries = [...pastEntries, ...displayEntries];
     }
+    if (showFutureEntries) {
+      displayEntries = [...displayEntries, ...futureEntries];
+    }
+    
+    // Add appropriate pending bookings
+    let displayBookings = [];
+    if (showPendingBookings) {
+      displayBookings = [...currentPendingBookings]; // Always show current
+      if (newShowPastEntries) {
+        displayBookings = [...pastPendingBookings, ...displayBookings];
+      }
+      if (showFutureEntries) {
+        displayBookings = [...displayBookings, ...futurePendingBookings];
+      }
+    }
+    
+    const combinedResults = [...displayEntries, ...displayBookings];
+    
+    setFilteredEntries(combinedResults);
+    calculateSummary(displayEntries);
+  };
+  
+  // Toggle future entries visibility (new function)
+  const handleToggleFutureEntries = () => {
+    const newShowFutureEntries = !showFutureEntries;
+    setShowFutureEntries(newShowFutureEntries);
+    
+    // Build display list based on new state
+    let displayEntries = [...currentEntries]; // Always show current
+    if (showPastEntries) {
+      displayEntries = [...pastEntries, ...displayEntries];
+    }
+    if (newShowFutureEntries) {
+      displayEntries = [...displayEntries, ...futureEntries];
+    }
+    
+    // Add appropriate pending bookings
+    let displayBookings = [];
+    if (showPendingBookings) {
+      displayBookings = [...currentPendingBookings]; // Always show current
+      if (showPastEntries) {
+        displayBookings = [...pastPendingBookings, ...displayBookings];
+      }
+      if (newShowFutureEntries) {
+        displayBookings = [...displayBookings, ...futurePendingBookings];
+      }
+    }
+    
+    const combinedResults = [...displayEntries, ...displayBookings];
+    
+    setFilteredEntries(combinedResults);
+    calculateSummary(displayEntries);
   };
   
   // Toggle pending bookings visibility
@@ -463,13 +572,18 @@ const ExpenseTracker = () => {
       
       const updatedEntries = [];
       const past = [];
+      const current = [];
       const future = [];
       const expenseBookingIds = new Set();
       
-      // Get today's date at midnight for comparison
+      // Get date thresholds
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const todayTimestamp = today.getTime();
+      
+      const dayAfterTomorrow = new Date(today);
+      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+      const dayAfterTomorrowTimestamp = dayAfterTomorrow.getTime();
       
       expensesSnapshot.forEach((doc) => {
         const data = doc.data();
@@ -497,19 +611,21 @@ const ExpenseTracker = () => {
           expenseBookingIds.add(data.bookingId);
         }
         
-        // Sort into past and future based on date (include today in future)
+        // Sort into past, current, and future based on date
         if (dataDate) {
           const entryDate = new Date(dataDate);
           entryDate.setHours(0, 0, 0, 0);
+          const entryTimestamp = entryDate.getTime();
           
-          if (entryDate.getTime() >= todayTimestamp) {
-            future.push(entry);
-          } else {
+          if (entryTimestamp < todayTimestamp) {
             past.push(entry);
+          } else if (entryTimestamp >= todayTimestamp && entryTimestamp < dayAfterTomorrowTimestamp) {
+            current.push(entry);
+          } else {
+            future.push(entry);
           }
         } else {
-          // If no date, consider it as future
-          future.push(entry);
+          current.push(entry);
         }
       });
       
@@ -518,7 +634,10 @@ const ExpenseTracker = () => {
       const bookingsQuery = query(bookingsRef, orderBy('bookingDate', 'desc'));
       const bookingsSnapshot = await getDocs(bookingsQuery);
       
-      const pendingBookingsList = [];
+      const allPendingBookings = [];
+      const pastPendingBookingsList = [];
+      const currentPendingBookingsList = [];
+      const futurePendingBookingsList = [];
       
       bookingsSnapshot.forEach((doc) => {
         const bookingData = doc.data();
@@ -531,12 +650,29 @@ const ExpenseTracker = () => {
         
         // If this booking doesn't have an expense entry yet and is active, add to pending
         if (!expenseBookingIds.has(doc.id) && bookingData.status === 'active') {
-          pendingBookingsList.push(booking);
+          allPendingBookings.push(booking);
+          
+          // Categorize pending bookings by date
+          if (booking.bookingDate) {
+            const bookingDate = new Date(booking.bookingDate);
+            bookingDate.setHours(0, 0, 0, 0);
+            const bookingTimestamp = bookingDate.getTime();
+            
+            if (bookingTimestamp < todayTimestamp) {
+              pastPendingBookingsList.push(booking);
+            } else if (bookingTimestamp >= todayTimestamp && bookingTimestamp < dayAfterTomorrowTimestamp) {
+              currentPendingBookingsList.push(booking);
+            } else {
+              futurePendingBookingsList.push(booking);
+            }
+          } else {
+            currentPendingBookingsList.push(booking);
+          }
         }
       });
       
       // Sort entries by date
-      future.sort((a, b) => {
+      const sortByDateAscending = (a, b) => {
         const aTimestamp = a.data ? new Date(a.data).getTime() : 0;
         const bTimestamp = b.data ? new Date(b.data).getTime() : 0;
         
@@ -545,48 +681,58 @@ const ExpenseTracker = () => {
         }
         
         return 0;
-      });
+      };
       
-      past.sort((a, b) => {
-        const aTimestamp = a.data ? new Date(a.data).getTime() : 0;
-        const bTimestamp = b.data ? new Date(b.data).getTime() : 0;
-        
-        if (aTimestamp && bTimestamp) {
-          return bTimestamp - aTimestamp;
-        }
-        
-        return 0;
-      });
+      past.sort(sortByDateAscending);
+      current.sort(sortByDateAscending);
+      future.sort(sortByDateAscending);
       
       // Sort pending bookings by date
-      pendingBookingsList.sort((a, b) => {
+      const sortBookingsByDate = (a, b) => {
         const aDate = a.bookingDate ? new Date(a.bookingDate).getTime() : 0;
         const bDate = b.bookingDate ? new Date(b.bookingDate).getTime() : 0;
         return aDate - bDate;
-      });
+      };
+      
+      allPendingBookings.sort(sortBookingsByDate);
+      pastPendingBookingsList.sort(sortBookingsByDate);
+      currentPendingBookingsList.sort(sortBookingsByDate);
+      futurePendingBookingsList.sort(sortBookingsByDate);
       
       setEntries(updatedEntries);
       setPastEntries(past);
+      setCurrentEntries(current);
       setFutureEntries(future);
-      setPendingBookings(pendingBookingsList);
+      setPendingBookings(allPendingBookings);
+      setPastPendingBookings(pastPendingBookingsList);
+      setCurrentPendingBookings(currentPendingBookingsList);
+      setFuturePendingBookings(futurePendingBookingsList);
       
-      // Update filtered entries based on toggle state
+      // Update filtered entries based on toggle states
+      let displayEntries = [...current]; // Always show current
       if (showPastEntries) {
-        const allEntries = [...past, ...future];
-        const combinedResults = showPendingBookings 
-          ? [...allEntries, ...pendingBookingsList] 
-          : allEntries;
-        
-        setFilteredEntries(combinedResults);
-        calculateSummary(allEntries);
-      } else {
-        const combinedResults = showPendingBookings 
-          ? [...future, ...pendingBookingsList] 
-          : future;
-        
-        setFilteredEntries(combinedResults);
-        calculateSummary(future);
+        displayEntries = [...past, ...displayEntries];
       }
+      if (showFutureEntries) {
+        displayEntries = [...displayEntries, ...future];
+      }
+      
+      // Add appropriate pending bookings
+      let displayBookings = [];
+      if (showPendingBookings) {
+        displayBookings = [...currentPendingBookingsList]; // Always show current
+        if (showPastEntries) {
+          displayBookings = [...pastPendingBookingsList, ...displayBookings];
+        }
+        if (showFutureEntries) {
+          displayBookings = [...displayBookings, ...futurePendingBookingsList];
+        }
+      }
+      
+      const combinedResults = [...displayEntries, ...displayBookings];
+      
+      setFilteredEntries(combinedResults);
+      calculateSummary(displayEntries);
       
       return updatedEntries;
     } catch (err) {
@@ -1025,6 +1171,7 @@ const ExpenseTracker = () => {
     entryDate.setHours(0, 0, 0, 0);
     const isPastEntry = entryDate < today;
     const isTodayEntry = entryDate.getTime() === today.getTime();
+    const isTomorrowEntry = entryDate.getTime() === (today.getTime() + 24 * 60 * 60 * 1000);
     
     // Calculate if this card is expanded
     const isExpanded = expandedEntryId === entry.id;
@@ -1038,6 +1185,7 @@ const ExpenseTracker = () => {
         key={entry.id}
         className={`mb-4 p-3 rounded-lg shadow border ${
           isTodayEntry ? 'border-l-4 border-green-500' : 
+          isTomorrowEntry ? 'border-l-4 border-blue-500' :
           isPastEntry ? 'border-l-4 border-yellow-300' : 
           'border-gray-200'
         } bg-white`}
@@ -1049,6 +1197,11 @@ const ExpenseTracker = () => {
               {isTodayEntry && (
                 <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                   Today
+                </span>
+              )}
+              {isTomorrowEntry && (
+                <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Tomorrow
                 </span>
               )}
             </span>
@@ -1218,11 +1371,15 @@ const ExpenseTracker = () => {
   
   // Render a card view for booking (mobile display)
   const renderBookingCard = (booking) => {
-    // Check if this is today's booking
+    // Check if this is today's or tomorrow's booking
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
     const bookingDate = booking.bookingDate ? new Date(booking.bookingDate) : null;
     const isToday = bookingDate && bookingDate.setHours(0, 0, 0, 0) === today.getTime();
+    const isTomorrow = bookingDate && bookingDate.setHours(0, 0, 0, 0) === tomorrow.getTime();
     
     // Calculate if this card is expanded
     const isExpanded = expandedEntryId === booking.id;
@@ -1230,7 +1387,11 @@ const ExpenseTracker = () => {
     return (
       <div 
         key={booking.id}
-        className={`mb-4 p-3 rounded-lg shadow border-l-4 ${isToday ? 'border-orange-500' : 'border-orange-300'} bg-orange-50`}
+        className={`mb-4 p-3 rounded-lg shadow border-l-4 ${
+          isToday ? 'border-orange-500' : 
+          isTomorrow ? 'border-orange-400' : 
+          'border-orange-300'
+        } bg-orange-50`}
       >
         <div className="flex justify-between items-start mb-2">
           <div>
@@ -1239,6 +1400,11 @@ const ExpenseTracker = () => {
               {isToday && (
                 <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-200 text-orange-800">
                   Today
+                </span>
+              )}
+              {isTomorrow && (
+                <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-200 text-blue-800">
+                  Tomorrow
                 </span>
               )}
             </span>
@@ -1393,6 +1559,20 @@ const ExpenseTracker = () => {
             )}
           </button>
           <button 
+            onClick={handleToggleFutureEntries}
+            className={`px-4 py-2 ${showFutureEntries ? 'bg-purple-500' : 'bg-purple-600'} text-white rounded flex items-center hover:bg-purple-700`}
+          >
+            {showFutureEntries ? (
+              <>
+                <EyeOff size={16} className="mr-2" /> Hide Future Entries
+              </>
+            ) : (
+              <>
+                <Eye size={16} className="mr-2" /> Show Future Entries
+              </>
+            )}
+          </button>
+          <button 
             onClick={toggleSummary}
             className={`px-4 py-2 ${showSummary ? 'bg-indigo-500' : 'bg-indigo-600'} text-white rounded flex items-center hover:bg-indigo-700`}
           >
@@ -1471,6 +1651,22 @@ const ExpenseTracker = () => {
               )}
             </button>
             <button 
+              onClick={handleToggleFutureEntries}
+              className={`px-3 py-2 ${showFutureEntries ? 'bg-purple-500' : 'bg-purple-600'} text-white rounded flex items-center justify-center hover:bg-purple-700 text-sm`}
+            >
+              {showFutureEntries ? (
+                <>
+                  <EyeOff size={14} className="mr-1" /> Hide Future
+                </>
+              ) : (
+                <>
+                  <Eye size={14} className="mr-1" /> Show Future
+                </>
+              )}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <button 
               onClick={toggleSummary}
               className={`px-3 py-2 ${showSummary ? 'bg-indigo-500' : 'bg-indigo-600'} text-white rounded flex items-center justify-center hover:bg-indigo-700 text-sm`}
             >
@@ -1484,8 +1680,6 @@ const ExpenseTracker = () => {
                 </>
               )}
             </button>
-          </div>
-          <div className="grid grid-cols-2 gap-2 mt-2">
             <button 
               onClick={toggleForm}
               className="px-3 py-2 bg-blue-500 text-white rounded flex items-center justify-center hover:bg-blue-600 text-sm"
@@ -1500,16 +1694,43 @@ const ExpenseTracker = () => {
                 </>
               )}
             </button>
+          </div>
+          <div className="grid grid-cols-1 gap-2 mt-2">
             <button 
               onClick={exportToCSV}
               className="px-3 py-2 bg-green-500 text-white rounded flex items-center justify-center hover:bg-green-600 text-sm"
               disabled={loading || filteredEntries.filter(entry => !isBooking(entry)).length === 0}
             >
-              <Download size={14} className="mr-1" /> Export
+              <Download size={14} className="mr-1" /> Export CSV
             </button>
           </div>
         </div>
       )}
+      
+      {/* Current View Info Banner */}
+      <div className="mb-4 p-3 bg-blue-50 text-blue-800 rounded-md flex items-center justify-between">
+        <div className="flex items-center">
+          <CalendarClock size={16} className="mr-2" />
+          <span className="font-medium">
+            Current View: Today & Tomorrow
+            {showPastEntries && <span className="text-blue-600"> + Past Entries</span>}
+            {showFutureEntries && <span className="text-purple-600"> + Future Entries</span>}
+          </span>
+        </div>
+        <div className="text-xs">
+          {currentEntries.length} current entries
+          {showPastEntries && ` | ${pastEntries.length} past`}
+          {showFutureEntries && ` | ${futureEntries.length} future`}
+          {showPendingBookings && (
+            <>
+              <br />
+              {currentPendingBookings.length} current bookings
+              {showPastEntries && ` | ${pastPendingBookings.length} past bookings`}
+              {showFutureEntries && ` | ${futurePendingBookings.length} future bookings`}
+            </>
+          )}
+        </div>
+      </div>
       
       {/* Search Panel */}
       {showSearch && (
@@ -1620,21 +1841,35 @@ const ExpenseTracker = () => {
             </div>
             
             {/* Pending Bookings Summary */}
-            {pendingBookings.length > 0 && (
+            {(currentPendingBookings.length > 0 || (showPastEntries && pastPendingBookings.length > 0) || (showFutureEntries && futurePendingBookings.length > 0)) && (
               <div className="mt-4">
                 <div className="bg-orange-50 p-3 md:p-4 rounded-lg border border-orange-200 shadow-sm">
                   <h3 className="font-medium text-orange-800 mb-1 flex items-center">
                     <AlertTriangle size={16} className="mr-2" /> Pending Bookings
                   </h3>
                   <p className="text-base md:text-lg font-bold text-orange-900">
-                    {pendingBookings.length} booking{pendingBookings.length !== 1 ? 's' : ''} need expense entries
+                    {(() => {
+                      let totalBookings = currentPendingBookings.length;
+                      if (showPastEntries) totalBookings += pastPendingBookings.length;
+                      if (showFutureEntries) totalBookings += futurePendingBookings.length;
+                      return totalBookings;
+                    })()} booking{(() => {
+                      let totalBookings = currentPendingBookings.length;
+                      if (showPastEntries) totalBookings += pastPendingBookings.length;
+                      if (showFutureEntries) totalBookings += futurePendingBookings.length;
+                      return totalBookings !== 1 ? 's' : '';
+                    })()} need expense entries
                   </p>
                   <p className="text-xs md:text-sm text-orange-700 mt-1">
                     Total potential revenue: {new Intl.NumberFormat('en-US', {
                       style: 'currency',
                       currency: 'EUR'
-                    }).format(pendingBookings.reduce((sum, booking) => 
-                      sum + (booking.pricing?.agreedPrice || 0), 0))}
+                    }).format((() => {
+                      let bookingsToSum = [...currentPendingBookings];
+                      if (showPastEntries) bookingsToSum = [...pastPendingBookings, ...bookingsToSum];
+                      if (showFutureEntries) bookingsToSum = [...bookingsToSum, ...futurePendingBookings];
+                      return bookingsToSum.reduce((sum, booking) => sum + (booking.pricing?.agreedPrice || 0), 0);
+                    })())}
                   </p>
                 </div>
               </div>
@@ -2143,15 +2378,25 @@ const ExpenseTracker = () => {
       </div>
       
       {/* Pending Bookings Section */}
-      {showPendingBookings && pendingBookings.length > 0 && (
+      {showPendingBookings && (currentPendingBookings.length > 0 || (showPastEntries && pastPendingBookings.length > 0) || (showFutureEntries && futurePendingBookings.length > 0)) && (
         <div className="mb-8 border rounded-md p-4 bg-orange-50">
           <h2 className="text-lg font-bold mb-4 text-orange-800 flex items-center">
-            <CalendarClock size={20} className="mr-2" /> Pending Bookings ({pendingBookings.length})
+            <CalendarClock size={20} className="mr-2" /> Pending Bookings ({(() => {
+              let totalBookings = currentPendingBookings.length;
+              if (showPastEntries) totalBookings += pastPendingBookings.length;
+              if (showFutureEntries) totalBookings += futurePendingBookings.length;
+              return totalBookings;
+            })()})
           </h2>
           
           {/* Mobile view for bookings - only show on small screens */}
           <div className="md:hidden">
-            {pendingBookings.map(booking => renderBookingCard(booking))}
+            {(() => {
+              let bookingsToShow = [...currentPendingBookings];
+              if (showPastEntries) bookingsToShow = [...pastPendingBookings, ...bookingsToShow];
+              if (showFutureEntries) bookingsToShow = [...bookingsToShow, ...futurePendingBookings];
+              return bookingsToShow.map(booking => renderBookingCard(booking));
+            })()}
           </div>
           
           {/* Desktop view for bookings - hide on small screens */}
@@ -2169,61 +2414,95 @@ const ExpenseTracker = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-orange-200">
-                {pendingBookings.map((booking) => {
-                  // Check if this is today's booking
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  const bookingDate = booking.bookingDate ? new Date(booking.bookingDate) : null;
-                  const isToday = bookingDate && bookingDate.setHours(0, 0, 0, 0) === today.getTime();
-                  
-                  return (
-                    <tr 
-                      key={booking.id} 
-                      className={`${isToday ? 'border-l-4 border-orange-500' : ''}`}
-                      onMouseEnter={(e) => e.currentTarget.classList.add('bg-orange-100')}
-                      onMouseLeave={(e) => e.currentTarget.classList.remove('bg-orange-100')}
-                    >
-                      <td className="px-3 py-3 text-sm">
-                        <span className={`font-medium ${isToday ? 'text-orange-600' : ''}`}>
-                          {formatDate(booking.bookingDate)}
-                        </span>
-                        {isToday && (
-                          <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-200 text-orange-800">
-                            Today
+                {(() => {
+                  let bookingsToShow = [...currentPendingBookings];
+                  if (showPastEntries) bookingsToShow = [...pastPendingBookings, ...bookingsToShow];
+                  if (showFutureEntries) bookingsToShow = [...bookingsToShow, ...futurePendingBookings];
+                  return bookingsToShow.map((booking) => {
+                    // Check if this is today's or tomorrow's booking
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const tomorrow = new Date(today);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    
+                    const bookingDate = booking.bookingDate ? new Date(booking.bookingDate) : null;
+                    const isToday = bookingDate && bookingDate.setHours(0, 0, 0, 0) === today.getTime();
+                    const isTomorrow = bookingDate && bookingDate.setHours(0, 0, 0, 0) === tomorrow.getTime();
+                    
+                    return (
+                      <tr 
+                        key={booking.id} 
+                        className={`${
+                          isToday ? 'border-l-4 border-orange-500' : 
+                          isTomorrow ? 'border-l-4 border-orange-400' : ''
+                        }`}
+                        onMouseEnter={(e) => e.currentTarget.classList.add('bg-orange-100')}
+                        onMouseLeave={(e) => e.currentTarget.classList.remove('bg-orange-100')}
+                      >
+                        <td className="px-3 py-3 text-sm">
+                          <span className={`font-medium ${isToday || isTomorrow ? 'text-orange-600' : ''}`}>
+                            {formatDate(booking.bookingDate)}
                           </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-sm">{booking.clientName}</td>
-                      <td className="px-3 py-3 text-sm">{booking.bookingDetails?.boatName || '-'}</td>
-                      <td className="px-3 py-3 text-sm">{booking.bookingDetails?.boatCompany || '-'}</td>
-                      <td className="px-3 py-3 text-sm font-mono">
-                        {formatCurrency(booking.pricing?.agreedPrice)}
-                      </td>
-                      <td className="px-3 py-3 text-sm">
-                        {booking.bookingDetails?.startTime} - {booking.bookingDetails?.endTime}
-                      </td>
-                      <td className="px-3 py-3 text-sm whitespace-nowrap">
-                        <button
-                          onClick={() => handleCreateFromBooking(booking)}
-                          className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded font-medium text-xs"
-                        >
-                          <Plus size={14} className="mr-1" /> Create Expense
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                          {isToday && (
+                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-200 text-orange-800">
+                              Today
+                            </span>
+                          )}
+                          {isTomorrow && (
+                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-200 text-blue-800">
+                              Tomorrow
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-sm">{booking.clientName}</td>
+                        <td className="px-3 py-3 text-sm">{booking.bookingDetails?.boatName || '-'}</td>
+                        <td className="px-3 py-3 text-sm">{booking.bookingDetails?.boatCompany || '-'}</td>
+                        <td className="px-3 py-3 text-sm font-mono">
+                          {formatCurrency(booking.pricing?.agreedPrice)}
+                        </td>
+                        <td className="px-3 py-3 text-sm">
+                          {booking.bookingDetails?.startTime} - {booking.bookingDetails?.endTime}
+                        </td>
+                        <td className="px-3 py-3 text-sm whitespace-nowrap">
+                          <button
+                            onClick={() => handleCreateFromBooking(booking)}
+                            className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded font-medium text-xs"
+                          >
+                            <Plus size={14} className="mr-1" /> Create Expense
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>
         </div>
       )}
       
-      {/* Past Entries Notice */}
-      {!showPastEntries && pastEntries.length > 0 && (
+      {/* Hidden entries notices */}
+      {!showPastEntries && (pastEntries.length > 0 || pastPendingBookings.length > 0) && (
         <div className="mb-4 p-2 bg-yellow-100 text-yellow-800 rounded-md flex items-center justify-center">
           <Eye size={16} className="mr-2" /> 
-          <span>{pastEntries.length} past entries from previous dates are hidden. Click Show Past Entries to view them.</span>
+          <span>
+            {pastEntries.length > 0 && `${pastEntries.length} past entries`}
+            {pastEntries.length > 0 && pastPendingBookings.length > 0 && ' and '}
+            {pastPendingBookings.length > 0 && `${pastPendingBookings.length} past bookings`}
+            {' '}from previous dates are hidden. Click Show Past Entries to view them.
+          </span>
+        </div>
+      )}
+      
+      {!showFutureEntries && (futureEntries.length > 0 || futurePendingBookings.length > 0) && (
+        <div className="mb-4 p-2 bg-purple-100 text-purple-800 rounded-md flex items-center justify-center">
+          <Eye size={16} className="mr-2" /> 
+          <span>
+            {futureEntries.length > 0 && `${futureEntries.length} future entries`}
+            {futureEntries.length > 0 && futurePendingBookings.length > 0 && ' and '}
+            {futurePendingBookings.length > 0 && `${futurePendingBookings.length} future bookings`}
+            {' '}(day after tomorrow onwards) are hidden. Click Show Future Entries to view them.
+          </span>
         </div>
       )}
       
@@ -2285,13 +2564,15 @@ const ExpenseTracker = () => {
                     entryDate.setHours(0, 0, 0, 0);
                     const isPastEntry = entryDate < today;
                     const isTodayEntry = entryDate.getTime() === today.getTime();
+                    const isTomorrowEntry = entryDate.getTime() === (today.getTime() + 24 * 60 * 60 * 1000);
                     
                     return (
                       <tr 
                         key={entry.id} 
                         className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
                         ${isPastEntry ? 'border-l-4 border-yellow-300' : ''}
-                        ${isTodayEntry ? 'border-l-4 border-green-500' : ''}`}
+                        ${isTodayEntry ? 'border-l-4 border-green-500' : ''}
+                        ${isTomorrowEntry ? 'border-l-4 border-blue-500' : ''}`}
                         onMouseEnter={(e) => e.currentTarget.classList.add('bg-gray-100')}
                         onMouseLeave={(e) => e.currentTarget.classList.remove('bg-gray-100')}>
                         {/* Intrari Data */}
@@ -2300,6 +2581,11 @@ const ExpenseTracker = () => {
                           {isTodayEntry && (
                             <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                               Today
+                            </span>
+                          )}
+                          {isTomorrowEntry && (
+                            <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              Tomorrow
                             </span>
                           )}
                         </td>
@@ -2378,10 +2664,16 @@ const ExpenseTracker = () => {
             </table>
           </div>
           
-          {/* Divider between past and future entries - when viewing all entries */}
-          {showPastEntries && pastEntries.length > 0 && futureEntries.length > 0 && (
-            <div className="my-4 p-2 bg-green-100 text-green-800 rounded-md flex items-center justify-center">
-              <span>Todays Date: {new Date().toLocaleDateString()} | Upcoming entries below ⬇️</span>
+          {/* Dividers between entry types when showing multiple views */}
+          {showPastEntries && showFutureEntries && pastEntries.length > 0 && currentEntries.length > 0 && (
+            <div className="my-4 p-2 bg-yellow-100 text-yellow-800 rounded-md flex items-center justify-center">
+              <span>Past entries above ⬆️ | Current entries (Today & Tomorrow) below ⬇️</span>
+            </div>
+          )}
+          
+          {showFutureEntries && currentEntries.length > 0 && futureEntries.length > 0 && (
+            <div className="my-4 p-2 bg-purple-100 text-purple-800 rounded-md flex items-center justify-center">
+              <span>Current entries (Today & Tomorrow) above ⬆️ | Future entries (Day after tomorrow onwards) below ⬇️</span>
             </div>
           )}
         </>

@@ -717,150 +717,155 @@ const PaymentTracking = () => {
 
     // Apply filters and sorting
     useEffect(() => {
-        let filtered = [...bookings];
+    let filtered = [...bookings];
 
-        // Filter out San Antonio tours if needed
-        if (!filters.includeSanAntonioTours) {
-            filtered = filtered.filter(booking => !booking.isSanAntonioTour);
-        }
+    // Filter out San Antonio tours if needed
+    if (!filters.includeSanAntonioTours) {
+        filtered = filtered.filter(booking => !booking.isSanAntonioTour);
+    }
 
-        // Apply active tab filtering
-        if (activeTab === 'urgent') {
-            filtered = filtered.filter(booking => 
-                booking.priority === 'CRITICAL' || booking.priority === 'HIGH'
-            );
-        } else if (activeTab === 'upcoming') {
-            filtered = filtered.filter(booking => 
-                booking.embarkedDate && new Date(booking.embarkedDate) >= new Date() &&
-                (booking.priority !== 'COMPLETE')
-            );
-        } else if (activeTab === 'completed') {
-            filtered = filtered.filter(booking => booking.priority === 'COMPLETE');
-        } else if (activeTab === 'overdue') {
-            const today = new Date();
-            filtered = filtered.filter(booking => 
-                booking.embarkedDate && 
-                new Date(booking.embarkedDate) < today && 
-                booking.priority !== 'COMPLETE'
-            );
-        }
+    // Apply active tab filtering
+    if (activeTab === 'urgent') {
+        filtered = filtered.filter(booking => 
+            booking.priority === 'CRITICAL' || booking.priority === 'HIGH'
+        );
+    } else if (activeTab === 'upcoming') {
+        filtered = filtered.filter(booking => 
+            booking.embarkedDate && new Date(booking.embarkedDate) >= new Date() &&
+            (booking.priority !== 'COMPLETE')
+        );
+    } else if (activeTab === 'completed') {
+        filtered = filtered.filter(booking => booking.priority === 'COMPLETE');
+    } else if (activeTab === 'overdue') {
+        const today = new Date();
+        filtered = filtered.filter(booking => 
+            booking.embarkedDate && 
+            new Date(booking.embarkedDate) < today && 
+            booking.priority !== 'COMPLETE'
+        );
+    }
 
-        // Apply text search
-        if (filters.search) {
-            const searchTerm = filters.search.toLowerCase();
-            filtered = filtered.filter(booking => 
-                (booking.boatName && booking.boatName.toLowerCase().includes(searchTerm)) ||
-                (booking.boatCompany && booking.boatCompany.toLowerCase().includes(searchTerm)) ||
-                (booking.clientName && booking.clientName.toLowerCase().includes(searchTerm))
-            );
-        }
+    // Apply text search
+    if (filters.search) {
+        const searchTerm = filters.search.toLowerCase();
+        filtered = filtered.filter(booking => 
+            (booking.boatName && booking.boatName.toLowerCase().includes(searchTerm)) ||
+            (booking.boatCompany && booking.boatCompany.toLowerCase().includes(searchTerm)) ||
+            (booking.clientName && booking.clientName.toLowerCase().includes(searchTerm))
+        );
+    }
 
-        // Apply date filters
-        if (filters.dateFrom) {
-            filtered = filtered.filter(booking => 
-                booking.embarkedDate && new Date(booking.embarkedDate) >= new Date(filters.dateFrom)
-            );
-        }
+    // Apply date filters
+    if (filters.dateFrom) {
+        filtered = filtered.filter(booking => 
+            booking.embarkedDate && new Date(booking.embarkedDate) >= new Date(filters.dateFrom)
+        );
+    }
 
-        if (filters.dateTo) {
-            filtered = filtered.filter(booking => 
-                booking.embarkedDate && new Date(booking.embarkedDate) <= new Date(filters.dateTo)
-            );
-        }
+    if (filters.dateTo) {
+        filtered = filtered.filter(booking => 
+            booking.embarkedDate && new Date(booking.embarkedDate) <= new Date(filters.dateTo)
+        );
+    }
 
-        // Apply payment status filter
-        if (filters.paymentStatus !== 'all') {
-            filtered = filtered.filter(booking => {
-                if (filters.paymentStatus === 'pending') {
-                    return !booking.firstPayment.received || !booking.secondPayment.received;
-                }
-                return booking.firstPayment.received && booking.secondPayment.received;
-            });
-        }
+    // Apply payment status filter
+    if (filters.paymentStatus !== 'all') {
+        filtered = filtered.filter(booking => {
+            if (filters.paymentStatus === 'pending') {
+                return !booking.firstPayment.received || !booking.secondPayment.received;
+            }
+            return booking.firstPayment.received && booking.secondPayment.received;
+        });
+    }
 
-        // Apply company filter
-        if (filters.boatCompany !== 'all') {
-            filtered = filtered.filter(booking => 
-                booking.boatCompany === filters.boatCompany
-            );
-        }
+    // Apply company filter
+    if (filters.boatCompany !== 'all') {
+        filtered = filtered.filter(booking => 
+            booking.boatCompany === filters.boatCompany
+        );
+    }
 
-        // Apply transfer filter
-        if (filters.transferOnly) {
-            filtered = filtered.filter(booking => booking.hasTransfer);
-        }
-        
-        // Apply completion status filter
-        if (filters.completionStatus !== 'all') {
-            filtered = filtered.filter(booking => {
-                const complete = isBookingComplete(booking);
-                return filters.completionStatus === 'complete' ? complete : !complete;
-            });
-        }
+    // Apply transfer filter
+    if (filters.transferOnly) {
+        filtered = filtered.filter(booking => booking.hasTransfer);
+    }
+    
+    // Apply completion status filter
+    if (filters.completionStatus !== 'all') {
+        filtered = filtered.filter(booking => {
+            const complete = isBookingComplete(booking);
+            return filters.completionStatus === 'complete' ? complete : !complete;
+        });
+    }
 
-        // Apply payment due within filter
-        if (filters.paymentDueWithin !== 'all') {
-            const today = new Date();
-            const daysAhead = parseInt(filters.paymentDueWithin);
-            filtered = filtered.filter(booking => {
-                if (!booking.paymentDueDate) return false;
+    // Apply payment due within filter
+    if (filters.paymentDueWithin !== 'all') {
+        const today = new Date();
+        const daysAhead = parseInt(filters.paymentDueWithin);
+        filtered = filtered.filter(booking => {
+            if (!booking.paymentDueDate) return false;
+            
+            const daysDiff = differenceInDays(new Date(booking.paymentDueDate), today);
+            return daysDiff >= 0 && daysDiff <= daysAhead;
+        });
+    }
+
+    // Apply priority filter
+    if (filters.paymentPriority !== 'all') {
+        filtered = filtered.filter(booking => booking.priority === filters.paymentPriority);
+    }
+
+    // Apply sorting
+    if (sortConfig.key) {
+        filtered.sort((a, b) => {
+            // Handle date comparison
+            if (['embarkedDate', 'bookingDate', 'paymentDueDate'].includes(sortConfig.key)) {
+                const dateA = a[sortConfig.key] ? new Date(a[sortConfig.key]) : new Date(0);
+                const dateB = b[sortConfig.key] ? new Date(b[sortConfig.key]) : new Date(0);
                 
-                const daysDiff = differenceInDays(new Date(booking.paymentDueDate), today);
-                return daysDiff >= 0 && daysDiff <= daysAhead;
-            });
-        }
-
-        // Apply priority filter
-        if (filters.paymentPriority !== 'all') {
-            filtered = filtered.filter(booking => booking.priority === filters.paymentPriority);
-        }
-
-        // Apply sorting
-        if (sortConfig.key) {
-            filtered.sort((a, b) => {
-                // Handle date comparison
-                if (['embarkedDate', 'bookingDate', 'paymentDueDate'].includes(sortConfig.key)) {
-                    const dateA = a[sortConfig.key] ? new Date(a[sortConfig.key]) : new Date(0);
-                    const dateB = b[sortConfig.key] ? new Date(b[sortConfig.key]) : new Date(0);
-                    
-                    if (sortConfig.direction === 'asc') {
-                        return dateA - dateB;
-                    } else {
-                        return dateB - dateA;
-                    }
+                if (sortConfig.direction === 'asc') {
+                    return dateA - dateB;
+                } else {
+                    return dateB - dateA;
                 }
+            }
+            
+            // Handle string comparison
+            if (['boatName', 'boatCompany', 'clientName', 'priority'].includes(sortConfig.key)) {
+                const valueA = a[sortConfig.key] || '';
+                const valueB = b[sortConfig.key] || '';
                 
-                // Handle string comparison
-                if (['boatName', 'boatCompany', 'clientName', 'priority'].includes(sortConfig.key)) {
-                    const valueA = a[sortConfig.key] || '';
-                    const valueB = b[sortConfig.key] || '';
-                    
-                    if (sortConfig.direction === 'asc') {
-                        return valueA.localeCompare(valueB);
-                    } else {
-                        return valueB.localeCompare(valueA);
-                    }
+                if (sortConfig.direction === 'asc') {
+                    return valueA.localeCompare(valueB);
+                } else {
+                    return valueB.localeCompare(valueA);
                 }
+            }
+            
+            // Handle number comparison
+            if (sortConfig.key === 'totalAmount') {
+                const numA = parseFloat(a[sortConfig.key]) || 0;
+                const numB = parseFloat(b[sortConfig.key]) || 0;
                 
-                // Handle number comparison
-                if (sortConfig.key === 'totalAmount') {
-                    const numA = parseFloat(a[sortConfig.key]) || 0;
-                    const numB = parseFloat(b[sortConfig.key]) || 0;
-                    
-                    if (sortConfig.direction === 'asc') {
-                        return numA - numB;
-                    } else {
-                        return numB - numA;
-                    }
+                if (sortConfig.direction === 'asc') {
+                    return numA - numB;
+                } else {
+                    return numB - numA;
                 }
-                
-                return 0;
-            });
-        }
+            }
+            
+            return 0;
+        });
+    }
 
-        setFilteredBookings(filtered);
-        setCurrentPage(1);
-    }, [filters, bookings, activeTab, sortConfig]);
+    setFilteredBookings(filtered);
+    
+    // Only adjust current page if it's now beyond the available pages
+    const newTotalPages = Math.ceil(filtered.length / itemsPerPage);
+    if (currentPage > newTotalPages && newTotalPages > 0) {
+        setCurrentPage(newTotalPages);
+    }
+}, [filters, bookings, activeTab, sortConfig, itemsPerPage, currentPage]);
 
     // Generate alerts for important payment actions
     const generateAlerts = (data) => {

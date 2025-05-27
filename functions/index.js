@@ -3,6 +3,7 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onRequest } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 const axios = require('axios');
+const { getMessaging } = require('firebase-admin/messaging');
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -623,17 +624,101 @@ exports.recordPlaceConversion = onCall({
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-  
-  
-
+exports.notifyNewOrder = onDocumentCreated('orders/{orderId}', {
+  region: "us-central1"
+}, async (event) => {
+  try {
+    const order = event.data.data();
+    const orderId = event.params.orderId;
+    
+    console.log('New order detected:', orderId);
+    
+    // Build notification message
+    const orderNumber = order.orderId || orderId.slice(-6);
+    const customerName = order.fullName || 'Customer';
+    const boatName = order.boatName || 'Boat';
+    const totalAmount = order.amount_total || 0;
+    const itemCount = order.items ? order.items.length : 0;
+    
+    // Get all users with REAL FCM tokens (not simple tokens)
+    const usersSnapshot = await admin.firestore().collection('users')
+      .where('notificationsEnabled', '==', true)
+      .get();
+    
+    const fcmTokens = [];
+    usersSnapshot.forEach(doc => {
+      const userData = doc.data();
+      // Only use real FCM tokens (they're longer and don't start with 'token_')
+      if (userData.fcmToken && !userData.fcmToken.startsWith('token_') && userData.fcmToken.length > 50) {
+        fcmTokens.push(userData.fcmToken);
+      }
+    });
+    
+    console.log(`Found ${fcmTokens.length} real FCM tokens`);
+    
+    if (fcmTokens.length === 0) {
+      console.log('No users with FCM tokens found');
+      return { success: false, message: 'No FCM tokens' };
+    }
+    
+    // Send REAL push notification
+    const message = {
+      notification: {
+        title: '🍽️ NEW ORDER ALERT!',
+        body: `Order #${orderNumber} from ${customerName} on ${boatName} - €${totalAmount} (${itemCount} items)`,
+        icon: '/icon-192x192.png'
+      },
+      data: {
+        orderId: orderId,
+        orderNumber: orderNumber,
+        customerName: customerName,
+        boatName: boatName,
+        totalAmount: totalAmount.toString(),
+        url: '/orders',
+        type: 'new-order'
+      },
+      tokens: fcmTokens
+    };
+    
+    const response = await admin.messaging().sendMulticast(message);
+    
+    console.log(`Push notifications sent successfully: ${response.successCount} sent, ${response.failureCount} failed`);
+    
+    // Clean up invalid tokens
+    if (response.responses) {
+      const invalidTokens = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          invalidTokens.push(fcmTokens[idx]);
+          console.log('Invalid token:', resp.error);
+        }
+      });
+      
+      // Remove invalid tokens from database
+      if (invalidTokens.length > 0) {
+        const batch = admin.firestore().batch();
+        const allUsers = await admin.firestore().collection('users').get();
+        
+        allUsers.forEach(doc => {
+          const userData = doc.data();
+          if (invalidTokens.includes(userData.fcmToken)) {
+            batch.update(doc.ref, { fcmToken: admin.firestore.FieldValue.delete() });
+          }
+        });
+        
+        await batch.commit();
+        console.log(`Cleaned up ${invalidTokens.length} invalid tokens`);
+      }
+    }
+    
+    return { 
+      success: true, 
+      sent: response.successCount, 
+      failed: response.failureCount 
+    };
+    
+  } catch (error) {
+    console.error('Error sending push notification:', error);
+    return { success: false, error: error.message };
+  }
+});
