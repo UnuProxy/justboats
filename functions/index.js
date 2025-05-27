@@ -10,6 +10,7 @@ admin.initializeApp();
 const db = admin.firestore();
 
 // Constants
+const SENDGRID_ORDER_NOTIFICATION_TEMPLATE_ID = 'd-19b8a21dc04c4c8aa3171f6faf5de453';
 const SENDGRID_TEMPLATE_ID = 'd-a0536d03f0c74ef2b52e722e8b26ef4e';
 const SENDGRID_MULTI_BOAT_TEMPLATE_ID = 'd-a0536d03f0c74ef2b52e722e8b26ef4e'; // Use same template or create a new one
 const ALLOWED_ORIGINS = [
@@ -17,7 +18,7 @@ const ALLOWED_ORIGINS = [
   'https://justenjoyibizaboats.com',
   'http://localhost:3000'
 ];
-
+const ADMIN_EMAIL = 'unujulian@gmail.com';
 // Simplified API key handling using Firebase Secrets
 function getApiKey() {
   const apiKey = process.env.SENDGRID_API_KEY;
@@ -624,101 +625,224 @@ exports.recordPlaceConversion = onCall({
   }
 });
 
-exports.notifyNewOrder = onDocumentCreated('orders/{orderId}', {
-  region: "us-central1"
+function formatOrderNotificationData(order, orderId) {
+  const orderNumber = order.orderId || orderId.slice(-6);
+  const customerName = order.fullName || 'Unknown Customer';
+  const boatName = order.boatName || 'Unknown Boat';
+  const totalAmount = (order.amount_total || 0).toFixed(2);
+  const itemCount = order.items ? order.items.length : 0;
+  
+  // Format items for template
+  let formattedItems = [];
+  if (order.items && order.items.length > 0) {
+    formattedItems = order.items.map(item => ({
+      name: item.name || 'Item',
+      quantity: item.quantity || 1,
+      price: (item.price || 0).toFixed(2),
+      itemTotal: ((item.price || 0) * (item.quantity || 1)).toFixed(2)
+    }));
+  }
+
+  // Check if there are special instructions (based on your actual fields)
+  const hasSpecialInstructions = !!(
+    order.specialNotes || 
+    order.deliveryInstructions
+  );
+
+  return {
+    // Header information
+    orderNumber: orderNumber,
+    totalAmount: totalAmount,
+    itemCount: itemCount,
+    timestamp: new Date().toLocaleString(),
+    
+    // Customer information (based on your database fields)
+    customerName: customerName,
+    boatName: boatName,
+    customerEmail: order.customerEmail || 'Not provided',
+    phoneNumber: order.phoneNumber || 'Not provided',
+    rentalCompany: order.rentalCompany || 'Not provided',
+    orderDate: order.orderDate || new Date().toLocaleDateString(),
+    orderSource: order.orderSource || 'Unknown',
+    paymentMethod: order.paymentMethod || 'Not specified',
+    paymentStatus: order.paymentStatus || order.status || 'Unknown',
+    currency: order.currency?.toUpperCase() || 'EUR',
+    
+    // Delivery information (based on your database fields)
+    marina: order.marina || order.boatLocation || 'Not specified',
+    berthNumber: order.berthNumber || null,
+    berthName: order.berthName || null,
+    deliveryAddress: order.deliveryAddress || null,
+    
+    // Order items
+    items: formattedItems,
+    
+    // Special instructions (based on your database fields)
+    hasSpecialInstructions: hasSpecialInstructions,
+    specialNotes: order.specialNotes || null,
+    deliveryInstructions: order.deliveryInstructions || null,
+    
+    // Additional info
+    sessionId: order.sessionId || null,
+    contactMe: order.contactMe || false,
+    contactRental: order.contactRental || false
+  };
+}
+
+// ========================================
+// REPLACE YOUR EXISTING notifyNewOrder FUNCTION WITH THIS:
+// ========================================
+
+// 🔥 UPDATED: New Order Email Notification using SendGrid Template
+exports.notifyNewOrder = onDocumentCreated({
+  document: 'orders/{orderId}',
+  // Try removing region specification or use a different region
+  // region: "us-central1", // Comment this out first
+  secrets: ["SENDGRID_API_KEY"]
 }, async (event) => {
   try {
-    const order = event.data.data();
+    console.log('🔥 NEW ORDER FUNCTION TRIGGERED!');
+    console.log('📦 Full event object:', JSON.stringify(event, null, 2));
+    
+    // For v2, the data structure is different
+    const snapshot = event.data;
+    if (!snapshot) {
+      console.log("❌ No data associated with the event");
+      return;
+    }
+    
+    const order = snapshot.data();
     const orderId = event.params.orderId;
     
-    console.log('New order detected:', orderId);
+    console.log('📦 Order ID:', orderId);
+    console.log('📊 Order data received:', JSON.stringify(order, null, 2));
     
-    // Build notification message
-    const orderNumber = order.orderId || orderId.slice(-6);
-    const customerName = order.fullName || 'Customer';
-    const boatName = order.boatName || 'Boat';
-    const totalAmount = order.amount_total || 0;
-    const itemCount = order.items ? order.items.length : 0;
+    // Check if SendGrid API key exists
+    const apiKey = process.env.SENDGRID_API_KEY;
+    console.log('🔑 SendGrid API key exists:', !!apiKey);
+    console.log('🔑 API key starts with:', apiKey ? apiKey.substring(0, 10) + '...' : 'NOT FOUND');
     
-    // Get all users with REAL FCM tokens (not simple tokens)
-    const usersSnapshot = await admin.firestore().collection('users')
-      .where('notificationsEnabled', '==', true)
-      .get();
+    // Check admin email
+    console.log('📧 Admin email:', ADMIN_EMAIL);
     
-    const fcmTokens = [];
-    usersSnapshot.forEach(doc => {
-      const userData = doc.data();
-      // Only use real FCM tokens (they're longer and don't start with 'token_')
-      if (userData.fcmToken && !userData.fcmToken.startsWith('token_') && userData.fcmToken.length > 50) {
-        fcmTokens.push(userData.fcmToken);
-      }
-    });
-    
-    console.log(`Found ${fcmTokens.length} real FCM tokens`);
-    
-    if (fcmTokens.length === 0) {
-      console.log('No users with FCM tokens found');
-      return { success: false, message: 'No FCM tokens' };
+    if (!apiKey) {
+      console.error('❌ SendGrid API key not found!');
+      return { success: false, error: 'SendGrid API key missing' };
     }
     
-    // Send REAL push notification
-    const message = {
-      notification: {
-        title: '🍽️ NEW ORDER ALERT!',
-        body: `Order #${orderNumber} from ${customerName} on ${boatName} - €${totalAmount} (${itemCount} items)`,
-        icon: '/icon-192x192.png'
-      },
-      data: {
-        orderId: orderId,
-        orderNumber: orderNumber,
-        customerName: customerName,
-        boatName: boatName,
-        totalAmount: totalAmount.toString(),
-        url: '/orders',
-        type: 'new-order'
-      },
-      tokens: fcmTokens
+    if (!ADMIN_EMAIL || ADMIN_EMAIL === 'your-admin-email@example.com') {
+      console.error('❌ Admin email not configured!');
+      return { success: false, error: 'Admin email not configured' };
+    }
+    
+    // Format order data for SendGrid template
+    console.log('🔄 Formatting order data...');
+    const templateData = formatOrderNotificationData(order, orderId);
+    
+    console.log('📋 Template data prepared:', JSON.stringify(templateData, null, 2));
+    
+    // Send email using SendGrid template
+    const emailData = {
+      to: ADMIN_EMAIL,
+      from: 'info@justenjoyibiza.com',
+      templateId: SENDGRID_ORDER_NOTIFICATION_TEMPLATE_ID,
+      dynamic_template_data: templateData
     };
     
-    const response = await admin.messaging().sendMulticast(message);
+    console.log('📤 Sending email with data:', JSON.stringify(emailData, null, 2));
     
-    console.log(`Push notifications sent successfully: ${response.successCount} sent, ${response.failureCount} failed`);
+    const result = await sendEmailDirectApi(emailData);
     
-    // Clean up invalid tokens
-    if (response.responses) {
-      const invalidTokens = [];
-      response.responses.forEach((resp, idx) => {
-        if (!resp.success) {
-          invalidTokens.push(fcmTokens[idx]);
-          console.log('Invalid token:', resp.error);
+    console.log('✅ Email sent successfully!', result);
+    console.log(`📧 Order notification email sent for order #${templateData.orderNumber}`);
+    
+    return { success: true, message: 'Email notification sent' };
+    
+  } catch (error) {
+    console.error('❌ ERROR in notifyNewOrder function:', error);
+    console.error('❌ Error stack:', error.stack);
+    return { success: false, error: error.message };
+  }
+});
+
+// ========================================
+// ADD THIS NEW TEST FUNCTION:
+// ========================================
+
+// 🆕 Test function for order notification emails
+exports.testOrderNotification = onCall({
+  region: "us-central1",
+  secrets: ["SENDGRID_API_KEY"],
+  maxInstances: 10
+}, async (request) => {
+  try {
+    console.log('Test function called');
+    
+    // Test order based on your actual database structure
+    const testOrder = {
+      orderId: 'TEST123',
+      fullName: 'John Test Customer',
+      boatName: 'Luna',
+      customerEmail: 'customer@test.com',
+      phoneNumber: '695688348',
+      rentalCompany: 'Just Enjoy Ibiza',
+      orderDate: '2025-05-27',
+      marina: 'Marina Ibiza',
+      boatLocation: 'Marina Ibiza',
+      berthNumber: 'A20',
+      berthName: 'Premium Berth',
+      deliveryAddress: 'Marina Ibiza, Berth A20',
+      amount_total: 25.50,
+      currency: 'eur',
+      orderSource: 'Website',
+      paymentMethod: 'card',
+      paymentStatus: 'paid',
+      status: 'paid',
+      specialNotes: 'Please deliver to the main dock',
+      deliveryInstructions: 'Call when arriving at marina',
+      contactMe: false,
+      contactRental: false,
+      sessionId: 'cs_test_123456789',
+      items: [
+        { 
+          id: '506GkIox9zysB7bGXLXx',
+          name: 'Solan de Cabras 0.33ml', 
+          quantity: 2, 
+          price: 1.00 
+        },
+        { 
+          id: '507GkIox9zysB7bGXLXy',
+          name: 'Paella Valenciana', 
+          quantity: 1, 
+          price: 23.50 
         }
-      });
-      
-      // Remove invalid tokens from database
-      if (invalidTokens.length > 0) {
-        const batch = admin.firestore().batch();
-        const allUsers = await admin.firestore().collection('users').get();
-        
-        allUsers.forEach(doc => {
-          const userData = doc.data();
-          if (invalidTokens.includes(userData.fcmToken)) {
-            batch.update(doc.ref, { fcmToken: admin.firestore.FieldValue.delete() });
-          }
-        });
-        
-        await batch.commit();
-        console.log(`Cleaned up ${invalidTokens.length} invalid tokens`);
-      }
-    }
+      ]
+    };
+    
+    console.log('Formatting test order data...');
+    const templateData = formatOrderNotificationData(testOrder, 'test-order-id');
+    
+    console.log('Template data:', templateData);
+    
+    const emailData = {
+      to: ADMIN_EMAIL,
+      from: 'info@justenjoyibiza.com',
+      templateId: SENDGRID_ORDER_NOTIFICATION_TEMPLATE_ID,
+      dynamic_template_data: templateData
+    };
+
+    console.log('Sending email with SendGrid...');
+    await sendEmailDirectApi(emailData);
+    
+    console.log('Test email sent successfully!');
     
     return { 
       success: true, 
-      sent: response.successCount, 
-      failed: response.failureCount 
+      message: `Test order notification email sent to ${ADMIN_EMAIL}`,
+      templateId: SENDGRID_ORDER_NOTIFICATION_TEMPLATE_ID
     };
-    
   } catch (error) {
-    console.error('Error sending push notification:', error);
-    return { success: false, error: error.message };
+    console.error('Test function error:', error);
+    throw new HttpsError('internal', `Test failed: ${error.message}`);
   }
 });
