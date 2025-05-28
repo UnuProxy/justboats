@@ -83,15 +83,14 @@ const InvoiceGenerator = () => {
   };
 
   // Calculate by summing the individual item totals directly
-  const subtotal = items.reduce((sum, item) => sum + (item.unitPrice - (item.unitPrice * item.discount / 100)), 0);
-  const vat = Math.round(subtotal * 0.21 * 100) / 100; // Round to 2 decimal places
-  
-  // Calculate total by summing individual item totals instead of subtotal + vat
-  const total = items.reduce((sum, item) => {
-    const discountedPrice = item.unitPrice - (item.unitPrice * item.discount / 100);
-    const itemTotal = Math.round((discountedPrice + Math.round(discountedPrice * 0.21 * 100) / 100) * 100) / 100;
-    return sum + itemTotal;
-  }, 0);
+ // Calculate totals with VAT extraction logic
+const total = items.reduce((sum, item) => {
+  const discountedPriceInclVat = item.unitPrice - (item.unitPrice * item.discount / 100);
+  return sum + discountedPriceInclVat;
+}, 0);
+
+const vat = Math.round((total * 0.21 / 1.21) * 100) / 100; // Extract total VAT
+const subtotal = Math.round((total / 1.21) * 100) / 100; // Calculate net amount (without VAT)
   
   // Format currency with Euro symbol, ensuring proper rounding
   const formatCurrency = (amount) => {
@@ -398,7 +397,7 @@ const InvoiceGenerator = () => {
               <tr className="border-b border-gray-300">
                 <th className="text-left py-3 px-2">Item</th>
                 <th className="text-left py-3 px-2">Description</th>
-                <th className="text-right py-3 px-2">Unit price</th>
+               <th className="text-right py-3 px-2">Price (VAT incl.)</th>
                 <th className="text-right py-3 px-2">Discount</th>
                 <th className="text-right py-3 px-2">VAT (21%)</th>
                 <th className="text-right py-3 px-2">Total Amount EUR</th>
@@ -406,10 +405,10 @@ const InvoiceGenerator = () => {
               </tr>
             </thead>
             <tbody>
-              {items.map((item, index) => {
-                const discountedPrice = item.unitPrice - (item.unitPrice * item.discount / 100);
-                const itemVat = Math.round(discountedPrice * 0.21 * 100) / 100; // Round VAT to 2 decimal places
-                const totalAmount = Math.round((discountedPrice + itemVat) * 100) / 100; // Round total to exactly 2 decimal places
+             {items.map((item, index) => {
+  const discountedPriceInclVat = item.unitPrice - (item.unitPrice * item.discount / 100);
+  const itemVat = Math.round((discountedPriceInclVat * 0.21 / 1.21) * 100) / 100; // Extract VAT from inclusive price
+  const totalAmount = discountedPriceInclVat; // This is already the VAT-inclusive total
                 
                 return (
                   <tr key={item.id} className="border-b border-gray-200">
@@ -442,15 +441,15 @@ const InvoiceGenerator = () => {
             className="border p-2 sm:col-span-2"
           />
           <input
-            type="number"
-            placeholder="Unit Price"
-            name="unitPrice"
-            value={invoiceData.unitPrice}
-            onChange={handleInputChange}
-            className="border p-2"
-            min="0"
-            step="0.01"
-          />
+  type="number"
+  placeholder="Price (VAT incl.)"
+  name="unitPrice"
+  value={invoiceData.unitPrice}
+  onChange={handleInputChange}
+  className="border p-2"
+  min="0"
+  step="0.01"
+/>
           <input
             type="number"
             placeholder="Discount %"
@@ -488,16 +487,30 @@ const InvoiceGenerator = () => {
         </div>
 
         {/* Footer Section */}
-        <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
-          <div>
-            <h3 className="font-bold mb-2">Contact Information:</h3>
-            <p>For any queries regarding this invoice, please contact us at:</p>
-            <p>Email: info@justenjoyibiza.com</p>
-            <p>Phone: +34 692 688 348</p>
-            <p>Address: 48/52 Av.Sant Jordi,</p>
-            <p>Ibiza, 07800, Spain</p>
-          </div>
-        </div>
+        {/* Footer Section */}
+<div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
+  <div>
+    <h3 className="font-bold mb-2">Contact Information:</h3>
+    <p>For any queries regarding this invoice, please contact us at:</p>
+    <p>Email: info@justenjoyibiza.com</p>
+    <p>Phone: +34 692 688 348</p>
+    <p>Address: 48/52 Av.Sant Jordi,</p>
+    <p>Ibiza, 07800, Spain</p>
+  </div>
+  <div>
+    <h3 className="font-bold mb-2">Payment Information:</h3>
+    <p>Please make payment by bank transfer to:</p>
+    <p className="font-mono bg-gray-100 p-2 rounded mt-2">
+      <strong>IBAN:</strong> ES86 0182 0288 0002 0167 8954
+    </p>
+    <p className="mt-2 text-sm text-gray-600">
+      Account holder: Just Enjoy Ibiza
+    </p>
+    <p className="text-sm text-gray-600">
+      Please include invoice number as reference
+    </p>
+  </div>
+</div>
 
         <div className="mt-8 text-center">
           <p>Thank you for your business and we look forward to working with you soon.</p>
