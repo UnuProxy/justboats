@@ -7,7 +7,8 @@ import {
   History,
   Edit,
   MapPin,
-  ExternalLink
+  ExternalLink,
+  Copy
 } from 'lucide-react';
 import {
   collection,
@@ -30,6 +31,7 @@ const LocationQRManager = () => {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [scanStats, setScanStats] = useState(null);
   const [viewMode, setViewMode] = useState('list'); // 'list', 'add', 'edit', 'stats'
+  const [useSimpleUrl, setUseSimpleUrl] = useState(false);
 
   // Form state - removed WhatsApp fields
   const [formData, setFormData] = useState({
@@ -67,7 +69,6 @@ const LocationQRManager = () => {
   const createLocation = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
-      alert('Please enter a name for the location');
       return;
     }
     
@@ -109,7 +110,6 @@ const LocationQRManager = () => {
       setViewMode('list');
     } catch (err) {
       console.error('Error creating location:', err);
-      alert('Failed to create location');
     } finally {
       setLoading(false);
     }
@@ -147,7 +147,6 @@ const LocationQRManager = () => {
       setSelectedLocation(null);
     } catch (err) {
       console.error('Error updating location:', err);
-      alert('Failed to update location');
     } finally {
       setLoading(false);
     }
@@ -164,7 +163,6 @@ const LocationQRManager = () => {
         setLocations(prev => prev.filter(loc => loc.id !== id));
       } catch (err) {
         console.error('Error deleting location:', err);
-        alert('Failed to delete QR code');
       }
     }
   };
@@ -184,25 +182,54 @@ const LocationQRManager = () => {
     const container = document.getElementById(`qr-canvas-${id}`);
     const svg = container?.querySelector('svg');
     if (!svg) return;
-    const svgData = new XMLSerializer().serializeToString(svg);
-    const blob = new Blob([svgData], {
-      type: 'image/svg+xml;charset=utf-8'
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+    
     const location = locations.find(loc => loc.id === id);
-    link.href = url;
-    link.download = `qr-code-${location.name.replace(/\s+/g, '-').toLowerCase()}.svg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const fileName = `qr-code-${location.name.replace(/\s+/g, '-').toLowerCase()}.jpg`;
+    
+    // Create canvas element
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Set canvas size to match QR code size (200x200 + margins)
+    canvas.width = 240;
+    canvas.height = 240;
+    
+    // Fill with white background
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Convert SVG to image
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const svgUrl = URL.createObjectURL(svgBlob);
+    
+    const img = new Image();
+    img.onload = () => {
+      // Draw the QR code centered on canvas
+      const padding = 20;
+      ctx.drawImage(img, padding, padding, canvas.width - padding * 2, canvas.height - padding * 2);
+      
+      // Convert canvas to JPG and download
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(svgUrl);
+      }, 'image/jpeg', 0.95); // 95% quality JPG
+    };
+    
+    img.src = svgUrl;
   };
 
   // URL for the redirect function
   const TRACK_FN_URL = 'https://us-central1-crm-boats.cloudfunctions.net/trackAndRedirect';
   
-  // Generate QR code URL with parameters
+  // Generate QR code URL with parameters (keeping your original structure)
   const getQrCodeUrl = location => {
     let url = `${TRACK_FN_URL}?locationId=${location.id}`;
     
@@ -218,6 +245,39 @@ const LocationQRManager = () => {
     }
     
     return url;
+  };
+
+  // Ultra-simple QR code URL - just the ID (optional for cleaner codes)
+  const getSimpleQrCodeUrl = location => {
+    return `${TRACK_FN_URL}?locationId=${location.id}`;
+  };
+
+  // Get the appropriate URL based on user preference
+  const getFinalQrCodeUrl = location => {
+    return useSimpleUrl ? getSimpleQrCodeUrl(location) : getQrCodeUrl(location);
+  };
+
+  // QR code complexity indicator
+  const getQrCodeComplexity = (url) => {
+    if (url.length < 50) return { level: 'Simple', color: 'green', description: 'Easy to scan' };
+    if (url.length < 100) return { level: 'Medium', color: 'yellow', description: 'Good scanning' };
+    return { level: 'Complex', color: 'red', description: 'May be harder to scan' };
+  };
+
+  // Copy URL to clipboard
+  const copyUrlToClipboard = async (location) => {
+    const url = getFinalQrCodeUrl(location);
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (err) {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = url;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+    }
   };
     
   const fetchScanStats = async locationId => {
@@ -247,7 +307,6 @@ const LocationQRManager = () => {
       setViewMode('stats');
     } catch (err) {
       console.error('Error fetching scan stats:', err);
-      alert('Failed to fetch scan statistics');
     }
   };
 
@@ -429,7 +488,7 @@ const LocationQRManager = () => {
               </p>
             </div>
 
-            <div className="mb-6">
+            <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Address (optional)
               </label>
@@ -444,6 +503,37 @@ const LocationQRManager = () => {
               <p className="text-xs text-gray-500 mt-1">
                 Physical location where this QR code will be placed
               </p>
+            </div>
+
+            {/* QR Code Options */}
+            <div className="mb-6 p-4 bg-gray-50 rounded-md">
+              <h3 className="text-sm font-medium text-gray-700 mb-3">QR Code Options</h3>
+              <div className="mb-4">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={useSimpleUrl}
+                    onChange={(e) => setUseSimpleUrl(e.target.checked)}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">Generate simple QR codes (recommended for better scanning)</span>
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  Simple codes only include the location ID. Additional data will be fetched server-side.
+                </p>
+              </div>
+              
+              {/* Preview URL length if form has data */}
+              {formData.name && (
+                <div className="text-xs text-gray-600">
+                  <p>Preview URL length: ~{useSimpleUrl ? 80 : 80 + (formData.name?.length || 0) + (formData.category?.length || 0)} characters</p>
+                  <p className={useSimpleUrl ? 'text-green-600' : formData.name.length > 20 ? 'text-red-600' : 'text-yellow-600'}>
+                    {useSimpleUrl ? '✓ Simple QR code - Easy to scan' : 
+                     formData.name.length > 20 ? '⚠ Complex QR code - May be harder to scan' : 
+                     '◐ Medium QR code - Good scanning'}
+                  </p>
+                </div>
+              )}
             </div>
 
             <button
@@ -473,13 +563,24 @@ const LocationQRManager = () => {
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Location QR Codes</h1>
-        <button
-          onClick={() => setViewMode('add')}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-        >
-          <PlusCircle size={18} className="mr-2" />
-          Add New QR Code
-        </button>
+        <div className="flex gap-2">
+          <label className="flex items-center text-sm">
+            <input
+              type="checkbox"
+              checked={useSimpleUrl}
+              onChange={(e) => setUseSimpleUrl(e.target.checked)}
+              className="mr-2"
+            />
+            Simple QR codes
+          </label>
+          <button
+            onClick={() => setViewMode('add')}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            <PlusCircle size={18} className="mr-2" />
+            Add New QR Code
+          </button>
+        </div>
       </div>
 
       {locations.length === 0 ? (
@@ -498,88 +599,115 @@ const LocationQRManager = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {locations.map(location => (
-            <div
-              key={location.id}
-              className="bg-white rounded-lg shadow-md overflow-hidden"
-            >
-              <div className="p-4 border-b border-gray-100">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-semibold text-lg">{location.name}</h3>
-                    {location.description && (
-                      <p className="text-sm text-gray-500 mt-1">{location.description}</p>
-                    )}
-                    {location.category && (
-                      <span className="inline-block px-2 py-1 mt-2 text-xs bg-blue-100 text-blue-800 rounded-full">
-                        {location.category}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {location.scanCount || 0} scans
-                  </div>
-                </div>
-              </div>
-
+          {locations.map(location => {
+            const qrUrl = getFinalQrCodeUrl(location);
+            const complexity = getQrCodeComplexity(qrUrl);
+            
+            return (
               <div
-                id={`qr-canvas-${location.id}`}
-                className="flex justify-center py-6 px-4 bg-gray-50"
+                key={location.id}
+                className="bg-white rounded-lg shadow-md overflow-hidden"
               >
-                <QRCodeSVG
-                  value={getQrCodeUrl(location)}
-                  size={150}
-                  level="H"
-                  includeMargin
-                />
-              </div>
-
-              <div className="p-4 bg-white border-t border-gray-100">
-                <div className="mb-3">
-                  <a
-                    href={getQrCodeUrl(location)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center text-sm text-blue-600 hover:text-blue-800"
-                  >
-                    <ExternalLink size={14} className="mr-1" />
-                    <span>Preview Destination</span>
-                  </a>
+                <div className="p-4 border-b border-gray-100">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-semibold text-lg">{location.name}</h3>
+                      {location.description && (
+                        <p className="text-sm text-gray-500 mt-1">{location.description}</p>
+                      )}
+                      {location.category && (
+                        <span className="inline-block px-2 py-1 mt-2 text-xs bg-blue-100 text-blue-800 rounded-full">
+                          {location.category}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      {location.scanCount || 0} scans
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => downloadQrCode(location.id)}
-                    className="flex items-center px-3 py-1 bg-gray-200 rounded-md hover:bg-gray-300 text-sm"
-                  >
-                    <Download size={16} className="mr-1" />
-                    Download QR
-                  </button>
-                  <button
-                    onClick={() => fetchScanStats(location.id)}
-                    className="flex items-center px-3 py-1 bg-gray-200 rounded-md hover:bg-gray-300 text-sm"
-                  >
-                    <History size={16} className="mr-1" />
-                    Stats
-                  </button>
-                  <button
-                    onClick={() => handleEditLocation(location)}
-                    className="flex items-center px-3 py-1 bg-gray-200 rounded-md hover:bg-gray-300 text-sm"
-                  >
-                    <Edit size={16} className="mr-1" />
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => deleteLocation(location.id)}
-                    className="flex items-center px-3 py-1 bg-red-100 text-red-600 rounded-md hover:bg-red-200 text-sm"
-                  >
-                    <Trash2 size={16} className="mr-1" />
-                    Delete
-                  </button>
+                <div
+                  id={`qr-canvas-${location.id}`}
+                  className="flex flex-col items-center py-6 px-4 bg-gray-50"
+                >
+                  <QRCodeSVG
+                    value={qrUrl}
+                    size={200}                    // Increased size for better scanning
+                    level={useSimpleUrl ? "L" : "M"}  // Low error correction for simple, Medium for detailed
+                    includeMargin={true}
+                    fgColor="#000000"            // Black foreground
+                    bgColor="#FFFFFF"            // White background
+                  />
+                  
+                  {/* URL Quality Indicator */}
+                  <div className="mt-3 text-center">
+                    <div className="text-xs text-gray-500">
+                      URL Length: {qrUrl.length} chars
+                    </div>
+                    <div className={`text-xs font-medium ${
+                      complexity.color === 'green' ? 'text-green-600' : 
+                      complexity.color === 'yellow' ? 'text-yellow-600' : 'text-red-600'
+                    }`}>
+                      {complexity.level} - {complexity.description}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-white border-t border-gray-100">
+                  <div className="mb-3">
+                    <a
+                      href={qrUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center text-sm text-blue-600 hover:text-blue-800"
+                    >
+                      <ExternalLink size={14} className="mr-1" />
+                      <span>Preview Destination</span>
+                    </a>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => downloadQrCode(location.id)}
+                      className="flex items-center px-3 py-1 bg-gray-200 rounded-md hover:bg-gray-300 text-sm"
+                    >
+                      <Download size={16} className="mr-1" />
+                      Download
+                    </button>
+                    <button
+                      onClick={() => copyUrlToClipboard(location)}
+                      className="flex items-center px-3 py-1 bg-green-100 text-green-600 rounded-md hover:bg-green-200 text-sm"
+                    >
+                      <Copy size={16} className="mr-1" />
+                      Copy URL
+                    </button>
+                    <button
+                      onClick={() => fetchScanStats(location.id)}
+                      className="flex items-center px-3 py-1 bg-gray-200 rounded-md hover:bg-gray-300 text-sm"
+                    >
+                      <History size={16} className="mr-1" />
+                      Stats
+                    </button>
+                    <button
+                      onClick={() => handleEditLocation(location)}
+                      className="flex items-center px-3 py-1 bg-gray-200 rounded-md hover:bg-gray-300 text-sm"
+                    >
+                      <Edit size={16} className="mr-1" />
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => deleteLocation(location.id)}
+                      className="flex items-center px-3 py-1 bg-red-100 text-red-600 rounded-md hover:bg-red-200 text-sm"
+                    >
+                      <Trash2 size={16} className="mr-1" />
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
