@@ -206,7 +206,9 @@ const ContractGenerator = () => {
   const boatOptions = [
     { id: 'monterey268',   brand: 'Monterey',     model: '268', plate: 'IB-12345', fuelConsumption: '30–40 litres' },
     { id: 'seaRay290',     brand: 'Sea Ray',      model: '290', plate: 'IB-67890', fuelConsumption: '35–45 litres' },
-    { id: 'quicksilver607', brand: 'QuickSilver', model: '607', plate: 'IB-24680', fuelConsumption: '20–25 litres' }
+    { id: 'quicksilver607', brand: 'QuickSilver', model: '607', plate: 'IB-24680', fuelConsumption: '20–25 litres' },
+    { id: 'quicksilver675', brand: 'Quicksilver', model: 'Activ 675', plate: '6ª AT-3-38-23', fuelConsumption: '25–30 litres' },
+    { id: 'seaRay230',     brand: 'Sea Ray',      model: '230 BR', plate: '242364', fuelConsumption: '25–35 litres' }
   ];
 
   // Helpers
