@@ -97,11 +97,39 @@ function UpcomingBookings() {
         console.error('Error normalizing booking date:', bookingDate, e);
       }
     }
+
+    // Debug: Log all booking fields to find partner name field
+    console.log('=== BOOKING DEBUG ===');
+    console.log('All booking fields:', Object.keys(booking));
+    console.log('Full booking object:', booking);
+    console.log('Client Type:', booking.clientType);
+    console.log('Potential partner fields:', {
+      selectedPartnerName: booking.selectedPartnerName,
+      partnerName: booking.partnerName,
+      hotelName: booking.hotelName,
+      collaboratorName: booking.collaboratorName,
+      partner: booking.partner,
+      hotel: booking.hotel,
+      'partner.name': booking.partner?.name,
+      'hotel.name': booking.hotel?.name
+    });
+    console.log('=====================');
+
+    // Try multiple possible partner name fields
+    let partnerName = "";
+    if (booking.selectedPartnerName) partnerName = booking.selectedPartnerName;
+    else if (booking.partnerName) partnerName = booking.partnerName;
+    else if (booking.partner?.name) partnerName = booking.partner.name;
+    else if (booking.hotel?.name) partnerName = booking.hotel.name;
+    else if (booking.hotelName) partnerName = booking.hotelName;
+    else if (booking.collaboratorName) partnerName = booking.collaboratorName;
+    else if (booking.partner) partnerName = booking.partner;
+    else if (booking.hotel) partnerName = booking.hotel;
   
     return {
       ...booking,
       clientType: booking.clientType || "Direct",
-      partnerName: booking.selectedPartnerName || "",
+      partnerName: partnerName,
       clientName: booking.clientDetails?.name || "N/A",
       clientPhone: booking.clientDetails?.phone || "N/A",
       clientEmail: booking.clientDetails?.email || "N/A",
@@ -222,14 +250,24 @@ function UpcomingBookings() {
   // Add this helper function to match orders with bookings
   const getMatchingOrdersForBooking = (booking) => {
     return foodOrders.filter(order => {
-      // Match by email
-      if (booking.clientEmail && order.customerEmail === booking.clientEmail) return true;
+      // Primary match: Email + Date (most reliable)
+      if (booking.clientEmail && order.customerEmail === booking.clientEmail && 
+          booking.bookingDate && order.orderDate === booking.bookingDate) {
+        return true;
+      }
       
-      // Match by boat name
-      if (booking.boatName && order.boatName === booking.boatName) return true;
+      // Secondary match: Email only (if dates don't match but email does)
+      if (booking.clientEmail && order.customerEmail === booking.clientEmail) {
+        return true;
+      }
       
-      // Match by date
-      if (booking.bookingDate && order.orderDate === booking.bookingDate) return true;
+      // Tertiary match: Boat name + Date + Customer name (for cases where email differs)
+      if (booking.boatName && order.boatName === booking.boatName &&
+          booking.bookingDate && order.orderDate === booking.bookingDate &&
+          booking.clientName && order.fullName && 
+          booking.clientName.toLowerCase().includes(order.fullName.toLowerCase().split(' ')[0].toLowerCase())) {
+        return true;
+      }
       
       return false;
     });
@@ -379,9 +417,6 @@ function UpcomingBookings() {
     });
     setIsSearchMode(false);
   };
-
-  // No pagination in this simplified version
-  // Using the full filtered bookings list directly
 
   // Filter bookings based on date
   useEffect(() => {
@@ -572,7 +607,7 @@ function UpcomingBookings() {
     
     return (
       <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-        <div className="bg-white p-6 rounded-xl shadow-lg max-w-md w-full">
+        <div className="bg-white p-6 rounded-xl shadow-lg max-w-md w-full mx-4">
           <div className="flex flex-col items-center justify-center space-y-4">
             <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-500 border-t-transparent"></div>
             <span className="text-gray-700 font-medium text-lg">Loading bookings...</span>
@@ -637,11 +672,11 @@ function UpcomingBookings() {
     
     return (
       <div className="bg-white p-3 sm:p-4 rounded-xl shadow-md mb-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <button
               onClick={() => setIsDatePickerOpen(!isDatePickerOpen)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium w-full sm:w-auto justify-center sm:justify-start ${
                 isDatePickerOpen ? 'bg-blue-100 text-blue-700 border-blue-300' : 'border-gray-300 text-gray-700'
               }`}
             >
@@ -651,15 +686,15 @@ function UpcomingBookings() {
             
             {/* Display selected date range */}
             {(filters.dateFrom || filters.dateTo) && (
-              <span className="text-sm text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg">
+              <span className="text-sm text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg text-center">
                 {getDateDisplay()}
               </span>
             )}
           </div>
           
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             {!isSearchMode && (
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2 w-full">
                 <button
                   onClick={handleJumpToToday}
                   className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium"
@@ -670,17 +705,17 @@ function UpcomingBookings() {
                 <div className="flex items-center border rounded-lg overflow-hidden">
                   <button
                     onClick={handlePreviousDays}
-                    className="p-2 hover:bg-gray-100 border-r"
+                    className="p-2 hover:bg-gray-100 border-r flex-1 sm:flex-none"
                     aria-label="Previous days"
                   >
-                    <ChevronLeft className="h-5 w-5 text-gray-600" />
+                    <ChevronLeft className="h-5 w-5 text-gray-600 mx-auto" />
                   </button>
                   <button
                     onClick={handleNextDays}
-                    className="p-2 hover:bg-gray-100"
+                    className="p-2 hover:bg-gray-100 flex-1 sm:flex-none"
                     aria-label="Next days"
                   >
-                    <ChevronRight className="h-5 w-5 text-gray-600" />
+                    <ChevronRight className="h-5 w-5 text-gray-600 mx-auto" />
                   </button>
                 </div>
               </div>
@@ -690,7 +725,7 @@ function UpcomingBookings() {
             {isSearchMode && (
               <button
                 onClick={clearDateFilter}
-                className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium"
+                className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium w-full"
               >
                 Clear Filter
               </button>
@@ -700,7 +735,7 @@ function UpcomingBookings() {
         
         {isDatePickerOpen && (
           <div className="bg-blue-50 p-3 sm:p-4 rounded-lg mt-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div className="grid grid-cols-1 gap-4 mb-4">
               {/* From Date Calendar */}
               <div className="bg-white p-3 rounded-lg border border-blue-200">
                 <div className="flex justify-between items-center mb-2">
@@ -723,7 +758,7 @@ function UpcomingBookings() {
                 
                 {/* Calendar popup */}
                 {showFromCalendar && (
-                  <div className="relative z-10 flex justify-center md:justify-start">
+                  <div className="relative z-10 flex justify-center">
                     <CalendarPicker
                       selectedDate={filters.dateFrom}
                       onChange={handleFromDateSelect}
@@ -755,7 +790,7 @@ function UpcomingBookings() {
                 
                 {/* Calendar popup */}
                 {showToCalendar && (
-                  <div className="relative z-10 flex justify-center md:justify-start">
+                  <div className="relative z-10 flex justify-center">
                     <CalendarPicker
                       selectedDate={filters.dateTo}
                       onChange={handleToDateSelect}
@@ -767,20 +802,13 @@ function UpcomingBookings() {
             </div>
             
             {/* Simplified Button Row */}
-            <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-2">
-              <button
-                onClick={() => setIsDatePickerOpen(false)}
-                className="mt-2 sm:mt-0 px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium w-full sm:w-auto"
-              >
-                Close
-              </button>
-              
-              <div className="flex gap-2 flex-col sm:flex-row">
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 {/* Only one clear button at this level */}
                 {(filters.dateFrom || filters.dateTo) && (
                   <button
                     onClick={handleClearAll}
-                    className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium w-full sm:w-auto"
+                    className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium w-full"
                   >
                     Clear Dates
                   </button>
@@ -791,11 +819,18 @@ function UpcomingBookings() {
                     setShowFromCalendar(false);
                     setShowToCalendar(false);
                   }}
-                  className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium w-full sm:w-auto"
+                  className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium w-full"
                 >
                   Search
                 </button>
               </div>
+              
+              <button
+                onClick={() => setIsDatePickerOpen(false)}
+                className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium w-full"
+              >
+                Close
+              </button>
             </div>
           </div>
         )}
@@ -809,9 +844,9 @@ function UpcomingBookings() {
       <div className="space-y-4">
         <div className="bg-white rounded-xl shadow-md overflow-hidden">
           <div className="bg-blue-500 text-white px-4 py-3">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
               <h3 className="font-semibold text-lg">Search Results</h3>
-              <span>
+              <span className="text-sm">
                 {filteredBookings.length} {filteredBookings.length === 1 ? 'booking' : 'bookings'} found
               </span>
             </div>
@@ -830,67 +865,77 @@ function UpcomingBookings() {
                   onClick={() => handleBookingSelect(booking)}
                   className="p-4 hover:bg-gray-50 cursor-pointer transition-colors"
                 >
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-medium text-gray-900">{booking.clientName}</h4>
-                        <span className="text-sm text-gray-500">{formatDateForDisplay(booking.bookingDate)}</span>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                          <h4 className="font-medium text-gray-900">{booking.clientName}</h4>
+                          <span className="text-sm text-gray-500">{formatDateForDisplay(booking.bookingDate)}</span>
+                        </div>
+                        <div className="text-sm text-gray-600 mt-1">{booking.clientEmail || booking.clientPhone}</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {booking.clientType === 'Hotel' && booking.partnerName ? 
+                            `Hotel (${booking.partnerName})` : 
+                            booking.clientType === 'Collaborator' && booking.partnerName ? 
+                            `Collaborator (${booking.partnerName})` : 
+                            booking.clientType
+                          }
+                        </div>
                       </div>
-                      <div className="text-sm text-gray-600">{booking.clientEmail || booking.clientPhone}</div>
-                    </div>
-                    
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      booking.isCancelled ? 'bg-red-100 text-red-700' :
-                      booking.paymentStatus === 'Completed' ? 'bg-green-100 text-green-700' :
-                      booking.paymentStatus === 'Partial' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-gray-100 text-gray-700'
-                    }`}>
-                      {booking.isCancelled ? 'Cancelled' : booking.paymentStatus}
-                    </span>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-2">
-                    <div className="flex items-center gap-1 text-sm">
-                      <Ship className="h-4 w-4 text-blue-500" />
-                      <span className="truncate">{booking.boatName}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-1 text-sm">
-                      <Clock className="h-4 w-4 text-green-500" />
-                      <span>{booking.startTime} - {booking.endTime}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-1 text-sm">
-                      <Users className="h-4 w-4 text-purple-500" />
-                      <span>{booking.numberOfPassengers || 0} passengers</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-1 text-sm font-medium">
-                      <Euro className="h-4 w-4 text-indigo-500" />
-                      <span>€{booking.finalPrice.toFixed(2)}</span>
-                    </div>
-                  </div>
-                  
-                  {(booking.privateTransfer || booking.restaurantName) && (
-                    <div className="flex flex-wrap gap-3 mt-2">
-                      {booking.privateTransfer && (
-                        <div className="flex items-center gap-1 text-xs bg-yellow-50 px-2 py-1 rounded">
-                          <MapPin className="h-3 w-3 text-yellow-500" />
-                          <span>Transfer</span>
-                        </div>
-                      )}
                       
-                      {booking.restaurantName && (
-                        <div className="flex items-center gap-1 text-xs bg-red-50 px-2 py-1 rounded">
-                          <Home className="h-3 w-3 text-red-500" />
-                          <span>{booking.restaurantName}</span>
-                        </div>
-                      )}
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+                        booking.isCancelled ? 'bg-red-100 text-red-700' :
+                        booking.paymentStatus === 'Completed' ? 'bg-green-100 text-green-700' :
+                        booking.paymentStatus === 'Partial' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {booking.isCancelled ? 'Cancelled' : booking.paymentStatus}
+                      </span>
                     </div>
-                  )}
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Ship className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                        <span className="truncate">{booking.boatName}</span>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 text-sm">
+                        <Clock className="h-4 w-4 text-green-500 flex-shrink-0" />
+                        <span>{booking.startTime} - {booking.endTime}</span>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 text-sm">
+                        <Users className="h-4 w-4 text-purple-500 flex-shrink-0" />
+                        <span>{booking.numberOfPassengers || 0} passengers</span>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Euro className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+                        <span>€{booking.finalPrice.toFixed(2)}</span>
+                      </div>
+                    </div>
+                    
+                    {(booking.privateTransfer || booking.restaurantName) && (
+                      <div className="flex flex-wrap gap-2">
+                        {booking.privateTransfer && (
+                          <div className="flex items-center gap-1 text-xs bg-yellow-50 px-2 py-1 rounded">
+                            <MapPin className="h-3 w-3 text-yellow-500" />
+                            <span>Transfer</span>
+                          </div>
+                        )}
+                        
+                        {booking.restaurantName && (
+                          <div className="flex items-center gap-1 text-xs bg-red-50 px-2 py-1 rounded">
+                            <Home className="h-3 w-3 text-red-500" />
+                            <span>{booking.restaurantName}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-                  {/* Add Food Order Indicator in search view */}
-                  <FoodOrderIndicator booking={booking} />
+                    {/* Add Food Order Indicator in search view */}
+                    <FoodOrderIndicator booking={booking} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -903,37 +948,39 @@ function UpcomingBookings() {
   // Timeline View
   const renderTimelineView = () => {
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         {getDaysArray().map((date, index) => {
           const dateBookings = getBookingsForDate(date);
           const dateString = formatDate(date);
           
           return (
             <div key={index} className={`rounded-xl overflow-hidden shadow-md ${isToday(date) ? 'ring-2 ring-blue-500' : ''}`}>
-              <div className={`px-4 py-3 ${isToday(date) ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white' : 'bg-gradient-to-r from-gray-100 to-gray-200'} flex justify-between items-center`}>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold text-lg">{dateString}</h3>
-                  <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${isToday(date) ? 'bg-white bg-opacity-20' : 'bg-blue-100 text-blue-800'}`}>
-                    {dateBookings.length} {dateBookings.length === 1 ? 'booking' : 'bookings'}
-                  </span>
-                </div>
-                
-                {dateBookings.length > 0 && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <div className={`flex items-center gap-1 px-2 py-1 rounded-md ${isToday(date) ? 'bg-white bg-opacity-20' : 'bg-blue-50'}`}>
-                      <Users className="h-4 w-4" />
-                      <span>
-                        {dateBookings.reduce((sum, booking) => sum + (booking.numberOfPassengers || 0), 0)} passengers
-                      </span>
-                    </div>
-                    <div className={`flex items-center gap-1 px-2 py-1 rounded-md ${isToday(date) ? 'bg-white bg-opacity-20' : 'bg-blue-50'}`}>
-                      <Euro className="h-4 w-4" />
-                      <span>
-                        €{dateBookings.reduce((sum, booking) => sum + booking.finalPrice, 0).toFixed(0)}
-                      </span>
-                    </div>
+              <div className={`px-4 py-3 ${isToday(date) ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white' : 'bg-gradient-to-r from-gray-100 to-gray-200'}`}>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg">{dateString}</h3>
+                    <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${isToday(date) ? 'bg-white bg-opacity-20' : 'bg-blue-100 text-blue-800'}`}>
+                      {dateBookings.length} {dateBookings.length === 1 ? 'booking' : 'bookings'}
+                    </span>
                   </div>
-                )}
+                  
+                  {dateBookings.length > 0 && (
+                    <div className="flex items-center gap-3 text-sm">
+                      <div className={`flex items-center gap-1 px-2 py-1 rounded-md ${isToday(date) ? 'bg-white bg-opacity-20' : 'bg-blue-50'}`}>
+                        <Users className="h-4 w-4" />
+                        <span>
+                          {dateBookings.reduce((sum, booking) => sum + (booking.numberOfPassengers || 0), 0)} passengers
+                        </span>
+                      </div>
+                      <div className={`flex items-center gap-1 px-2 py-1 rounded-md ${isToday(date) ? 'bg-white bg-opacity-20' : 'bg-blue-50'}`}>
+                        <Euro className="h-4 w-4" />
+                        <span>
+                          €{dateBookings.reduce((sum, booking) => sum + booking.finalPrice, 0).toFixed(0)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               
               {dateBookings.length === 0 ? (
@@ -941,31 +988,36 @@ function UpcomingBookings() {
                   <p className="text-gray-500">No bookings for this day</p>
                 </div>
               ) : (
-                <div className={`grid gap-3 p-3 ${isToday(date) ? 'bg-blue-50' : 'bg-white'}`}>
+                <div className={`space-y-3 p-3 sm:p-4 ${isToday(date) ? 'bg-blue-50' : 'bg-white'}`}>
                   {dateBookings.map((booking) => (
                     <div 
                       key={booking.id} 
                       id={`booking-${booking.id}`}
-                      className="p-4 bg-white hover:bg-gray-50 transition-all cursor-pointer rounded-lg border border-gray-200 shadow-sm hover:shadow-md transform hover:-translate-y-1"
+                      className="p-4 bg-white hover:bg-gray-50 transition-all cursor-pointer rounded-lg border border-gray-200 shadow-sm hover:shadow-md"
                       onClick={() => handleBookingSelect(booking)}
                     >
-                      <div className="flex justify-between items-start mb-3">
-                        <div className="flex-1">
-                          <div className="flex items-center">
-                            <h4 className="font-medium text-gray-900">{booking.clientName}</h4>
-                            <span className={`ml-2 px-2 py-0.5 rounded-full text-xs font-medium ${
-                              booking.clientType === 'Direct' ? 'bg-blue-100 text-blue-700' :
-                              booking.clientType === 'Hotel' ? 'bg-purple-100 text-purple-700' :
-                              'bg-green-100 text-green-700'
-                            }`}>
-                              {booking.clientType}
-                            </span>
+                      <div className="flex flex-col gap-3">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                              <h4 className="font-medium text-gray-900 truncate">{booking.clientName}</h4>
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${
+                                booking.clientType === 'Direct' ? 'bg-blue-100 text-blue-700' :
+                                booking.clientType === 'Hotel' ? 'bg-purple-100 text-purple-700' :
+                                'bg-green-100 text-green-700'
+                              }`}>
+                                {booking.clientType === 'Hotel' && booking.partnerName ? 
+                                  `Hotel (${booking.partnerName})` : 
+                                  booking.clientType === 'Collaborator' && booking.partnerName ? 
+                                  `Collaborator (${booking.partnerName})` : 
+                                  booking.clientType
+                                }
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-600 mt-1 truncate">{booking.clientEmail || booking.clientPhone}</div>
                           </div>
-                          <div className="text-sm text-gray-600 mt-0.5">{booking.clientEmail || booking.clientPhone}</div>
-                        </div>
-                        
-                        <div>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ml-2 ${
                             booking.isCancelled ? 'bg-red-100 text-red-700' :
                             booking.paymentStatus === 'Completed' ? 'bg-green-100 text-green-700' :
                             booking.paymentStatus === 'Partial' ? 'bg-yellow-100 text-yellow-700' :
@@ -974,60 +1026,60 @@ function UpcomingBookings() {
                             {booking.isCancelled ? 'Cancelled' : booking.paymentStatus}
                           </span>
                         </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-                        <div className="flex items-center gap-2 text-sm text-gray-700">
-                          <div className="bg-blue-100 p-1 rounded-md">
-                            <Ship className="h-4 w-4 text-blue-600" />
-                          </div>
-                          <span className="truncate font-medium">{booking.boatName}</span>
-                        </div>
                         
-                        <div className="flex items-center gap-2 text-sm text-gray-700">
-                          <div className="bg-green-100 p-1 rounded-md">
-                            <Clock className="h-4 w-4 text-green-600" />
-                          </div>
-                          <span>{booking.startTime} - {booking.endTime}</span>
-                        </div>
-                        
-                        <div className="flex items-center gap-2 text-sm text-gray-700">
-                          <div className="bg-purple-100 p-1 rounded-md">
-                            <Users className="h-4 w-4 text-purple-600" />
-                          </div>
-                          <span>{booking.numberOfPassengers || 0} passengers</span>
-                        </div>
-                        
-                        {booking.privateTransfer && (
-                          <div className="flex items-center gap-2 text-sm text-gray-700 md:col-span-2">
-                            <div className="bg-yellow-100 p-1 rounded-md">
-                              <MapPin className="h-4 w-4 text-yellow-600" />
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm text-gray-700">
+                            <div className="bg-blue-100 p-1 rounded-md flex-shrink-0">
+                              <Ship className="h-4 w-4 text-blue-600" />
                             </div>
-                            <span className="truncate">Transfer: {booking.pickupLocation} → {booking.dropoffLocation}</span>
+                            <span className="font-medium truncate">{booking.boatName}</span>
+                          </div>
+                          
+                          <div className="flex items-center gap-2 text-sm text-gray-700">
+                            <div className="bg-green-100 p-1 rounded-md flex-shrink-0">
+                              <Clock className="h-4 w-4 text-green-600" />
+                            </div>
+                            <span>{booking.startTime} - {booking.endTime}</span>
+                          </div>
+                          
+                          <div className="flex items-center gap-2 text-sm text-gray-700">
+                            <div className="bg-purple-100 p-1 rounded-md flex-shrink-0">
+                              <Users className="h-4 w-4 text-purple-600" />
+                            </div>
+                            <span>{booking.numberOfPassengers || 0} passengers</span>
+                          </div>
+                          
+                          {booking.privateTransfer && (
+                            <div className="flex items-center gap-2 text-sm text-gray-700">
+                              <div className="bg-yellow-100 p-1 rounded-md flex-shrink-0">
+                                <MapPin className="h-4 w-4 text-yellow-600" />
+                              </div>
+                              <span className="truncate">Transfer: {booking.pickupLocation} → {booking.dropoffLocation}</span>
+                            </div>
+                          )}
+                          
+                          <div className="flex items-center gap-2 text-sm font-medium">
+                            <div className="bg-indigo-100 p-1 rounded-md flex-shrink-0">
+                              <Euro className="h-4 w-4 text-indigo-600" />
+                            </div>
+                            <span className="text-gray-900">€{booking.finalPrice.toFixed(2)}</span>
+                          </div>
+                        </div>
+                        
+                        {booking.restaurantName && (
+                          <div className="text-sm">
+                            <div className="flex items-center gap-2 text-gray-700">
+                              <div className="bg-red-100 p-1 rounded-md flex-shrink-0">
+                                <Home className="h-4 w-4 text-red-600" />
+                              </div>
+                              <span className="truncate">Restaurant: {booking.restaurantName}</span>
+                            </div>
                           </div>
                         )}
-                        
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <div className="bg-indigo-100 p-1 rounded-md">
-                            <Euro className="h-4 w-4 text-indigo-600" />
-                          </div>
-                          <span className="text-gray-900">€{booking.finalPrice.toFixed(2)}</span>
-                        </div>
-                      </div>
-                      
-                      {booking.restaurantName && (
-                        <div className="mt-3 text-sm">
-                          <div className="flex items-center gap-2 text-gray-700">
-                            <div className="bg-red-100 p-1 rounded-md">
-                              <Home className="h-4 w-4 text-red-600" />
-                            </div>
-                            <span>Restaurant: {booking.restaurantName}</span>
-                          </div>
-                        </div>
-                      )}
 
-                      {/* Add Food Order Indicator in timeline view */}
-                      <FoodOrderIndicator booking={booking} />
+                        {/* Add Food Order Indicator in timeline view */}
+                        <FoodOrderIndicator booking={booking} />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1041,7 +1093,7 @@ function UpcomingBookings() {
 
   // Main component rendering
   return (
-    <div className="p-4 md:p-6 space-y-4 bg-gray-50 min-h-screen">
+    <div className="p-3 sm:p-4 md:p-6 space-y-4 bg-gray-50 min-h-screen">
       <LoadingOverlay isActive={isFiltering} />
       
       {/* Food orders loading indicator */}
