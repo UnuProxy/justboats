@@ -67,6 +67,99 @@ const formatDateForStorage = (dateString) => {
     return dateString;
   }
 };
+const FoodOrderIndicator = ({ booking }) => {
+  const [hasFoodOrder, setHasFoodOrder] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    const checkForFoodOrders = async () => {
+      if (!booking?.id) {
+        setIsChecking(false);
+        return;
+      }
+
+      try {
+        // Check if this booking has any linked orders with food items
+        const bookingRef = doc(db, "bookings", booking.id);
+        const bookingDoc = await getDoc(bookingRef);
+        
+        if (!bookingDoc.exists()) {
+          setIsChecking(false);
+          return;
+        }
+
+        const bookingData = bookingDoc.data();
+        const linkedOrders = bookingData.linkedOrders || [];
+
+        if (linkedOrders.length === 0) {
+          setIsChecking(false);
+          return;
+        }
+
+        // Check each linked order for food items
+        let foundFoodOrder = false;
+        
+        for (const linkedOrder of linkedOrders) {
+          if (!linkedOrder.orderDocId) continue;
+          
+          try {
+            const orderDoc = await getDoc(doc(db, "orders", linkedOrder.orderDocId));
+            
+            if (orderDoc.exists()) {
+              const orderData = orderDoc.data();
+              const items = orderData.items || [];
+              
+              // Check if any item is food-related
+              const hasFoodItems = items.some(item => 
+                item.name.toLowerCase().includes('grazing') || 
+                item.name.toLowerCase().includes('platter') || 
+                item.name.toLowerCase().includes('food') ||
+                item.category === 'food' ||
+                item.category === 'grazing'
+              );
+
+              if (hasFoodItems) {
+                foundFoodOrder = true;
+                break;
+              }
+            }
+          } catch (error) {
+            console.error(`Error checking order ${linkedOrder.orderDocId}:`, error);
+          }
+        }
+
+        setHasFoodOrder(foundFoodOrder);
+      } catch (error) {
+        console.error("Error checking for food orders:", error);
+      } finally {
+        setIsChecking(false);
+      }
+    };
+
+    checkForFoodOrders();
+  }, [booking?.id]);
+
+  if (isChecking) {
+    return (
+      <div className="inline-flex items-center justify-center w-6 h-6" title="Checking for food orders...">
+        <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (!hasFoodOrder) {
+    return null; // Don't show anything if no food orders
+  }
+
+  return (
+    <div 
+      className="inline-flex items-center justify-center w-6 h-6 bg-orange-100 rounded-full" 
+      title="This booking has food orders"
+    >
+      <span className="text-orange-600 text-sm">🍽️</span>
+    </div>
+  );
+};
 
 const BookingDetails = ({ booking, onClose }) => {
   const navigate = useNavigate();
@@ -1267,6 +1360,7 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || 'N/A
             >
               Booking Details
             </h3>
+            <FoodOrderIndicator booking={booking} />
             {editedBooking.isCancelled && (
               <span className="ml-3 px-2 py-1 bg-red-200 text-red-800 rounded-md text-sm font-medium">
                 CANCELLED

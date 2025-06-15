@@ -7,7 +7,9 @@ import {
   orderBy as firestoreOrderBy,
   doc,
   deleteDoc,
-  updateDoc
+  updateDoc,
+  getDocs,
+  where
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import BookingDetails from './BookingDetails';
@@ -25,6 +27,10 @@ function UpcomingBookings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
+  
+  // Food orders state
+  const [foodOrders, setFoodOrders] = useState([]);
+  const [loadingFoodOrders, setLoadingFoodOrders] = useState(false);
   
   // Timeline view variables
   const visibleDays = 5; // Fixed number of days to show
@@ -146,6 +152,173 @@ function UpcomingBookings() {
 
     return () => unsubscribe();
   }, [normalizeBookingData]);
+
+  // Add this useEffect to fetch food orders when bookings change
+  useEffect(() => {
+    if (filteredBookings.length === 0) {
+      setFoodOrders([]);
+      return;
+    }
+
+    const fetchFoodOrders = async () => {
+      setLoadingFoodOrders(true);
+      try {
+        const ordersRef = collection(db, "orders");
+        const allOrders = [];
+
+        // Get unique emails and boat names from current bookings
+        const emails = [...new Set(filteredBookings.map(b => b.clientEmail).filter(Boolean))];
+        const boatNames = [...new Set(filteredBookings.map(b => b.boatName).filter(Boolean))];
+        const dates = [...new Set(filteredBookings.map(b => b.bookingDate).filter(Boolean))];
+
+        // Query by emails
+        for (const email of emails) {
+          const q = query(ordersRef, where("customerEmail", "==", email));
+          const snapshot = await getDocs(q);
+          snapshot.forEach(doc => {
+            const orderData = { id: doc.id, ...doc.data() };
+            if (!allOrders.find(order => order.id === orderData.id)) {
+              allOrders.push(orderData);
+            }
+          });
+        }
+
+        // Query by boat names
+        for (const boatName of boatNames) {
+          const q = query(ordersRef, where("boatName", "==", boatName));
+          const snapshot = await getDocs(q);
+          snapshot.forEach(doc => {
+            const orderData = { id: doc.id, ...doc.data() };
+            if (!allOrders.find(order => order.id === orderData.id)) {
+              allOrders.push(orderData);
+            }
+          });
+        }
+
+        // Query by dates
+        for (const date of dates) {
+          const q = query(ordersRef, where("orderDate", "==", date));
+          const snapshot = await getDocs(q);
+          snapshot.forEach(doc => {
+            const orderData = { id: doc.id, ...doc.data() };
+            if (!allOrders.find(order => order.id === orderData.id)) {
+              allOrders.push(orderData);
+            }
+          });
+        }
+
+        console.log("Found food orders:", allOrders);
+        setFoodOrders(allOrders);
+      } catch (error) {
+        console.error("Error fetching food orders:", error);
+      } finally {
+        setLoadingFoodOrders(false);
+      }
+    };
+
+    fetchFoodOrders();
+  }, [filteredBookings]);
+
+  // Add this helper function to match orders with bookings
+  const getMatchingOrdersForBooking = (booking) => {
+    return foodOrders.filter(order => {
+      // Match by email
+      if (booking.clientEmail && order.customerEmail === booking.clientEmail) return true;
+      
+      // Match by boat name
+      if (booking.boatName && order.boatName === booking.boatName) return true;
+      
+      // Match by date
+      if (booking.bookingDate && order.orderDate === booking.bookingDate) return true;
+      
+      return false;
+    });
+  };
+
+  // Add this component inside your UpcomingBookings component
+  const FoodOrderIndicator = ({ booking }) => {
+    const matchingOrders = getMatchingOrdersForBooking(booking);
+    
+    if (matchingOrders.length === 0) return null;
+
+    const totalAmount = matchingOrders.reduce((sum, order) => sum + (order.amount_total || 0), 0);
+    const hasUnpaidOrders = matchingOrders.some(order => order.paymentStatus !== 'paid');
+    const hasDeliveryInstructions = matchingOrders.some(order => order.deliveryInstructions);
+
+    return (
+      <div className="mt-3 p-3 bg-orange-50 rounded-lg border border-orange-200">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <div className="bg-orange-100 p-1 rounded-md">
+              <svg className="w-4 h-4 text-orange-600" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <span className="font-medium text-orange-800">
+              {matchingOrders.length} Food Order{matchingOrders.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <span className="text-orange-700 font-medium">€{totalAmount.toFixed(2)}</span>
+        </div>
+
+        {/* Warning indicators */}
+        <div className="flex flex-wrap gap-2 mb-2">
+          {hasUnpaidOrders && (
+            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+              ⚠️ Unpaid Orders
+            </span>
+          )}
+          {hasDeliveryInstructions && (
+            <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">
+              📍 Special Delivery
+            </span>
+          )}
+        </div>
+
+        {/* Order summary */}
+        <div className="space-y-1">
+          {matchingOrders.map((order) => (
+            <div key={order.id} className="text-sm">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-700">
+                  Order #{order.orderId || order.id.slice(-6)}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                    order.paymentStatus === 'paid' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                  }`}>
+                    {order.paymentStatus || 'unpaid'}
+                  </span>
+                  <span className="text-gray-600">€{(order.amount_total || 0).toFixed(2)}</span>
+                </div>
+              </div>
+              
+              {/* Show key items */}
+              {order.items && order.items.length > 0 && (
+                <div className="text-xs text-gray-600 mt-1">
+                  {order.items.slice(0, 2).map((item, idx) => (
+                    <span key={idx} className="mr-3">
+                      {item.quantity}x {item.name}
+                    </span>
+                  ))}
+                  {order.items.length > 2 && (
+                    <span className="text-gray-500">+{order.items.length - 2} more</span>
+                  )}
+                </div>
+              )}
+              
+              {/* Show delivery instructions if any */}
+              {order.deliveryInstructions && (
+                <div className="text-xs text-orange-700 mt-1 bg-orange-100 p-1 rounded">
+                  📍 {order.deliveryInstructions}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   // Format date for display (human-readable format)
   const formatDateForDisplay = (dateString) => {
@@ -715,6 +888,9 @@ function UpcomingBookings() {
                       )}
                     </div>
                   )}
+
+                  {/* Add Food Order Indicator in search view */}
+                  <FoodOrderIndicator booking={booking} />
                 </div>
               ))}
             </div>
@@ -849,6 +1025,9 @@ function UpcomingBookings() {
                           </div>
                         </div>
                       )}
+
+                      {/* Add Food Order Indicator in timeline view */}
+                      <FoodOrderIndicator booking={booking} />
                     </div>
                   ))}
                 </div>
@@ -864,6 +1043,16 @@ function UpcomingBookings() {
   return (
     <div className="p-4 md:p-6 space-y-4 bg-gray-50 min-h-screen">
       <LoadingOverlay isActive={isFiltering} />
+      
+      {/* Food orders loading indicator */}
+      {loadingFoodOrders && (
+        <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 mb-4">
+          <div className="flex items-center gap-2 text-orange-700">
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-orange-500 border-t-transparent"></div>
+            <span className="text-sm">Loading food orders...</span>
+          </div>
+        </div>
+      )}
       
       {/* Date Picker */}
       <SimpleDatePicker />
