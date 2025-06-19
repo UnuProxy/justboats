@@ -130,7 +130,8 @@ const Sidebar = () => {
                     allowed: true
                 }
             ]
-        }
+        },
+        
     ];
     
     // Add full navigation for admin users
@@ -166,7 +167,13 @@ const Sidebar = () => {
                         icon: FileText,
                         path: '/contract-generator',
                         allowed: true
-                    }
+                    },
+                    {
+    name: 'Client Data Collection',
+    icon: Users,
+    path: '/client-data-collection',
+    allowed: true
+}
                 ]
             },
             {
