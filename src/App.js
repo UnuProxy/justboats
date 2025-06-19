@@ -31,7 +31,7 @@ import PricingManager from './components/PricingManager';
 import ExpenseTracker from './components/ExpenseTracker';
 import CateringExpensesTracker from './components/CateringExpensesTracker';
 import ContractGenerator from './components/ContractGenerator';
-
+import ClientDataCollection from './components/ClientDataCollection';
 const Splash = ({ onFinish }) => {
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -190,6 +190,16 @@ function App() {
                             />
  
                             
+                                    <Route
+                                        path="/client-data-collection"
+                                        element={
+                                            <ProtectedRoute>
+                                                <ProtectedLayout>
+                                                    <ClientDataCollection />
+                                                </ProtectedLayout>
+                                            </ProtectedRoute>
+                                        }
+                                    />
                             {/* San Antonio Tours */}
                             <Route
                                 path="/san-antonio-tours"
