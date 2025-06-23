@@ -8,8 +8,7 @@ import {
   doc,
   deleteDoc,
   updateDoc,
-  getDocs,
-  where
+  getDocs
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import BookingDetails from './BookingDetails';
@@ -28,12 +27,15 @@ function UpcomingBookings() {
   const [error, setError] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
   
-  // Food orders state
-  const [foodOrders, setFoodOrders] = useState([]);
-  const [loadingFoodOrders, setLoadingFoodOrders] = useState(false);
+
+  
+  // Partners state
+  const [hotels, setHotels] = useState([]);
+  const [collaborators, setCollaborators] = useState([]);
+  const [partnersLoaded, setPartnersLoaded] = useState(false);
   
   // Timeline view variables
-  const visibleDays = 5; // Fixed number of days to show
+  const visibleDays = 5;
   const [startDate, setStartDate] = useState(new Date());
   
   // Date filter variables
@@ -60,6 +62,38 @@ function UpcomingBookings() {
     }
   }, [viewBookingId, filteredBookings]);
 
+  // Fetch partners data
+  useEffect(() => {
+    const fetchPartners = async () => {
+      try {
+        // Fetch hotels
+        const hotelsRef = collection(db, 'hotels');
+        const hotelsSnapshot = await getDocs(hotelsRef);
+        const hotelsData = hotelsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setHotels(hotelsData);
+
+        // Fetch collaborators
+        const collaboratorsRef = collection(db, 'collaborators');
+        const collaboratorsSnapshot = await getDocs(collaboratorsRef);
+        const collaboratorsData = collaboratorsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setCollaborators(collaboratorsData);
+
+        setPartnersLoaded(true);
+      } catch (error) {
+        console.error('Error fetching partners:', error);
+        setPartnersLoaded(true);
+      }
+    };
+
+    fetchPartners();
+  }, []);
+
   // Normalize date for comparisons
   const normalizeDate = (dateString) => {
     if (!dateString) return null;
@@ -75,6 +109,124 @@ function UpcomingBookings() {
     }
   };
 
+  // Get partner name helper
+  const getPartnerName = useCallback((booking) => {
+    if (!partnersLoaded) return 'Loading...';
+    
+    // Debug: Log all potential partner fields for this booking
+    console.log('=== PARTNER DEBUG ===');
+    console.log('Booking ID:', booking.id);
+    console.log('Client Type:', booking.clientType);
+    console.log('All potential partner fields:', {
+      selectedPartnerName: booking.selectedPartnerName,
+      partnerName: booking.partnerName,
+      hotelName: booking.hotelName,
+      collaboratorName: booking.collaboratorName,
+      partner: booking.partner,
+      hotel: booking.hotel,
+      selectedPartner: booking.selectedPartner,
+      'partner.name': booking.partner?.name,
+      'hotel.name': booking.hotel?.name
+    });
+    console.log('Available hotels:', hotels.map(h => ({ id: h.id, name: h.name })));
+    console.log('Available collaborators:', collaborators.map(c => ({ id: c.id, name: c.name })));
+    console.log('====================');
+    
+    if (booking.clientType === 'Hotel') {
+      // Try all possible hotel ID fields
+      const possibleIds = [
+        booking.selectedPartnerName,
+        booking.partnerName,
+        booking.hotelName,
+        booking.selectedPartner,
+        booking.partner,
+        booking.hotel,
+        booking.partner?.id,
+        booking.hotel?.id
+      ].filter(Boolean);
+      
+      // Try all possible hotel name fields
+      const possibleNames = [
+        booking.selectedPartnerName,
+        booking.partnerName,
+        booking.hotelName,
+        booking.partner?.name,
+        booking.hotel?.name
+      ].filter(Boolean);
+      
+      // First try to find by ID
+      for (const id of possibleIds) {
+        const hotel = hotels.find(h => h.id === id);
+        if (hotel) {
+          console.log('Found hotel by ID:', hotel.name);
+          return hotel.name;
+        }
+      }
+      
+      // Then try to find by name
+      for (const name of possibleNames) {
+        const hotel = hotels.find(h => h.name === name);
+        if (hotel) {
+          console.log('Found hotel by name:', hotel.name);
+          return hotel.name;
+        }
+      }
+      
+      // Return the first available name as fallback
+      const fallbackName = possibleNames[0] || 'Unknown Hotel';
+      console.log('Using fallback hotel name:', fallbackName);
+      return fallbackName;
+    }
+    
+    if (booking.clientType === 'Collaborator') {
+      // Try all possible collaborator ID fields
+      const possibleIds = [
+        booking.selectedPartnerName,
+        booking.partnerName,
+        booking.collaboratorName,
+        booking.selectedPartner,
+        booking.partner,
+        booking.collaborator,
+        booking.partner?.id,
+        booking.collaborator?.id
+      ].filter(Boolean);
+      
+      // Try all possible collaborator name fields
+      const possibleNames = [
+        booking.selectedPartnerName,
+        booking.partnerName,
+        booking.collaboratorName,
+        booking.partner?.name,
+        booking.collaborator?.name
+      ].filter(Boolean);
+      
+      // First try to find by ID
+      for (const id of possibleIds) {
+        const collaborator = collaborators.find(c => c.id === id);
+        if (collaborator) {
+          console.log('Found collaborator by ID:', collaborator.name);
+          return collaborator.name;
+        }
+      }
+      
+      // Then try to find by name
+      for (const name of possibleNames) {
+        const collaborator = collaborators.find(c => c.name === name);
+        if (collaborator) {
+          console.log('Found collaborator by name:', collaborator.name);
+          return collaborator.name;
+        }
+      }
+      
+      // Return the first available name as fallback
+      const fallbackName = possibleNames[0] || 'Unknown Collaborator';
+      console.log('Using fallback collaborator name:', fallbackName);
+      return fallbackName;
+    }
+    
+    return '';
+  }, [hotels, collaborators, partnersLoaded]);
+
   // Normalize booking data
   const normalizeBookingData = useCallback((booking) => {
     const basePrice = parseFloat(booking.pricing?.basePrice || 0);
@@ -88,7 +240,6 @@ function UpcomingBookings() {
     // Try to normalize the date format if it exists
     if (bookingDate && bookingDate !== "N/A") {
       try {
-        // Try to convert to a consistent YYYY-MM-DD format
         const dateObj = new Date(bookingDate);
         if (!isNaN(dateObj.getTime())) {
           bookingDate = dateObj.toISOString().split('T')[0];
@@ -98,33 +249,8 @@ function UpcomingBookings() {
       }
     }
 
-    // Debug: Log all booking fields to find partner name field
-    console.log('=== BOOKING DEBUG ===');
-    console.log('All booking fields:', Object.keys(booking));
-    console.log('Full booking object:', booking);
-    console.log('Client Type:', booking.clientType);
-    console.log('Potential partner fields:', {
-      selectedPartnerName: booking.selectedPartnerName,
-      partnerName: booking.partnerName,
-      hotelName: booking.hotelName,
-      collaboratorName: booking.collaboratorName,
-      partner: booking.partner,
-      hotel: booking.hotel,
-      'partner.name': booking.partner?.name,
-      'hotel.name': booking.hotel?.name
-    });
-    console.log('=====================');
-
-    // Try multiple possible partner name fields
-    let partnerName = "";
-    if (booking.selectedPartnerName) partnerName = booking.selectedPartnerName;
-    else if (booking.partnerName) partnerName = booking.partnerName;
-    else if (booking.partner?.name) partnerName = booking.partner.name;
-    else if (booking.hotel?.name) partnerName = booking.hotel.name;
-    else if (booking.hotelName) partnerName = booking.hotelName;
-    else if (booking.collaboratorName) partnerName = booking.collaboratorName;
-    else if (booking.partner) partnerName = booking.partner;
-    else if (booking.hotel) partnerName = booking.hotel;
+    // Get the resolved partner name
+    const partnerName = getPartnerName(booking);
   
     return {
       ...booking,
@@ -137,7 +263,7 @@ function UpcomingBookings() {
       boatCompanyName: booking.bookingDetails?.boatCompany || "N/A",
       boatName: booking.bookingDetails?.boatName || "N/A",
       numberOfPassengers: passengers === undefined || passengers === null ? undefined : parseInt(passengers, 10),
-      bookingDate, // Use the normalized date
+      bookingDate,
       startTime: booking.bookingDetails?.startTime || "N/A",
       endTime: booking.bookingDetails?.endTime || "N/A",
       basePrice,
@@ -153,7 +279,7 @@ function UpcomingBookings() {
       restaurantName: booking.restaurantName || "",
       isCancelled: booking.status === "cancelled" || booking.isCancelled || false,
     };
-  }, []);
+  }, [getPartnerName]);
 
   // Real-time listener setup for base bookings
   useEffect(() => {
@@ -181,182 +307,9 @@ function UpcomingBookings() {
     return () => unsubscribe();
   }, [normalizeBookingData]);
 
-  // Add this useEffect to fetch food orders when bookings change
-  useEffect(() => {
-    if (filteredBookings.length === 0) {
-      setFoodOrders([]);
-      return;
-    }
 
-    const fetchFoodOrders = async () => {
-      setLoadingFoodOrders(true);
-      try {
-        const ordersRef = collection(db, "orders");
-        const allOrders = [];
 
-        // Get unique emails and boat names from current bookings
-        const emails = [...new Set(filteredBookings.map(b => b.clientEmail).filter(Boolean))];
-        const boatNames = [...new Set(filteredBookings.map(b => b.boatName).filter(Boolean))];
-        const dates = [...new Set(filteredBookings.map(b => b.bookingDate).filter(Boolean))];
 
-        // Query by emails
-        for (const email of emails) {
-          const q = query(ordersRef, where("customerEmail", "==", email));
-          const snapshot = await getDocs(q);
-          snapshot.forEach(doc => {
-            const orderData = { id: doc.id, ...doc.data() };
-            if (!allOrders.find(order => order.id === orderData.id)) {
-              allOrders.push(orderData);
-            }
-          });
-        }
-
-        // Query by boat names
-        for (const boatName of boatNames) {
-          const q = query(ordersRef, where("boatName", "==", boatName));
-          const snapshot = await getDocs(q);
-          snapshot.forEach(doc => {
-            const orderData = { id: doc.id, ...doc.data() };
-            if (!allOrders.find(order => order.id === orderData.id)) {
-              allOrders.push(orderData);
-            }
-          });
-        }
-
-        // Query by dates
-        for (const date of dates) {
-          const q = query(ordersRef, where("orderDate", "==", date));
-          const snapshot = await getDocs(q);
-          snapshot.forEach(doc => {
-            const orderData = { id: doc.id, ...doc.data() };
-            if (!allOrders.find(order => order.id === orderData.id)) {
-              allOrders.push(orderData);
-            }
-          });
-        }
-
-        console.log("Found food orders:", allOrders);
-        setFoodOrders(allOrders);
-      } catch (error) {
-        console.error("Error fetching food orders:", error);
-      } finally {
-        setLoadingFoodOrders(false);
-      }
-    };
-
-    fetchFoodOrders();
-  }, [filteredBookings]);
-
-  // Add this helper function to match orders with bookings
-  const getMatchingOrdersForBooking = (booking) => {
-    return foodOrders.filter(order => {
-      // Primary match: Email + Date (most reliable)
-      if (booking.clientEmail && order.customerEmail === booking.clientEmail && 
-          booking.bookingDate && order.orderDate === booking.bookingDate) {
-        return true;
-      }
-      
-      // Secondary match: Email only (if dates don't match but email does)
-      if (booking.clientEmail && order.customerEmail === booking.clientEmail) {
-        return true;
-      }
-      
-      // Tertiary match: Boat name + Date + Customer name (for cases where email differs)
-      if (booking.boatName && order.boatName === booking.boatName &&
-          booking.bookingDate && order.orderDate === booking.bookingDate &&
-          booking.clientName && order.fullName && 
-          booking.clientName.toLowerCase().includes(order.fullName.toLowerCase().split(' ')[0].toLowerCase())) {
-        return true;
-      }
-      
-      return false;
-    });
-  };
-
-  // Add this component inside your UpcomingBookings component
-  const FoodOrderIndicator = ({ booking }) => {
-    const matchingOrders = getMatchingOrdersForBooking(booking);
-    
-    if (matchingOrders.length === 0) return null;
-
-    const totalAmount = matchingOrders.reduce((sum, order) => sum + (order.amount_total || 0), 0);
-    const hasUnpaidOrders = matchingOrders.some(order => order.paymentStatus !== 'paid');
-    const hasDeliveryInstructions = matchingOrders.some(order => order.deliveryInstructions);
-
-    return (
-      <div className="mt-3 p-3 bg-orange-50 rounded-lg border border-orange-200">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <div className="bg-orange-100 p-1 rounded-md">
-              <svg className="w-4 h-4 text-orange-600" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <span className="font-medium text-orange-800">
-              {matchingOrders.length} Food Order{matchingOrders.length !== 1 ? 's' : ''}
-            </span>
-          </div>
-          <span className="text-orange-700 font-medium">€{totalAmount.toFixed(2)}</span>
-        </div>
-
-        {/* Warning indicators */}
-        <div className="flex flex-wrap gap-2 mb-2">
-          {hasUnpaidOrders && (
-            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
-              ⚠️ Unpaid Orders
-            </span>
-          )}
-          {hasDeliveryInstructions && (
-            <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">
-              📍 Special Delivery
-            </span>
-          )}
-        </div>
-
-        {/* Order summary */}
-        <div className="space-y-1">
-          {matchingOrders.map((order) => (
-            <div key={order.id} className="text-sm">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-700">
-                  Order #{order.orderId || order.id.slice(-6)}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                    order.paymentStatus === 'paid' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                  }`}>
-                    {order.paymentStatus || 'unpaid'}
-                  </span>
-                  <span className="text-gray-600">€{(order.amount_total || 0).toFixed(2)}</span>
-                </div>
-              </div>
-              
-              {/* Show key items */}
-              {order.items && order.items.length > 0 && (
-                <div className="text-xs text-gray-600 mt-1">
-                  {order.items.slice(0, 2).map((item, idx) => (
-                    <span key={idx} className="mr-3">
-                      {item.quantity}x {item.name}
-                    </span>
-                  ))}
-                  {order.items.length > 2 && (
-                    <span className="text-gray-500">+{order.items.length - 2} more</span>
-                  )}
-                </div>
-              )}
-              
-              {/* Show delivery instructions if any */}
-              {order.deliveryInstructions && (
-                <div className="text-xs text-orange-700 mt-1 bg-orange-100 p-1 rounded">
-                  📍 {order.deliveryInstructions}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
 
   // Format date for display (human-readable format)
   const formatDateForDisplay = (dateString) => {
@@ -378,12 +331,10 @@ function UpcomingBookings() {
 
   // Handle date filter changes
   const handleDateChange = (field, value) => {
-    // Make sure we're storing dates in YYYY-MM-DD format
     let normalizedValue = value;
     
     if (value) {
       try {
-        // Try to ensure date is in YYYY-MM-DD format
         const date = new Date(value);
         if (!isNaN(date.getTime())) {
           normalizedValue = date.toISOString().split('T')[0];
@@ -421,25 +372,20 @@ function UpcomingBookings() {
   // Filter bookings based on date
   useEffect(() => {
     if (!isSearchMode) {
-      // If not in search mode, don't filter
       setFilteredBookings(bookings);
       return;
     }
     
-    // Filter by date
     let filtered = bookings;
     
     if (filters.dateFrom || filters.dateTo) {
       filtered = bookings.filter(booking => {
-        // Normalize dates for comparison
         const bookingDate = normalizeDate(booking.bookingDate);
         const fromDate = normalizeDate(filters.dateFrom);
         const toDate = normalizeDate(filters.dateTo);
         
-        // Skip bookings with invalid dates if date filters are active
         if ((fromDate || toDate) && bookingDate === null) return false;
         
-        // Apply date filters
         if (fromDate && bookingDate && bookingDate < fromDate) return false;
         if (toDate && bookingDate && bookingDate > toDate) return false;
         
@@ -447,7 +393,6 @@ function UpcomingBookings() {
       });
     }
     
-    // Sort by date
     filtered.sort((a, b) => {
       return new Date(a.bookingDate) - new Date(b.bookingDate);
     });
@@ -637,11 +582,9 @@ function UpcomingBookings() {
 
   // Simplified Date Picker
   const SimpleDatePicker = () => {
-    // State to control calendar visibility
     const [showFromCalendar, setShowFromCalendar] = useState(false);
     const [showToCalendar, setShowToCalendar] = useState(false);
     
-    // Helper to format date for display
     const getDateDisplay = () => {
       if (filters.dateFrom && filters.dateTo) {
         return `${formatDateForDisplay(filters.dateFrom)} to ${formatDateForDisplay(filters.dateTo)}`;
@@ -653,7 +596,6 @@ function UpcomingBookings() {
       return '';
     };
     
-    // Handle selecting a date from the calendar
     const handleFromDateSelect = (dateString) => {
       handleDateChange('dateFrom', dateString);
     };
@@ -662,7 +604,6 @@ function UpcomingBookings() {
       handleDateChange('dateTo', dateString);
     };
   
-    // Clear all filter settings
     const handleClearAll = () => {
       setFilters({ dateFrom: '', dateTo: '' });
       setIsSearchMode(false);
@@ -684,7 +625,6 @@ function UpcomingBookings() {
               <span>Date Filter</span>
             </button>
             
-            {/* Display selected date range */}
             {(filters.dateFrom || filters.dateTo) && (
               <span className="text-sm text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg text-center">
                 {getDateDisplay()}
@@ -721,7 +661,6 @@ function UpcomingBookings() {
               </div>
             )}
             
-            {/* Single Clear Filter button for search mode */}
             {isSearchMode && (
               <button
                 onClick={clearDateFilter}
@@ -748,7 +687,6 @@ function UpcomingBookings() {
                   </button>
                 </div>
                 
-                {/* Selected date display */}
                 <div 
                   className="p-2 border rounded-md cursor-pointer hover:bg-blue-50 mb-2"
                   onClick={() => setShowFromCalendar(true)}
@@ -756,7 +694,6 @@ function UpcomingBookings() {
                   {filters.dateFrom ? formatDateForDisplay(filters.dateFrom) : 'Select a date'}
                 </div>
                 
-                {/* Calendar popup */}
                 {showFromCalendar && (
                   <div className="relative z-10 flex justify-center">
                     <CalendarPicker
@@ -780,7 +717,6 @@ function UpcomingBookings() {
                   </button>
                 </div>
                 
-                {/* Selected date display */}
                 <div 
                   className="p-2 border rounded-md cursor-pointer hover:bg-blue-50 mb-2"
                   onClick={() => setShowToCalendar(true)}
@@ -788,7 +724,6 @@ function UpcomingBookings() {
                   {filters.dateTo ? formatDateForDisplay(filters.dateTo) : 'Select a date'}
                 </div>
                 
-                {/* Calendar popup */}
                 {showToCalendar && (
                   <div className="relative z-10 flex justify-center">
                     <CalendarPicker
@@ -801,10 +736,8 @@ function UpcomingBookings() {
               </div>
             </div>
             
-            {/* Simplified Button Row */}
             <div className="flex flex-col gap-2">
               <div className="flex flex-col sm:flex-row gap-2">
-                {/* Only one clear button at this level */}
                 {(filters.dateFrom || filters.dateTo) && (
                   <button
                     onClick={handleClearAll}
@@ -875,9 +808,9 @@ function UpcomingBookings() {
                         <div className="text-sm text-gray-600 mt-1">{booking.clientEmail || booking.clientPhone}</div>
                         <div className="text-xs text-gray-500 mt-1">
                           {booking.clientType === 'Hotel' && booking.partnerName ? 
-                            `Hotel (${booking.partnerName})` : 
+                            booking.partnerName : 
                             booking.clientType === 'Collaborator' && booking.partnerName ? 
-                            `Collaborator (${booking.partnerName})` : 
+                            booking.partnerName : 
                             booking.clientType
                           }
                         </div>
@@ -933,8 +866,6 @@ function UpcomingBookings() {
                       </div>
                     )}
 
-                    {/* Add Food Order Indicator in search view */}
-                    <FoodOrderIndicator booking={booking} />
                   </div>
                 </div>
               ))}
@@ -1007,9 +938,9 @@ function UpcomingBookings() {
                                 'bg-green-100 text-green-700'
                               }`}>
                                 {booking.clientType === 'Hotel' && booking.partnerName ? 
-                                  `Hotel (${booking.partnerName})` : 
+                                  booking.partnerName : 
                                   booking.clientType === 'Collaborator' && booking.partnerName ? 
-                                  `Collaborator (${booking.partnerName})` : 
+                                  booking.partnerName : 
                                   booking.clientType
                                 }
                               </span>
@@ -1077,8 +1008,6 @@ function UpcomingBookings() {
                           </div>
                         )}
 
-                        {/* Add Food Order Indicator in timeline view */}
-                        <FoodOrderIndicator booking={booking} />
                       </div>
                     </div>
                   ))}
@@ -1096,23 +1025,12 @@ function UpcomingBookings() {
     <div className="p-3 sm:p-4 md:p-6 space-y-4 bg-gray-50 min-h-screen">
       <LoadingOverlay isActive={isFiltering} />
       
-      {/* Food orders loading indicator */}
-      {loadingFoodOrders && (
-        <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 mb-4">
-          <div className="flex items-center gap-2 text-orange-700">
-            <div className="animate-spin rounded-full h-4 w-4 border-2 border-orange-500 border-t-transparent"></div>
-            <span className="text-sm">Loading food orders...</span>
-          </div>
-        </div>
-      )}
+
       
-      {/* Date Picker */}
       <SimpleDatePicker />
       
-      {/* Content - Either Timeline or Search Results */}
       {isSearchMode ? renderSearchResults() : renderTimelineView()}
       
-      {/* Booking Details Modal */}
       {selectedBooking && (
         <BookingDetails
           booking={selectedBooking}
