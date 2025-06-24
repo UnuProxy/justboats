@@ -445,7 +445,7 @@ const Sidebar = () => {
 
             {/* Sidebar */}
             <aside
-                className={`fixed top-0 left-0 h-full bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-gray-100 z-30 transform transition-all duration-300 ease-in-out w-80 overflow-hidden shadow-2xl
+                className={`fixed top-0 left-0 h-full bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-gray-100 z-30 transform transition-all duration-300 ease-in-out w-72 overflow-hidden shadow-2xl
                     ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
             >
                 <div className="flex flex-col h-full">
