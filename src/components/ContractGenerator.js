@@ -190,6 +190,7 @@ const ContractGenerator = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [withoutSkipper, setWithoutSkipper] = useState(false);
   const [showSkipperSection, setShowSkipperSection] = useState(false);
+  const [showCustomBoat, setShowCustomBoat] = useState(false);
 
   // Default skipper information
   const defaultSkipper = {
@@ -208,7 +209,8 @@ const ContractGenerator = () => {
     { id: 'seaRay290',     brand: 'Sea Ray',      model: '290', plate: 'IB-67890', fuelConsumption: '35–45 litres' },
     { id: 'quicksilver607', brand: 'QuickSilver', model: '607', plate: 'IB-24680', fuelConsumption: '20–25 litres' },
     { id: 'quicksilver675', brand: 'Quicksilver', model: 'Activ 675', plate: '6ª AT-3-38-23', fuelConsumption: '25–30 litres' },
-    { id: 'seaRay230',     brand: 'Sea Ray',      model: '230 BR', plate: '242364', fuelConsumption: '25–35 litres' }
+    { id: 'seaRay230',     brand: 'Sea Ray',      model: '230 BR', plate: '242364', fuelConsumption: '25–35 litres' },
+    { id: 'custom',        brand: '',       model: '', plate: '', fuelConsumption: '' }
   ];
 
   // Helpers
@@ -223,12 +225,12 @@ const ContractGenerator = () => {
     return date.toLocaleDateString('en-GB');
   }
 
-  // Form data state
+  // Form data state - UPDATED: Added email field to lessee
   const [contractData, setContractData] = useState({
     contractNumber: generateContractNumber(),
     date: formatDate(new Date()),
     selectedBoat: boatOptions[0],
-    lessee: { name: '', address: '', addressDuringTrip: '', identification: '', phone: '' },
+    lessee: { name: '', address: '', addressDuringTrip: '', identification: '', phone: '', email: '' },
     skipper: { ...defaultSkipper },
     checkIn: { date: formatDate(new Date()), time: '10:00' },
     checkOut: { date: formatDate(new Date()), time: '18:00' },
@@ -367,6 +369,11 @@ const ContractGenerator = () => {
     }
   }, [withoutSkipper]);
 
+  // Set showCustomBoat when component mounts or selectedBoat changes
+  useEffect(() => {
+    setShowCustomBoat(contractData.selectedBoat?.id === 'custom');
+  }, [contractData.selectedBoat]);
+
   // Load saved contracts when the saved tab is activated
   useEffect(() => {
     if (activeTab === 'saved') loadSavedContracts();
@@ -392,6 +399,7 @@ const ContractGenerator = () => {
       if (c) {
         setContractData(c);
         setWithoutSkipper(c.withoutSkipper || false);
+        setShowCustomBoat(c.selectedBoat?.id === 'custom');
         setActiveTab('preview');
         setContractSaved(true);
         setContractSaveId(id);
@@ -459,6 +467,14 @@ const ContractGenerator = () => {
   const handleBoatChange = (boatId) => {
     const b = boatOptions.find(x => x.id === boatId);
     setContractData(prev => ({ ...prev, selectedBoat: b }));
+    setShowCustomBoat(boatId === 'custom');
+  };
+
+  const handleCustomBoatChange = (field, value) => {
+    setContractData(prev => ({
+      ...prev,
+      selectedBoat: { ...prev.selectedBoat, [field]: value }
+    }));
   };
 
   const handleAddService = () => {
@@ -543,7 +559,7 @@ const ContractGenerator = () => {
       // Line separator
       pdf.line(20, 76, pdfWidth - 20, 76);
       
-      // LESSEE section
+      // LESSEE section - UPDATED: Added email field and adjusted positions
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(14);
       pdf.text("LESSEE", 20, 84);
@@ -551,44 +567,45 @@ const ContractGenerator = () => {
       pdf.setFontSize(11);
       pdf.text(`Name / Business name: ${contractData.lessee.name}`, 20, 90);
       pdf.text(`Phone: ${contractData.lessee.phone}`, 20, 96);
-      pdf.text(`Address: ${contractData.lessee.address}`, 20, 102);
-      pdf.text(`Address during the trip: ${contractData.lessee.addressDuringTrip}`, 20, 108);
-      pdf.text(`Passport / NIF: ${contractData.lessee.identification}`, 20, 114);
+      pdf.text(`Email: ${contractData.lessee.email}`, 20, 102);
+      pdf.text(`Address: ${contractData.lessee.address}`, 20, 108);
+      pdf.text(`Address during the trip: ${contractData.lessee.addressDuringTrip}`, 20, 114);
+      pdf.text(`Passport / NIF: ${contractData.lessee.identification}`, 20, 120);
       
-      // Line separator
-      pdf.line(20, 120, pdfWidth - 20, 120);
+      // Line separator - UPDATED: Adjusted position
+      pdf.line(20, 126, pdfWidth - 20, 126);
       
-      // SKIPPER section
+      // SKIPPER section - UPDATED: Adjusted positions
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(14);
       
       if (withoutSkipper) {
-        pdf.text("RENTAL WITHOUT SKIPPER", 20, 128);
+        pdf.text("RENTAL WITHOUT SKIPPER", 20, 134);
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(11);
         pdf.setTextColor(255, 0, 0);
-        pdf.text("The lessee will operate the boat directly without a skipper provided by the lessor.", 20, 134);
-        pdf.text("IMPORTANT: If the driver consumes alcohol or operates the boat above 3,500 revolutions,", 20, 140);
-        pdf.text("they will forfeit their right to any deposit refund and may face additional penalties.", 20, 146);
+        pdf.text("The lessee will operate the boat directly without a skipper provided by the lessor.", 20, 140);
+        pdf.text("IMPORTANT: If the driver consumes alcohol or operates the boat above 3,500 revolutions,", 20, 146);
+        pdf.text("they will forfeit their right to any deposit refund and may face additional penalties.", 20, 152);
         pdf.setTextColor(0, 0, 0);
       } else {
-        pdf.text("SKIPPER", 20, 128);
+        pdf.text("SKIPPER", 20, 134);
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(11);
-        pdf.text(`Name: ${contractData.skipper.name}`, 20, 134);
-        pdf.text(`Phone: ${contractData.skipper.phone}`, 20, 140);
-        pdf.text(`Address: ${contractData.skipper.address}`, 20, 146);
-        pdf.text(`Address during the trip: ${contractData.skipper.addressDuringTrip}`, 20, 152);
-        pdf.text(`DNI / NIF / Passport: ${contractData.skipper.identification}`, 20, 158);
-        pdf.text(`Navigation Title: ${contractData.skipper.navigationTitle}`, 20, 164);
-        pdf.text(`Number: ${contractData.skipper.navigationNumber}`, 20, 170);
+        pdf.text(`Name: ${contractData.skipper.name}`, 20, 140);
+        pdf.text(`Phone: ${contractData.skipper.phone}`, 20, 146);
+        pdf.text(`Address: ${contractData.skipper.address}`, 20, 152);
+        pdf.text(`Address during the trip: ${contractData.skipper.addressDuringTrip}`, 20, 158);
+        pdf.text(`DNI / NIF / Passport: ${contractData.skipper.identification}`, 20, 164);
+        pdf.text(`Navigation Title: ${contractData.skipper.navigationTitle}`, 20, 170);
+        pdf.text(`Number: ${contractData.skipper.navigationNumber}`, 20, 176);
       }
       
-      // Line separator
-      const skipperEndY = withoutSkipper ? 152 : 176;
+      // Line separator - UPDATED: Adjusted position
+      const skipperEndY = withoutSkipper ? 158 : 182;
       pdf.line(20, skipperEndY, pdfWidth - 20, skipperEndY);
       
-      // BOAT section
+      // BOAT section - UPDATED: Adjusted positions
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(14);
       pdf.text("BOAT", 20, skipperEndY + 8);
@@ -873,7 +890,7 @@ const ContractGenerator = () => {
             >
               {boatOptions.map(b => (
                 <option key={b.id} value={b.id}>
-                  {b.brand} {b.model}
+                  {b.id === 'custom' ? 'Custom Boat (Enter Details Below)' : `${b.brand} ${b.model}`}
                 </option>
               ))}
             </select>
@@ -882,6 +899,37 @@ const ContractGenerator = () => {
             </div>
           </div>
         </div>
+
+        {/* Custom Boat Details */}
+        {showCustomBoat && (
+          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+            <h4 className="text-md font-medium text-gray-700 mb-3 flex items-center">
+              <Ship size={16} className="mr-2" /> Custom Boat Details
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-600">Brand</label>
+                <input
+                  type="text"
+                  value={contractData.selectedBoat.brand}
+                  onChange={(e) => handleCustomBoatChange('brand', e.target.value)}
+                  placeholder="Enter boat brand"
+                  className="mt-1 p-2 w-full border border-gray-300 rounded-md"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">Model</label>
+                <input
+                  type="text"
+                  value={contractData.selectedBoat.model}
+                  onChange={(e) => handleCustomBoatChange('model', e.target.value)}
+                  placeholder="Enter boat model"
+                  className="mt-1 p-2 w-full border border-gray-300 rounded-md"
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Without skipper option */}
@@ -908,7 +956,7 @@ const ContractGenerator = () => {
         )}
       </div>
 
-      {/* Lessee Info */}
+      {/* Lessee Info - UPDATED: Added email field */}
       <div className="mb-6">
         <h3 className="text-md font-medium text-gray-700 mb-2 flex items-center">
           <User size={16} className="mr-2" /> Lessee Information
@@ -918,12 +966,13 @@ const ContractGenerator = () => {
           ['Address', 'address'],
           ['Address During Trip', 'addressDuringTrip'],
           ['Passport / NIF', 'identification'],
-          ['Phone', 'phone']
+          ['Phone', 'phone'],
+          ['Email', 'email']
         ].map(([label, field], idx) => (
           <div key={idx} className="mb-4">
             <label className="block text-sm font-medium text-gray-600">{label}</label>
             <input
-              type="text"
+              type={field === 'email' ? 'email' : 'text'}
               value={contractData.lessee[field]}
               onChange={(e) => handleChange('lessee', field, e.target.value)}
               className="mt-1 p-2 w-full border border-gray-300 rounded-md"
@@ -1144,7 +1193,7 @@ const ContractGenerator = () => {
     </div>
   );
 
-  // Render contract preview
+  // Render contract preview - UPDATED: Added email field
   const renderContractPreview = () => (
     <div className="bg-white rounded-lg shadow p-4 md:p-6">
       <div className="flex justify-between items-center mb-4">
@@ -1191,12 +1240,13 @@ const ContractGenerator = () => {
           </div>
         </section>
 
-        {/* LESSEE */}
+        {/* LESSEE - UPDATED: Added email field */}
         <section className="mb-6 border-b pb-4">
           <h2 className="text-lg font-semibold mb-2">LESSEE</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
             <p><strong>Name / Business name:</strong> {contractData.lessee.name}</p>
             <p><strong>Phone:</strong> {contractData.lessee.phone}</p>
+            <p><strong>Email:</strong> {contractData.lessee.email}</p>
             <p><strong>Address:</strong> {contractData.lessee.address}</p>
             <p><strong>Address during the trip:</strong> {contractData.lessee.addressDuringTrip}</p>
             <p><strong>Passport / NIF:</strong> {contractData.lessee.identification}</p>
