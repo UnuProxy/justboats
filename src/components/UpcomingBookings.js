@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, ChevronLeft, ChevronRight, Ship, Clock, Users, Euro, MapPin, Home } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Ship, Clock, Users, Euro, MapPin, Home, FileText } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -848,6 +848,19 @@ function UpcomingBookings() {
                       </div>
                     </div>
                     
+                    {/* Notes section */}
+                    {booking.clientNotes && booking.clientNotes !== 'None' && (
+                      <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                        <div className="flex items-start gap-2">
+                          <FileText className="h-4 w-4 text-yellow-600 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <div className="text-xs font-medium text-yellow-800 mb-1">Notes:</div>
+                            <div className="text-sm text-yellow-700">{booking.clientNotes}</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
                     {(booking.privateTransfer || booking.restaurantName) && (
                       <div className="flex flex-wrap gap-2">
                         {booking.privateTransfer && (
@@ -1004,6 +1017,21 @@ function UpcomingBookings() {
                                 <Home className="h-4 w-4 text-red-600" />
                               </div>
                               <span className="truncate">Restaurant: {booking.restaurantName}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Notes section for timeline view */}
+                        {booking.clientNotes && booking.clientNotes !== 'None' && (
+                          <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                            <div className="flex items-start gap-2">
+                              <div className="bg-yellow-100 p-1 rounded-md flex-shrink-0">
+                                <FileText className="h-4 w-4 text-yellow-600" />
+                              </div>
+                              <div className="flex-1">
+                                <div className="text-xs font-medium text-yellow-800 mb-1">Notes:</div>
+                                <div className="text-sm text-yellow-700">{booking.clientNotes}</div>
+                              </div>
                             </div>
                           </div>
                         )}
