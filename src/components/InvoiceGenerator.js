@@ -3,29 +3,20 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
 const InvoiceGenerator = () => {
-  // Format current date in DD.MM.YYYY format for default invoice date
   const currentDate = new Date().toLocaleDateString('en-GB', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric'
   }).split('/').join('.');
   
-  // Format a date string from yyyy-mm-dd to dd-mm-yyyy
-  const formatDateForDisplay = (dateString) => {
-    if (!dateString) return '';
-    const [year, month, day] = dateString.split('-');
-    return `${day}-${month}-${year}`;
-  };
-  
   const [invoiceData, setInvoiceData] = useState({
     invoiceNumber: '',
-    invoiceDate: new Date().toISOString().split('T')[0], // ISO format for date input
+    invoiceDate: new Date().toISOString().split('T')[0],
     description: '',
     unitPrice: '',
     discount: '0',
   });
 
-  // Add client details state
   const [clientData, setClientData] = useState({
     name: '',
     companyName: '',
@@ -69,7 +60,6 @@ const InvoiceGenerator = () => {
     
     setItems([...items, newItem]);
     
-    // Clear form fields
     setInvoiceData({
       ...invoiceData,
       description: '',
@@ -82,438 +72,606 @@ const InvoiceGenerator = () => {
     setItems(items.filter(item => item.id !== id));
   };
 
-  // Calculate by summing the individual item totals directly
- // Calculate totals with VAT extraction logic
-const total = items.reduce((sum, item) => {
-  const discountedPriceInclVat = item.unitPrice - (item.unitPrice * item.discount / 100);
-  return sum + discountedPriceInclVat;
-}, 0);
+  const total = items.reduce((sum, item) => {
+    const discountedPriceInclVat = item.unitPrice - (item.unitPrice * item.discount / 100);
+    return sum + discountedPriceInclVat;
+  }, 0);
 
-const vat = Math.round((total * 0.21 / 1.21) * 100) / 100; // Extract total VAT
-const subtotal = Math.round((total / 1.21) * 100) / 100; // Calculate net amount (without VAT)
+  const vat = Math.round((total * 0.21 / 1.21) * 100) / 100;
+  const subtotal = Math.round((total / 1.21) * 100) / 100;
   
-  // Format currency with Euro symbol, ensuring proper rounding
   const formatCurrency = (amount) => {
-    // Round to exactly 2 decimal places to avoid floating point issues
     const roundedAmount = Math.round(amount * 100) / 100;
     return `€ ${roundedAmount.toFixed(2)}`;
   };
   
-  // Reference to the invoice content for PDF generation
   const invoiceRef = useRef(null);
   
-  // Function to generate and download PDF
   const downloadInvoice = async () => {
-    if (invoiceRef.current) {
-      // Show loading indication
-      const button = document.getElementById('download-btn');
-      const originalText = button.innerText;
-      button.innerText = 'Processing...';
-      button.disabled = true;
-      
-      // Find all elements to hide in PDF and save their original display state
-      const elementsToHide = invoiceRef.current.querySelectorAll('.no-print');
-      const originalDisplays = [];
-      
-      try {
-        // Hide elements that shouldn't be in the PDF
-        elementsToHide.forEach(el => {
-          originalDisplays.push(el.style.display);
-          el.style.display = 'none';
-        });
-        
-        // Make sure print-only elements are visible
-        const printElements = invoiceRef.current.querySelectorAll('.print-only');
-        printElements.forEach(el => {
-          el.style.display = 'block';
-        });
-        
-        const canvas = await html2canvas(invoiceRef.current, {
-          scale: 2,
-          useCORS: true,
-          logging: false
-        });
-        
-        const imgData = canvas.toDataURL('image/png');
-        const pdf = new jsPDF({
-          orientation: 'portrait',
-          unit: 'mm',
-          format: 'a4',
-        });
-        
-        const imgWidth = 210; // A4 width in mm
-        const pageHeight = 297; // A4 height in mm
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-        
-        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-        
-        // If content exceeds a page, add more pages
-        let heightLeft = imgHeight;
-        let position = 0;
-        
-        while (heightLeft > pageHeight) {
-          position = heightLeft - pageHeight;
-          pdf.addPage();
-          pdf.addImage(imgData, 'PNG', 0, -position, imgWidth, imgHeight);
-          heightLeft -= pageHeight;
+    if (!invoiceRef.current) return;
+    
+    const button = document.getElementById('download-btn');
+    if (!button) return;
+    
+    const originalText = button.innerText;
+    button.innerText = 'Processing...';
+    button.disabled = true;
+    
+    try {
+      const canvas = await html2canvas(invoiceRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        ignoreElements: (element) => {
+          return element.classList?.contains('no-print');
         }
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+      
+      const imgWidth = 210;
+      const pageHeight = 297;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      
+      let heightLeft = imgHeight;
+      let position = 0;
+      
+      while (heightLeft > pageHeight) {
+        position = heightLeft - pageHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, -position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      
+      const filename = invoiceData.invoiceNumber 
+        ? `just-enjoy-ibiza-invoice-${invoiceData.invoiceNumber}.pdf` 
+        : `just-enjoy-ibiza-invoice-${currentDate.replace(/\./g, '-')}.pdf`;
         
-        // Generate filename based on invoice number or date
-        const filename = invoiceData.invoiceNumber 
-          ? `just-enjoy-ibiza-invoice-${invoiceData.invoiceNumber}.pdf` 
-          : `just-enjoy-ibiza-invoice-${currentDate.replace(/\./g, '-')}.pdf`;
-          
-        pdf.save(filename);
-      } catch (error) {
-        console.error('Error generating PDF:', error);
-        alert('An error occurred while generating the PDF. Please try again.');
-      } finally {
-        // Restore visibility of hidden elements
-        elementsToHide.forEach((el, index) => {
-          el.style.display = originalDisplays[index] || '';
-        });
-        
-        // Reset button
+      pdf.save(filename);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('An error occurred while generating the PDF. Please try again.');
+    } finally {
+      if (button) {
         button.innerText = originalText;
         button.disabled = false;
       }
     }
   };
   
-  // Function to handle direct printing
   const printInvoice = () => {
     window.print();
   };
 
-  // Toggle client form visibility
   const toggleClientForm = () => {
     setShowClientForm(!showClientForm);
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 w-full mx-auto">
-      {/* Action buttons for printing and downloading */}
-      <div className="flex flex-col sm:flex-row sm:justify-end mb-4 gap-2 sm:gap-4 no-print">
-        <button 
-          onClick={toggleClientForm}
-          className="bg-green-500 text-white py-2 px-4 rounded-md hover:bg-green-600 transition-colors w-full sm:w-auto"
-        >
-          {showClientForm ? 'Hide Client Details' : 'Add Client Details'}
-        </button>
-        <button 
-          onClick={printInvoice} 
-          className="bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600 transition-colors w-full sm:w-auto"
-        >
-          Print Invoice
-        </button>
-        <button 
-          id="download-btn"
-          onClick={downloadInvoice} 
-          className="bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors w-full sm:w-auto"
-        >
-          Download as PDF
-        </button>
+    <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', fontFamily: 'system-ui, sans-serif' }}>
+      
+      {/* Control Panel */}
+      <div style={{ backgroundColor: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '16px 0' }} className="no-print">
+        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 style={{ fontSize: '20px', fontWeight: '600', color: '#1f2937', margin: 0 }}>Invoice Generator</h1>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button 
+              onClick={toggleClientForm}
+              style={{ 
+                padding: '8px 16px', 
+                border: '1px solid #d1d5db', 
+                backgroundColor: '#ffffff', 
+                color: '#374151',
+                cursor: 'pointer',
+                fontSize: '14px',
+                borderRadius: '6px'
+              }}
+            >
+              {showClientForm ? 'Hide Client' : 'Add Client'}
+            </button>
+            <button 
+              onClick={printInvoice}
+              style={{ 
+                padding: '8px 16px', 
+                border: '1px solid #d1d5db', 
+                backgroundColor: '#ffffff', 
+                color: '#374151',
+                cursor: 'pointer',
+                fontSize: '14px',
+                borderRadius: '6px'
+              }}
+            >
+              Print
+            </button>
+            <button 
+              id="download-btn"
+              onClick={downloadInvoice}
+              style={{ 
+                padding: '8px 16px', 
+                border: 'none', 
+                backgroundColor: '#2563eb', 
+                color: '#ffffff',
+                cursor: 'pointer',
+                fontSize: '14px',
+                borderRadius: '6px'
+              }}
+            >
+              Download PDF
+            </button>
+          </div>
+        </div>
       </div>
-      
-      {/* Client Details Form */}
-      {showClientForm && (
-        <div className="mb-6 p-4 border border-gray-200 rounded-md bg-gray-50 no-print">
-          <h2 className="text-lg font-bold mb-4">Client Details</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Client Name</label>
-              <input
-                type="text"
-                name="name"
-                value={clientData.name}
-                onChange={handleClientInputChange}
-                className="border p-2 w-full rounded"
-                placeholder="Full Name"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Company Name</label>
-              <input
-                type="text"
-                name="companyName"
-                value={clientData.companyName}
-                onChange={handleClientInputChange}
-                className="border p-2 w-full rounded"
-                placeholder="Company Name (optional)"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Tax ID / VAT Number</label>
-              <input
-                type="text"
-                name="taxId"
-                value={clientData.taxId}
-                onChange={handleClientInputChange}
-                className="border p-2 w-full rounded"
-                placeholder="Tax ID / VAT Number"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Email</label>
-              <input
-                type="email"
-                name="email"
-                value={clientData.email}
-                onChange={handleClientInputChange}
-                className="border p-2 w-full rounded"
-                placeholder="Email Address"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Phone</label>
-              <input
-                type="text"
-                name="phone"
-                value={clientData.phone}
-                onChange={handleClientInputChange}
-                className="border p-2 w-full rounded"
-                placeholder="Phone Number"
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium mb-1">Address</label>
-              <input
-                type="text"
-                name="address"
-                value={clientData.address}
-                onChange={handleClientInputChange}
-                className="border p-2 w-full rounded"
-                placeholder="Street Address"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">City</label>
-              <input
-                type="text"
-                name="city"
-                value={clientData.city}
-                onChange={handleClientInputChange}
-                className="border p-2 w-full rounded"
-                placeholder="City"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Postal Code</label>
-              <input
-                type="text"
-                name="postalCode"
-                value={clientData.postalCode}
-                onChange={handleClientInputChange}
-                className="border p-2 w-full rounded"
-                placeholder="Postal / Zip Code"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Country</label>
-              <input
-                type="text"
-                name="country"
-                value={clientData.country}
-                onChange={handleClientInputChange}
-                className="border p-2 w-full rounded"
-                placeholder="Country"
-              />
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Invoice content to be captured for PDF */}
-      <div ref={invoiceRef} className="bg-white p-4 sm:p-6 invoice-to-print">
-        <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Invoice</h1>
-        <p className="mb-4">{currentDate}</p>
-        
-        <div className="flex flex-col sm:flex-row sm:justify-between mb-6 sm:mb-8 gap-4">
-          {/* Sender Information */}
-          <div>
-            <h1 className="text-lg sm:text-xl font-bold">Just Enjoy Ibiza</h1>
-            <p>Av. Sant Jordi 48/52</p>
-            <p>CIF: B56880875</p>
-            <p>Ibiza, Spain</p>
-          </div>
-          
-          {/* Invoice Details */}
-          <div className="sm:text-right mt-4 sm:mt-0">
-            <p className="mb-2">Invoice Date</p>
-            <div className="mb-4 relative">
-              <input 
-                type="date" 
-                name="invoiceDate" 
-                value={invoiceData.invoiceDate} 
-                onChange={handleInputChange} 
-                className="border p-1 w-full sm:w-48 no-print" 
-              />
-              <p className="block no-print">
-                {formatDateForDisplay(invoiceData.invoiceDate)}
-              </p>
-              <p className="hidden print-only">
-                {formatDateForDisplay(invoiceData.invoiceDate)}
-              </p>
-            </div>
-            <p className="mb-2">Invoice Number</p>
-            <div>
-              <input 
-                type="text" 
-                name="invoiceNumber" 
-                value={invoiceData.invoiceNumber} 
-                onChange={handleInputChange} 
-                placeholder="JEI-00000" 
-                className="border p-1 w-full sm:w-48" 
-              />
-            </div>
-          </div>
-        </div>
 
-        {/* Client Information - This will display whether or not the client form is visible */}
-        {(clientData.name || clientData.companyName) && (
-          <div className="mb-6 border-t border-gray-200 pt-4">
-            <h2 className="text-lg font-bold mb-2">Bill To:</h2>
-            {clientData.name && <p>{clientData.name}</p>}
-            {clientData.companyName && <p>{clientData.companyName}</p>}
-            {clientData.taxId && <p>Tax ID: {clientData.taxId}</p>}
-            {clientData.address && <p>{clientData.address}</p>}
-            {(clientData.city || clientData.postalCode) && (
-              <p>
-                {clientData.city}
-                {clientData.city && clientData.postalCode && ', '}
-                {clientData.postalCode}
-              </p>
-            )}
-            {clientData.country && <p>{clientData.country}</p>}
-            {clientData.email && <p>Email: {clientData.email}</p>}
-            {clientData.phone && <p>Phone: {clientData.phone}</p>}
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
+        
+        {/* Client Form */}
+        {showClientForm && (
+          <div style={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', marginBottom: '24px', borderRadius: '8px' }} className="no-print">
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid #e5e7eb' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: '500', color: '#111827', margin: 0 }}>Client Details</h2>
+            </div>
+            <div style={{ padding: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Client Name</label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={clientData.name}
+                    onChange={handleClientInputChange}
+                    placeholder="Full Name"
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px', 
+                      border: '1px solid #d1d5db', 
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      backgroundColor: '#ffffff',
+                      color: '#111827'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Company</label>
+                  <input
+                    type="text"
+                    name="companyName"
+                    value={clientData.companyName}
+                    onChange={handleClientInputChange}
+                    placeholder="Company Name"
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px', 
+                      border: '1px solid #d1d5db', 
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      backgroundColor: '#ffffff',
+                      color: '#111827'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Tax ID</label>
+                  <input
+                    type="text"
+                    name="taxId"
+                    value={clientData.taxId}
+                    onChange={handleClientInputChange}
+                    placeholder="Tax/VAT Number"
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px', 
+                      border: '1px solid #d1d5db', 
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      backgroundColor: '#ffffff',
+                      color: '#111827'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Email</label>
+                  <input
+                    type="email"
+                    name="email"
+                    value={clientData.email}
+                    onChange={handleClientInputChange}
+                    placeholder="email@example.com"
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px', 
+                      border: '1px solid #d1d5db', 
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      backgroundColor: '#ffffff',
+                      color: '#111827'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Phone</label>
+                  <input
+                    type="text"
+                    name="phone"
+                    value={clientData.phone}
+                    onChange={handleClientInputChange}
+                    placeholder="Phone Number"
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px', 
+                      border: '1px solid #d1d5db', 
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      backgroundColor: '#ffffff',
+                      color: '#111827'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Address</label>
+                  <input
+                    type="text"
+                    name="address"
+                    value={clientData.address}
+                    onChange={handleClientInputChange}
+                    placeholder="Street Address"
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px', 
+                      border: '1px solid #d1d5db', 
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      backgroundColor: '#ffffff',
+                      color: '#111827'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>City</label>
+                  <input
+                    type="text"
+                    name="city"
+                    value={clientData.city}
+                    onChange={handleClientInputChange}
+                    placeholder="City"
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px', 
+                      border: '1px solid #d1d5db', 
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      backgroundColor: '#ffffff',
+                      color: '#111827'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Postal Code</label>
+                  <input
+                    type="text"
+                    name="postalCode"
+                    value={clientData.postalCode}
+                    onChange={handleClientInputChange}
+                    placeholder="Postal Code"
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px', 
+                      border: '1px solid #d1d5db', 
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      backgroundColor: '#ffffff',
+                      color: '#111827'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Country</label>
+                  <input
+                    type="text"
+                    name="country"
+                    value={clientData.country}
+                    onChange={handleClientInputChange}
+                    placeholder="Country"
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px', 
+                      border: '1px solid #d1d5db', 
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      backgroundColor: '#ffffff',
+                      color: '#111827'
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         )}
-
-        {/* Responsive Table for Items */}
-        <div className="mt-6 overflow-x-auto">
-          <table className="w-full min-w-full">
-            <thead>
-              <tr className="border-b border-gray-300">
-                <th className="text-left py-3 px-2">Item</th>
-                <th className="text-left py-3 px-2">Description</th>
-               <th className="text-right py-3 px-2">Price (VAT incl.)</th>
-                <th className="text-right py-3 px-2">Discount</th>
-                <th className="text-right py-3 px-2">VAT (21%)</th>
-                <th className="text-right py-3 px-2">Total Amount EUR</th>
-                <th className="text-center py-3 px-2 no-print">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-             {items.map((item, index) => {
-  const discountedPriceInclVat = item.unitPrice - (item.unitPrice * item.discount / 100);
-  const itemVat = Math.round((discountedPriceInclVat * 0.21 / 1.21) * 100) / 100; // Extract VAT from inclusive price
-  const totalAmount = discountedPriceInclVat; // This is already the VAT-inclusive total
-                
-                return (
-                  <tr key={item.id} className="border-b border-gray-200">
-                    <td className="py-3 px-2">{index + 1}</td>
-                    <td className="py-3 px-2">{item.description}</td>
-                    <td className="py-3 px-2 text-right">{formatCurrency(item.unitPrice)}</td>
-                    <td className="py-3 px-2 text-right">{item.discount > 0 ? `${item.discount}%` : '-'}</td>
-                    <td className="py-3 px-2 text-right">{formatCurrency(itemVat)}</td>
-                    <td className="py-3 px-2 text-right">{formatCurrency(totalAmount)}</td>
-                    <td className="py-3 px-2 text-center no-print">
-                      <button onClick={() => removeItem(item.id)} className="text-red-500">
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
         
-        {/* Mobile-friendly Add item form */}
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2 no-print">
-          <input
-            type="text"
-            placeholder="Description"
-            name="description"
-            value={invoiceData.description}
-            onChange={handleInputChange}
-            className="border p-2 sm:col-span-2"
-          />
-          <input
-  type="number"
-  placeholder="Price (VAT incl.)"
-  name="unitPrice"
-  value={invoiceData.unitPrice}
-  onChange={handleInputChange}
-  className="border p-2"
-  min="0"
-  step="0.01"
-/>
-          <input
-            type="number"
-            placeholder="Discount %"
-            name="discount"
-            value={invoiceData.discount}
-            onChange={handleInputChange}
-            className="border p-2"
-            min="0"
-            max="100"
-          />
-          <button 
-            onClick={addItem} 
-            className="bg-blue-500 text-white py-2 px-4 rounded"
-          >
-            Add Item
-          </button>
-        </div>
+        {/* Invoice */}
+        <div style={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '8px', minHeight: '297mm' }}>
+          <div ref={invoiceRef} className="invoice-to-print">
+            
+            {/* Header */}
+            <div style={{ padding: '48px 48px 32px 48px', borderBottom: '3px solid #2563eb' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '24px' }}>
+                    <div style={{ width: '8px', height: '8px', backgroundColor: '#2563eb', borderRadius: '50%', marginRight: '12px' }}></div>
+                    <h1 style={{ fontSize: '28px', fontWeight: '300', color: '#111827', margin: 0 }}>Just Enjoy Ibiza</h1>
+                  </div>
+                  <div style={{ color: '#6b7280', fontSize: '14px', lineHeight: '1.6' }}>
+                    <p style={{ margin: '0 0 4px 0' }}>Av. Sant Jordi 48/52</p>
+                    <p style={{ margin: '0 0 4px 0' }}>CIF: B56880875</p>
+                    <p style={{ margin: '0' }}>Ibiza, Spain</p>
+                  </div>
+                </div>
+                
+                <div style={{ textAlign: 'right' }}>
+                  <h2 style={{ fontSize: '48px', fontWeight: '300', color: '#111827', margin: '0 0 16px 0' }}>INVOICE</h2>
+                  <p style={{ color: '#6b7280', fontSize: '14px', margin: 0 }}>{currentDate}</p>
+                </div>
+              </div>
+            </div>
 
-        {/* Totals Section */}
-        <div className="mt-8 flex justify-end">
-          <div className="w-full sm:w-64">
-            <div className="flex justify-between border-t border-gray-300 pt-3 pb-2">
-              <span className="font-medium">Subtotal</span>
-              <span className="pl-4">{formatCurrency(subtotal)}</span>
+            {/* Details */}
+            <div style={{ padding: '32px 48px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '48px', marginBottom: '32px' }}>
+                
+                {/* Invoice Details */}
+                <div>
+                  <h3 style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px' }}>Invoice Details</h3>
+                  <div style={{ marginBottom: '24px' }}>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '8px' }}>Invoice Date</label>
+                    <input 
+                      type="date" 
+                      name="invoiceDate" 
+                      value={invoiceData.invoiceDate} 
+                      onChange={handleInputChange} 
+                      style={{ 
+                        display: 'block',
+                        width: '100%',
+                        maxWidth: '300px',
+                        padding: '10px 12px', 
+                        border: '1px solid #d1d5db', 
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        backgroundColor: '#ffffff',
+                        color: '#111827'
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '8px' }}>Invoice Number</label>
+                    <input 
+                      type="text" 
+                      name="invoiceNumber" 
+                      value={invoiceData.invoiceNumber} 
+                      onChange={handleInputChange} 
+                      placeholder="JEI-00000" 
+                      style={{ 
+                        display: 'block',
+                        width: '100%',
+                        maxWidth: '300px',
+                        padding: '10px 12px', 
+                        border: '1px solid #d1d5db', 
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        backgroundColor: '#ffffff',
+                        color: '#111827'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Client Info */}
+                {(clientData.name || clientData.companyName) && (
+                  <div>
+                    <h3 style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px' }}>Bill To</h3>
+                    <div style={{ color: '#374151', fontSize: '14px', lineHeight: '1.6' }}>
+                      {clientData.name && <p style={{ fontWeight: '600', color: '#111827', margin: '0 0 8px 0' }}>{clientData.name}</p>}
+                      {clientData.companyName && <p style={{ fontWeight: '500', margin: '0 0 8px 0' }}>{clientData.companyName}</p>}
+                      {clientData.taxId && <p style={{ margin: '0 0 8px 0' }}>Tax ID: {clientData.taxId}</p>}
+                      {clientData.address && <p style={{ margin: '0 0 4px 0' }}>{clientData.address}</p>}
+                      {(clientData.city || clientData.postalCode) && (
+                        <p style={{ margin: '0 0 4px 0' }}>
+                          {clientData.city}
+                          {clientData.city && clientData.postalCode && ', '}
+                          {clientData.postalCode}
+                        </p>
+                      )}
+                      {clientData.country && <p style={{ margin: '0 0 8px 0' }}>{clientData.country}</p>}
+                      {clientData.email && <p style={{ margin: '0 0 4px 0' }}>{clientData.email}</p>}
+                      {clientData.phone && <p style={{ margin: '0' }}>{clientData.phone}</p>}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Add Item Form */}
+              <div style={{ padding: '24px', backgroundColor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '8px', marginBottom: '32px' }} className="no-print">
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 120px', gap: '16px', alignItems: 'end' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Description</label>
+                    <input
+                      type="text"
+                      placeholder="Yacht charter service..."
+                      name="description"
+                      value={invoiceData.description}
+                      onChange={handleInputChange}
+                      style={{ 
+                        width: '100%', 
+                        padding: '8px 12px', 
+                        border: '1px solid #d1d5db', 
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        backgroundColor: '#ffffff',
+                        color: '#111827'
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Price (VAT incl.)</label>
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      name="unitPrice"
+                      value={invoiceData.unitPrice}
+                      onChange={handleInputChange}
+                      min="0"
+                      step="0.01"
+                      style={{ 
+                        width: '100%', 
+                        padding: '8px 12px', 
+                        border: '1px solid #d1d5db', 
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        backgroundColor: '#ffffff',
+                        color: '#111827'
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Discount %</label>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      name="discount"
+                      value={invoiceData.discount}
+                      onChange={handleInputChange}
+                      min="0"
+                      max="100"
+                      style={{ 
+                        width: '100%', 
+                        padding: '8px 12px', 
+                        border: '1px solid #d1d5db', 
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        backgroundColor: '#ffffff',
+                        color: '#111827'
+                      }}
+                    />
+                  </div>
+                  <button 
+                    onClick={addItem}
+                    disabled={!invoiceData.description || !invoiceData.unitPrice}
+                    style={{ 
+                      padding: '9px 16px', 
+                      border: 'none', 
+                      backgroundColor: !invoiceData.description || !invoiceData.unitPrice ? '#9ca3af' : '#2563eb', 
+                      color: '#ffffff',
+                      cursor: !invoiceData.description || !invoiceData.unitPrice ? 'not-allowed' : 'pointer',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      borderRadius: '6px'
+                    }}
+                  >
+                    Add Item
+                  </button>
+                </div>
+              </div>
+
+              {/* Items */}
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden', marginBottom: '32px' }}>
+                <div style={{ backgroundColor: '#f9fafb', padding: '16px 24px', borderBottom: '1px solid #e5e7eb' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr 120px 80px 120px 120px', gap: '16px', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <div>#</div>
+                    <div>Description</div>
+                    <div style={{ textAlign: 'right' }}>Price (VAT incl.)</div>
+                    <div style={{ textAlign: 'right' }}>Discount</div>
+                    <div style={{ textAlign: 'right' }}>VAT (21%)</div>
+                    <div style={{ textAlign: 'right' }}>Total</div>
+                  </div>
+                </div>
+                
+                {items.length === 0 ? (
+                  <div style={{ padding: '48px 24px', textAlign: 'center', color: '#9ca3af' }}>
+                    <p style={{ margin: '0 0 4px 0' }}>No items added yet</p>
+                    <p style={{ fontSize: '12px', margin: 0 }}>Add your first service using the form above</p>
+                  </div>
+                ) : (
+                  items.map((item, index) => {
+                    const discountedPriceInclVat = item.unitPrice - (item.unitPrice * item.discount / 100);
+                    const itemVat = Math.round((discountedPriceInclVat * 0.21 / 1.21) * 100) / 100;
+                    const totalAmount = discountedPriceInclVat;
+                    
+                    return (
+                      <div key={`item-${item.id}`} style={{ padding: '16px 24px', borderBottom: '1px solid #f3f4f6', backgroundColor: '#ffffff' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr 120px 80px 120px 120px', gap: '16px', alignItems: 'center', fontSize: '14px' }}>
+                          <div style={{ color: '#111827', fontWeight: '500' }}>{index + 1}</div>
+                          <div style={{ color: '#111827' }}>{item.description}</div>
+                          <div style={{ textAlign: 'right', color: '#111827', fontWeight: '500' }}>{formatCurrency(item.unitPrice)}</div>
+                          <div style={{ textAlign: 'right', color: '#6b7280' }}>{item.discount > 0 ? `${item.discount}%` : '—'}</div>
+                          <div style={{ textAlign: 'right', color: '#6b7280' }}>{formatCurrency(itemVat)}</div>
+                          <div style={{ textAlign: 'right', color: '#111827', fontWeight: '600' }}>{formatCurrency(totalAmount)}</div>
+                          <div className="no-print" style={{ textAlign: 'center' }}>
+                            <button 
+                              onClick={() => removeItem(item.id)} 
+                              style={{ 
+                                color: '#ef4444', 
+                                backgroundColor: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontSize: '18px',
+                                padding: '4px'
+                              }}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              
+              {/* Totals */}
+              {items.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '32px' }}>
+                  <div style={{ width: '320px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '24px' }}>
+                    <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
+                      <span style={{ color: '#6b7280' }}>Subtotal (excl. VAT)</span>
+                      <span style={{ color: '#111827', fontWeight: '500' }}>{formatCurrency(subtotal)}</span>
+                    </div>
+                    <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
+                      <span style={{ color: '#6b7280' }}>VAT (21%)</span>
+                      <span style={{ color: '#111827', fontWeight: '500' }}>{formatCurrency(vat)}</span>
+                    </div>
+                    <div style={{ paddingTop: '12px', borderTop: '1px solid #d1d5db', display: 'flex', justifyContent: 'space-between', fontSize: '18px' }}>
+                      <span style={{ color: '#111827', fontWeight: '600' }}>Total Amount</span>
+                      <span style={{ color: '#2563eb', fontWeight: '700' }}>{formatCurrency(total)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="flex justify-between border-t border-gray-300 pt-3 pb-2">
-              <span className="font-medium">VAT</span>
-              <span className="pl-4">{formatCurrency(vat)}</span>
-            </div>
-            <div className="flex justify-between border-t border-b border-gray-300 py-3">
-              <span className="font-bold">Total</span>
-              <span className="font-bold pl-4">{formatCurrency(total)}</span>
+
+            {/* Footer */}
+            <div style={{ marginTop: 'auto', padding: '32px 48px', backgroundColor: '#f8fafc', borderTop: '1px solid #e5e7eb' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
+                <div>
+                  <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>Payment Information</h3>
+                  <div style={{ color: '#6b7280', fontSize: '14px', lineHeight: '1.6' }}>
+                    
+                    <p style={{ margin: '0 0 8px 0', fontWeight: '500' }}>Payment terms: Net 30 days from invoice date</p>
+                    <p style={{ margin: '0' }}>All payments should include the invoice number as reference</p>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>Thank You</h3>
+                  <p style={{ color: '#6b7280', fontSize: '14px', lineHeight: '1.6', margin: '0' }}>Thank you for choosing Just Enjoy Ibiza for your luxury yacht experience.</p>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-
-        {/* Footer Section */}
-        {/* Footer Section */}
-<div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
-  <div>
-    <h3 className="font-bold mb-2">Contact Information:</h3>
-    <p>For any queries regarding this invoice, please contact us at:</p>
-    <p>Email: info@justenjoyibiza.com</p>
-    <p>Phone: +34 692 688 348</p>
-    <p>Address: 48/52 Av.Sant Jordi,</p>
-    <p>Ibiza, 07800, Spain</p>
-  </div>
-  <div>
-    <h3 className="font-bold mb-2">Payment Information:</h3>
-    <p>Please make payment by bank transfer to:</p>
-    <p className="font-mono bg-gray-100 p-2 rounded mt-2">
-      <strong>IBAN:</strong> ES86 0182 0288 0002 0167 8954
-    </p>
-    <p className="mt-2 text-sm text-gray-600">
-      Account holder: Just Enjoy Ibiza
-    </p>
-    <p className="text-sm text-gray-600">
-      Please include invoice number as reference
-    </p>
-  </div>
-</div>
-
-        <div className="mt-8 text-center">
-          <p>Thank you for your business and we look forward to working with you soon.</p>
         </div>
       </div>
     </div>
