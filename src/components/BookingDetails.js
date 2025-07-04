@@ -197,16 +197,17 @@ const BookingDetails = ({ booking, onClose }) => {
     console.log("First payment:", firstPayment);
     console.log("Second payment:", secondPayment);
     
-    return {
-      ...booking,
-      bookingDate: displayDate, // Use the correctly formatted date
-      payments,
-      firstPayment,
-      secondPayment,
-      finalPrice: booking?.pricing?.agreedPrice || 0,
-      paymentStatus: booking?.pricing?.paymentStatus || 'No Payment',
-    };
-  });
+   return {
+    ...booking,
+    bookingDate: displayDate, // Use the correctly formatted date
+    payments,
+    firstPayment,
+    secondPayment,
+    finalPrice: booking?.pricing?.agreedPrice || 0,
+    paymentStatus: booking?.pricing?.paymentStatus || 'No Payment',
+    clientNotes: booking?.clientNotes || booking?.notes || ""
+  };
+});
 
   /**
    * Focus the modal when it opens
@@ -258,7 +259,7 @@ const BookingDetails = ({ booking, onClose }) => {
             date: "",
             type: "second",
           };
-          // Set edited booking state - ADD THE CLIENT FIELDS HERE
+         
           setEditedBooking({
             ...bookingData,
             firstPayment,
@@ -269,7 +270,8 @@ const BookingDetails = ({ booking, onClose }) => {
             clientName: bookingData.clientName || bookingData.clientDetails?.name || "",
             clientPhone: bookingData.clientPhone || bookingData.clientDetails?.phone || "",
             clientEmail: bookingData.clientEmail || bookingData.clientDetails?.email || "",
-            clientPassport: bookingData.clientPassport || bookingData.clientDetails?.passportNumber || ""
+            clientPassport: bookingData.clientPassport || bookingData.clientDetails?.passportNumber || "",
+            clientNotes: bookingData.clientNotes || bookingData.notes || ""
           });
         }
       } catch (error) {
@@ -327,8 +329,7 @@ const BookingDetails = ({ booking, onClose }) => {
           console.log("First payment:", firstPayment);
           console.log("Second payment:", secondPayment);
           
-          // Set edited booking state with fresh data
-          // Look for this part in your code - in the refreshBookingData function:
+         // Look for this part in your code - in the refreshBookingData function:
           setEditedBooking({
             ...freshBookingData,
             id: booking.id, // Ensure ID is preserved

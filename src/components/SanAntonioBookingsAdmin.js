@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Ship, Calendar, Clock, Users, Euro, Check, X, ChevronRight, Search, PlusCircle, Percent, Edit, Trash2 } from 'lucide-react';
+import { Ship, Calendar, Clock, Users, Euro, Check, X, ChevronRight, Search, PlusCircle, Percent, Edit, Trash2, Anchor } from 'lucide-react';
 import { collection, addDoc, getDocs, query, where, doc, updateDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 
@@ -31,6 +31,10 @@ const SanAntonioBookingsAdmin = () => {
     },
     tourType: 'standard',
     tourTime: 'morning',
+    boatSelection: {
+      boatType: 'quicksilver', // quicksilver, searay, custom
+      customBoatName: ''
+    },
     date: '',
     startTime: '10:00',
     endTime: '13:30',
@@ -54,6 +58,13 @@ const SanAntonioBookingsAdmin = () => {
       isFullPayment: false
     }
   });
+  
+  // Available boats for San Antonio tours
+  const availableBoats = [
+    { id: 'quicksilver', name: 'QuickSilver 675' },
+    { id: 'searay', name: 'Sea Ray 230' },
+    { id: 'custom', name: 'Custom Boat' }
+  ];
   
   // Tour types and time slots specific to San Antonio
   const tourTypes = [
@@ -90,6 +101,16 @@ const SanAntonioBookingsAdmin = () => {
   
   // Payment methods
   const paymentMethods = ['cash', 'card', 'transfer', 'website'];
+  
+  // Helper function to get boat name for display
+  const getBoatName = (booking) => {
+    if (booking.boatSelection?.boatType === 'custom') {
+      return booking.boatSelection?.customBoatName || 'Custom Boat';
+    }
+    
+    const boat = availableBoats.find(b => b.id === booking.boatSelection?.boatType);
+    return boat?.name || booking.bookingDetails?.boatName || 'San Antonio Tour';
+  };
   
   useEffect(() => {
     const checkForEditRequest = async () => {
@@ -190,6 +211,10 @@ const SanAntonioBookingsAdmin = () => {
       },
       tourType: 'standard',
       tourTime: 'morning',
+      boatSelection: {
+        boatType: 'quicksilver',
+        customBoatName: ''
+      },
       date: '',
       startTime: '10:00',
       endTime: '13:30',
@@ -238,6 +263,32 @@ const SanAntonioBookingsAdmin = () => {
            booking.pricing.payments[0]?.amount === booking.pricing?.agreedPrice && 
            booking.pricing.payments[0]?.received);
         
+        // Determine boat selection from existing data
+        let boatSelection = {
+          boatType: 'quicksilver',
+          customBoatName: ''
+        };
+        
+        if (booking.boatSelection) {
+          // New format with boatSelection
+          boatSelection = booking.boatSelection;
+        } else if (booking.bookingDetails?.boatName) {
+          // Try to match existing boat name to our available boats
+          const boatName = booking.bookingDetails.boatName;
+          const matchedBoat = availableBoats.find(b => 
+            boatName.toLowerCase().includes(b.name.toLowerCase()) || 
+            b.name.toLowerCase().includes(boatName.toLowerCase())
+          );
+          
+          if (matchedBoat) {
+            boatSelection.boatType = matchedBoat.id;
+          } else {
+            // Unknown boat, set as custom
+            boatSelection.boatType = 'custom';
+            boatSelection.customBoatName = boatName;
+          }
+        }
+        
         // Convert from Firebase data structure to form structure
         const mappedData = {
           clientDetails: {
@@ -258,6 +309,7 @@ const SanAntonioBookingsAdmin = () => {
           },
           tourType: booking.tourType || 'standard',
           tourTime: booking.tourTime || 'morning',
+          boatSelection: boatSelection,
           date: booking.date || booking.bookingDate || '',
           startTime: booking.bookingDetails?.startTime || '10:00',
           endTime: booking.bookingDetails?.endTime || '13:30',
@@ -399,6 +451,29 @@ const SanAntonioBookingsAdmin = () => {
         startTime: slot.start,
         endTime: slot.end
       }));
+      return;
+    }
+    
+    if (section === 'boatSelection') {
+      if (field === 'boatType') {
+        // Update boat type and reset custom name if not custom
+        setFormData(prev => ({
+          ...prev,
+          boatSelection: {
+            ...prev.boatSelection,
+            boatType: value,
+            customBoatName: value === 'custom' ? prev.boatSelection.customBoatName : ''
+          }
+        }));
+      } else if (field === 'customBoatName') {
+        setFormData(prev => ({
+          ...prev,
+          boatSelection: {
+            ...prev.boatSelection,
+            customBoatName: value
+          }
+        }));
+      }
       return;
     }
     
@@ -696,6 +771,13 @@ const SanAntonioBookingsAdmin = () => {
   // Handle booking submission (create or update)
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validate custom boat name if custom boat selected
+    if (formData.boatSelection.boatType === 'custom' && !formData.boatSelection.customBoatName.trim()) {
+      alert('Please enter a custom boat name.');
+      return;
+    }
+    
     setIsLoading(true);
     
     try {
@@ -705,6 +787,11 @@ const SanAntonioBookingsAdmin = () => {
       const totalPaid = 
         (formData.payments.deposit.received ? depositAmount : 0) +
         (formData.payments.remaining.received ? remainingAmount : 0);
+      
+      // Get boat name for booking details
+      const boatName = formData.boatSelection.boatType === 'custom' 
+        ? formData.boatSelection.customBoatName 
+        : availableBoats.find(b => b.id === formData.boatSelection.boatType)?.name;
       
       // Build booking data in format compatible with your existing system
       const bookingData = {
@@ -718,11 +805,15 @@ const SanAntonioBookingsAdmin = () => {
         date: formData.date,
         bookingDetails: {
           boatCompany: "San Antonio Boats",
-          boatName: tourTypes.find(t => t.id === formData.tourType)?.name || "Standard Tour",
+          boatName: boatName,
           passengers: parseInt(formData.passengers),
           date: formData.date,
           startTime: formData.startTime,
           endTime: formData.endTime,
+        },
+        boatSelection: {
+          boatType: formData.boatSelection.boatType,
+          customBoatName: formData.boatSelection.customBoatName
         },
         pricing: {
           agreedPrice: parseFloat(formData.price),
@@ -847,7 +938,7 @@ const SanAntonioBookingsAdmin = () => {
   const filteredBookings = bookings.filter(booking => 
     booking.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     booking.source?.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    booking.bookingDetails?.boatName?.toLowerCase().includes(searchTerm.toLowerCase())
+    getBoatName(booking).toLowerCase().includes(searchTerm.toLowerCase())
   );
   
   // Format date for display
@@ -974,6 +1065,52 @@ const SanAntonioBookingsAdmin = () => {
                         <option key={key} value={key}>{slot.label}</option>
                       ))}
                     </select>
+                  </div>
+                </div>
+                
+                {/* Boat Selection Section - New */}
+                <div className="bg-green-100 p-3 rounded-lg border border-green-200">
+                  <h4 className="font-medium text-green-800 mb-3 flex items-center gap-1">
+                    <Anchor size={16} className="text-green-600" />
+                    Boat Selection
+                  </h4>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-gray-700 mb-1">Boat*</label>
+                      <select
+                        required
+                        value={formData.boatSelection.boatType}
+                        onChange={(e) => handleInputChange('boatSelection', 'boatType', e.target.value)}
+                        className="w-full p-2 border rounded"
+                      >
+                        {availableBoats.map(boat => (
+                          <option key={boat.id} value={boat.id}>
+                            {boat.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    {formData.boatSelection.boatType === 'custom' && (
+                      <div>
+                        <label className="block text-sm text-gray-700 mb-1">Custom Boat Name*</label>
+                        <input
+                          type="text"
+                          required
+                          value={formData.boatSelection.customBoatName}
+                          onChange={(e) => handleInputChange('boatSelection', 'customBoatName', e.target.value)}
+                          className="w-full p-2 border rounded"
+                          placeholder="Enter boat name"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="mt-2 text-xs text-green-700">
+                    <strong>Selected:</strong> {formData.boatSelection.boatType === 'custom' 
+                      ? formData.boatSelection.customBoatName || 'Custom Boat' 
+                      : availableBoats.find(b => b.id === formData.boatSelection.boatType)?.name}
                   </div>
                 </div>
                 
@@ -1446,6 +1583,10 @@ const SanAntonioBookingsAdmin = () => {
                           <Users size={12} />
                           {booking.bookingDetails?.passengers}
                         </span>
+                        <span className="flex items-center gap-1">
+                          <Anchor size={12} />
+                          {getBoatName(booking)}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1465,7 +1606,7 @@ const SanAntonioBookingsAdmin = () => {
                     <div className="text-right">
                       <div className="font-medium text-sm sm:text-base">€{booking.pricing?.agreedPrice}</div>
                       <div className="hidden sm:block text-xs text-gray-500 truncate max-w-[100px]">
-                        {booking.bookingDetails?.boatName || 'San Antonio Tour'}
+                        {getBoatName(booking)}
                       </div>
                     </div>
                     
@@ -1532,6 +1673,10 @@ const SanAntonioBookingsAdmin = () => {
                           <div><span className="text-gray-500">Date:</span> {formatDate(booking.date || booking.bookingDate)}</div>
                           <div><span className="text-gray-500">Time:</span> {booking.bookingDetails?.startTime} - {booking.bookingDetails?.endTime}</div>
                           <div><span className="text-gray-500">Passengers:</span> {booking.bookingDetails?.passengers}</div>
+                          <div className="col-span-2">
+                            <span className="text-gray-500">Boat:</span> 
+                            <span className="font-medium ml-1">{getBoatName(booking)}</span>
+                          </div>
                         </div>
                       </div>
                     </div>
