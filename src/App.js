@@ -32,6 +32,7 @@ import ExpenseTracker from './components/ExpenseTracker';
 import CateringExpensesTracker from './components/CateringExpensesTracker';
 import ContractGenerator from './components/ContractGenerator';
 import ClientDataCollection from './components/ClientDataCollection';
+import CharterManagementSystem from './components/CharterManagementSystem';
 const Splash = ({ onFinish }) => {
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -207,6 +208,16 @@ function App() {
                                     <ProtectedRoute>
                                         <ProtectedLayout>
                                             <SanAntonioBookingsAdmin />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/charter-management"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <CharterManagementSystem />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }

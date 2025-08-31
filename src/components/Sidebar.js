@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { Users2 } from 'lucide-react';
 
 const Sidebar = () => {
     const navigate = useNavigate();
@@ -198,6 +199,14 @@ const Sidebar = () => {
                         allowed: true,
                         description: 'Special tour packages'
                     },
+                    {
+                    name: 'Charter Management',
+                    icon: Users2,
+                    path: '/charter-management',
+                    allowed: true,
+                    description: 'Manage leads & collaborator bookings',
+                    badge: 'New'
+                },
                     {
                         name: 'Generate Contract',
                         icon: FileText,
