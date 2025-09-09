@@ -586,7 +586,6 @@ export default function InvoiceGenerator() {
               </div>
             )}
           </div>
-
           <footer className="a4-ft">
             <div className="a4-grid">
               <div>
