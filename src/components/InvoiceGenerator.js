@@ -513,7 +513,6 @@ export default function InvoiceGenerator() {
               </div>
             </div>
           </header>
-
           <div className="a4-body">
             <div className="grid g2" style={{ marginBottom: 10 }}>
               <div>
