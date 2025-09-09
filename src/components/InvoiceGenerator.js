@@ -1,681 +1,604 @@
-import React, { useState, useRef } from 'react';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import React, { useEffect, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
-const InvoiceGenerator = () => {
-  const currentDate = new Date().toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  }).split('/').join('.');
-  
-  const [invoiceData, setInvoiceData] = useState({
-    invoiceNumber: '',
-    invoiceDate: new Date().toISOString().split('T')[0],
-    description: '',
-    unitPrice: '',
-    discount: '0',
+/**
+ * Just Enjoy Ibiza — Invoice Generator (Luxury + Mobile-first + One-page PDF)
+ * - Fluid mobile UI (Edit / Preview tabs), zero horizontal overflow
+ * - Hidden A4 layout is captured for PDF at full opacity (no faint PDFs)
+ * - British English copy, EUR formatting, 21% VAT from VAT-inclusive prices
+ */
+
+const VAT_RATE = 0.21;
+const gbEur = new Intl.NumberFormat("en-GB", { style: "currency", currency: "EUR" });
+const fmt = (n) => gbEur.format(Math.round((Number(n) || 0) * 100) / 100);
+
+export default function InvoiceGenerator() {
+  // Dates
+  const todayIso = new Date().toISOString().split("T")[0];
+  const todayPretty = new Date().toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
   });
 
-  const [clientData, setClientData] = useState({
-    name: '',
-    companyName: '',
-    address: '',
-    city: '',
-    postalCode: '',
-    country: '',
-    email: '',
-    phone: '',
-    taxId: ''
+  // Responsive behaviour
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    const onResize = () => setIsNarrow(window.innerWidth <= 1024);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const [tab, setTab] = useState("edit"); // "edit" | "preview"
+
+  // Form state
+  const [invoice, setInvoice] = useState({
+    invoiceNumber: "",
+    invoiceDate: todayIso,
+    description: "",
+    unitPrice: "",
+    discount: "0",
+    notes: "Courtesy drinks, towels and skipper included.",
+    terms:
+      "Payment terms: Net 30 days from invoice date. Please include the invoice number as the payment reference.",
+  });
+
+  const [client, setClient] = useState({
+    name: "",
+    companyName: "",
+    address: "",
+    city: "",
+    postalCode: "",
+    country: "",
+    email: "",
+    phone: "",
+    taxId: "",
   });
 
   const [items, setItems] = useState([]);
-  const [showClientForm, setShowClientForm] = useState(false);
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setInvoiceData({
-      ...invoiceData,
-      [name]: value
-    });
-  };
-
-  const handleClientInputChange = (e) => {
-    const { name, value } = e.target;
-    setClientData({
-      ...clientData,
-      [name]: value
-    });
-  };
+  const onInvoice = (e) => setInvoice((s) => ({ ...s, [e.target.name]: e.target.value }));
+  const onClient = (e) => setClient((s) => ({ ...s, [e.target.name]: e.target.value }));
 
   const addItem = () => {
-    if (!invoiceData.description || !invoiceData.unitPrice) return;
-    
-    const newItem = {
-      id: Date.now(),
-      description: invoiceData.description,
-      unitPrice: parseFloat(invoiceData.unitPrice),
-      discount: parseFloat(invoiceData.discount) || 0,
+    if (!invoice.description || !invoice.unitPrice) return;
+    const price = parseFloat(invoice.unitPrice);
+    const disc = Math.min(Math.max(parseFloat(invoice.discount) || 0, 0), 100);
+
+    setItems((arr) => [
+      ...arr,
+      {
+        id: Date.now(),
+        description: invoice.description.trim(),
+        unitPrice: Number.isNaN(price) ? 0 : price, // VAT-inclusive
+        discount: disc,
+      },
+    ]);
+
+    setInvoice((s) => ({ ...s, description: "", unitPrice: "", discount: "0" }));
+    if (isNarrow) setTab("preview");
+  };
+
+  const onAddKey = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addItem();
+    }
+  };
+
+  const removeItem = (id) => setItems((arr) => arr.filter((x) => x.id !== id));
+
+  // Totals (from VAT-inclusive amounts)
+  const totalGross = items.reduce(
+    (sum, it) => sum + (it.unitPrice - (it.unitPrice * it.discount) / 100),
+    0
+  );
+  const totalVat = Math.round(((totalGross * VAT_RATE) / (1 + VAT_RATE)) * 100) / 100;
+  const totalNet = Math.round((totalGross / (1 + VAT_RATE)) * 100) / 100;
+
+  // Hidden A4 DOM for PDF
+  const pdfRef = useRef(null);
+
+  const downloadPDF = async () => {
+    const stage = pdfRef.current;
+    if (!stage) return;
+
+    const btn = document.getElementById("download-btn");
+    const prevBtn = btn ? { text: btn.innerText, disabled: btn.disabled } : null;
+    if (btn) {
+      btn.innerText = "Processing…";
+      btn.disabled = true;
+    }
+
+    // Move into viewport at full opacity so html2canvas captures crisply
+    const prev = {
+      position: stage.style.position,
+      top: stage.style.top,
+      left: stage.style.left,
+      zIndex: stage.style.zIndex,
+      opacity: stage.style.opacity,
+      pointerEvents: stage.style.pointerEvents,
     };
-    
-    setItems([...items, newItem]);
-    
-    setInvoiceData({
-      ...invoiceData,
-      description: '',
-      unitPrice: '',
-      discount: '0',
-    });
-  };
+    stage.style.position = "fixed";
+    stage.style.top = "0px";
+    stage.style.left = "0px";
+    stage.style.zIndex = "-1"; // behind everything; still rendered
+    stage.style.opacity = "1";
+    stage.style.pointerEvents = "none";
 
-  const removeItem = (id) => {
-    setItems(items.filter(item => item.id !== id));
-  };
-
-  const total = items.reduce((sum, item) => {
-    const discountedPriceInclVat = item.unitPrice - (item.unitPrice * item.discount / 100);
-    return sum + discountedPriceInclVat;
-  }, 0);
-
-  const vat = Math.round((total * 0.21 / 1.21) * 100) / 100;
-  const subtotal = Math.round((total / 1.21) * 100) / 100;
-  
-  const formatCurrency = (amount) => {
-    const roundedAmount = Math.round(amount * 100) / 100;
-    return `€ ${roundedAmount.toFixed(2)}`;
-  };
-  
-  const invoiceRef = useRef(null);
-  
-  const downloadInvoice = async () => {
-    if (!invoiceRef.current) return;
-    
-    const button = document.getElementById('download-btn');
-    if (!button) return;
-    
-    const originalText = button.innerText;
-    button.innerText = 'Processing...';
-    button.disabled = true;
-    
     try {
-      const canvas = await html2canvas(invoiceRef.current, {
+      await new Promise((r) => requestAnimationFrame(r));
+      if (document.fonts && document.fonts.ready) {
+        try {
+          await document.fonts.ready;
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("Font readiness wait failed:", err);
+        }
+      }
+
+      const canvas = await html2canvas(stage, {
         scale: 2,
         useCORS: true,
+        backgroundColor: "#ffffff",
         logging: false,
-        ignoreElements: (element) => {
-          return element.classList?.contains('no-print');
-        }
+        scrollX: 0,
+        scrollY: 0,
       });
-      
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-      });
-      
-      const imgWidth = 210;
-      const pageHeight = 297;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-      
-      let heightLeft = imgHeight;
-      let position = 0;
-      
-      while (heightLeft > pageHeight) {
-        position = heightLeft - pageHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, -position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-      
-      const filename = invoiceData.invoiceNumber 
-        ? `just-enjoy-ibiza-invoice-${invoiceData.invoiceNumber}.pdf` 
-        : `just-enjoy-ibiza-invoice-${currentDate.replace(/\./g, '-')}.pdf`;
-        
-      pdf.save(filename);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      alert('An error occurred while generating the PDF. Please try again.');
+
+      const img = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+      const pageW = 210;
+      const pageH = 297;
+      const imgW = pageW;
+      const imgH = (canvas.height * imgW) / canvas.width;
+      const s = Math.min(pageW / imgW, pageH / imgH);
+      const w = imgW * s;
+      const h = imgH * s;
+      const x = (pageW - w) / 2;
+      const y = 0;
+
+      pdf.addImage(img, "PNG", x, y, w, h, undefined, "FAST");
+      const fileName = invoice.invoiceNumber
+        ? `just-enjoy-ibiza-invoice-${invoice.invoiceNumber}.pdf`
+        : `just-enjoy-ibiza-invoice-${todayPretty.split("/").join("-")}.pdf`;
+      pdf.save(fileName);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("PDF generation error:", err);
+      alert("There was an error generating the PDF. Please try again.");
     } finally {
-      if (button) {
-        button.innerText = originalText;
-        button.disabled = false;
+      // Restore off-screen state
+      stage.style.position = prev.position || "fixed";
+      stage.style.top = prev.top || "-10000px";
+      stage.style.left = prev.left || "0px";
+      stage.style.zIndex = prev.zIndex || "-1";
+      stage.style.opacity = prev.opacity || "0";
+      stage.style.pointerEvents = prev.pointerEvents || "none";
+      if (btn && prevBtn) {
+        btn.innerText = prevBtn.text || "Download PDF";
+        btn.disabled = prevBtn.disabled;
       }
     }
   };
-  
-  const printInvoice = () => {
-    window.print();
-  };
-
-  const toggleClientForm = () => {
-    setShowClientForm(!showClientForm);
-  };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', fontFamily: 'system-ui, sans-serif' }}>
-      
-      {/* Control Panel */}
-      <div style={{ backgroundColor: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '16px 0' }} className="no-print">
-        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ fontSize: '20px', fontWeight: '600', color: '#1f2937', margin: 0 }}>Invoice Generator</h1>
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <button 
-              onClick={toggleClientForm}
-              style={{ 
-                padding: '8px 16px', 
-                border: '1px solid #d1d5db', 
-                backgroundColor: '#ffffff', 
-                color: '#374151',
-                cursor: 'pointer',
-                fontSize: '14px',
-                borderRadius: '6px'
-              }}
+    <div className="jei-app">
+      {/* Local styles */}
+      <style>{`
+        /* Never allow horizontal scroll */
+        html, body, #root { max-width: 100%; overflow-x: hidden; }
+        *, *::before, *::after { box-sizing: border-box; }
+
+        :root{
+          --bg:#f6f7fb; --card:#fff; --ink:#0b0f19; --text:#2a3242; --muted:#6b7280;
+          --border:#e7e7ea; --navy:#0f1f3d; --gold:#c8a25e; --shadow:0 12px 30px rgba(11,15,25,.08); --r:16px;
+        }
+        body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+        .jei-app{min-height:100vh}
+        .container{max-width:1100px;margin:0 auto;padding:12px 16px 96px}
+        .grid{display:grid;gap:12px}
+        .g2{grid-template-columns:1fr 1fr}
+        .g3{grid-template-columns:1fr 1fr 1fr}
+        @media(max-width:900px){.g2,.g3{grid-template-columns:1fr}}
+
+        .layout{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px}
+        @media(max-width:1024px){.layout{grid-template-columns:1fr}}
+
+        .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+        .ph{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+        .pt{margin:0;color:var(--ink);font-weight:900}
+        .pb{padding:14px}
+        label{font-size:12px;font-weight:800;color:var(--muted);margin-bottom:6px;display:block}
+        .input,.textarea{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;color:var(--ink);font-size:14px}
+        .textarea{min-height:86px;resize:vertical}
+
+        .btn{appearance:none;border:1px solid var(--border);background:#fff;color:var(--ink);padding:10px 12px;border-radius:12px;font-size:14px;cursor:pointer;transition:box-shadow .2s ease,transform .06s ease}
+        .btn:hover{box-shadow:var(--shadow)} .btn:active{transform:translateY(1px)}
+        .btn-primary{background:var(--navy);border-color:transparent;color:#fff}
+
+        /* Tabs (mobile) */
+        .seg{display:none;gap:8px;margin:0 0 12px}
+        .seg-btn{flex:1;border:1px solid var(--border);background:#fff;padding:10px;border-radius:999px;font-weight:800;color:var(--muted);cursor:pointer}
+        .seg-btn.active{background:var(--navy);border-color:var(--navy);color:#fff}
+        @media(max-width:1024px){.seg{display:flex}}
+
+        /* Mobile preview */
+        .m-invoice{background:#fff;border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+        .m-hd{padding:18px 16px;border-bottom:2px solid var(--gold);display:flex;align-items:center;justify-content:space-between;gap:12px}
+        .m-brand{display:flex;align-items:center;gap:10px}
+        .m-dot{width:10px;height:10px;border-radius:50%;background:var(--gold)}
+        .m-name{margin:0;font-size:18px;font-weight:900;color:var(--ink)}
+        .m-title{margin:0;font-size:26px;font-weight:900;color:var(--ink)}
+        .m-body{padding:16px}
+        .m-sect{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8b90a0;font-weight:900;margin:0 0 8px}
+        .m-items{display:grid;gap:10px}
+        .m-item{border:1px solid #eef2f7;border-radius:12px;padding:10px 12px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+        .m-item h4{margin:0;font-size:14px;color:var(--ink)}
+        .m-meta{font-size:12px;color:#667085}
+        .m-amt{font-weight:900;white-space:nowrap}
+        .m-remove{border:0;background:transparent;color:#ef4444;font-size:18px;cursor:pointer;margin-left:4px}
+        .m-totals{display:grid;gap:6px;padding-top:8px}
+        .m-row{display:flex;justify-content:space-between;font-size:14px}
+        .m-strong{border-top:1px solid var(--border);padding-top:8px;font-size:18px;font-weight:900;color:var(--navy)}
+        .m-ft{padding:16px;background:#fbfbfe;border-top:1px solid var(--border);display:grid;gap:12px}
+
+        /* Sticky mobile action bar */
+        .bar{position:sticky;bottom:0;z-index:50;background:rgba(255,255,255,.96);backdrop-filter:saturate(1.2) blur(6px);border-top:1px solid var(--border);display:none}
+        .bar-in{max-width:1100px;margin:0 auto;padding:10px 16px calc(10px + env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:space-between;gap:10px}
+        .bar-ttl{font-weight:900;color:var(--ink)}
+        @media(max-width:1024px){.bar{display:block}}
+
+        /* Hidden A4 stage for PDF (off-screen by default) */
+        .pdf-stage{position:fixed;left:0;top:-10000px;width:210mm;background:#fff;pointer-events:none;opacity:0;z-index:-1}
+        .a4{width:210mm;min-height:297mm;color:#2a3242;display:flex;flex-direction:column}
+        .a4-hd{padding:18mm 16mm 12mm;border-bottom:2px solid var(--gold)}
+        .a4-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+        .a4-org{display:flex;align-items:center;gap:10px}
+        .a4-dot{width:10px;height:10px;border-radius:50%;background:var(--gold)}
+        .a4-name{margin:0;font-size:24px;font-weight:900;color:var(--ink)}
+        .a4-meta{color:#707784;font-size:12px;line-height:1.45;margin-top:6px}
+        .a4-title{margin:0;font-size:40px;font-weight:900;color:var(--ink)}
+        .a4-date{color:#707784;font-size:12px;text-align:right}
+        .a4-body{padding:10mm 16mm}
+        .a4-sect{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:#8b90a0;font-weight:900;margin:0 0 8px}
+        table{width:100%;border-collapse:collapse}
+        thead th{background:#fafbff;border-bottom:1px solid var(--border);font-size:12px;color:#8b90a0;text-transform:uppercase;letter-spacing:.06em;padding:9px 10px;text-align:left}
+        tbody td{border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:13.5px}
+        th.num,td.num{text-align:right}
+        .a4-totals{display:flex;justify-content:flex-end;margin-top:10px}
+        .a4-card{width:100%;max-width:340px;background:#fbfbfe;border:1px solid var(--border);border-radius:12px;padding:14px}
+        .a4-line{display:flex;justify-content:space-between;margin:6px 0;font-size:14px}
+        .a4-strong{border-top:1px solid var(--border);margin-top:8px;padding-top:10px;font-size:18px;font-weight:900}
+        .a4-ft{margin-top:auto;padding:10mm 16mm;background:#fbfbfe;border-top:1px solid var(--border)}
+        .a4-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+      `}</style>
+
+      <div className="container">
+        {/* Mobile tabs */}
+        {isNarrow && (
+          <div className="seg">
+            <button
+              className={`seg-btn ${tab === "edit" ? "active" : ""}`}
+              onClick={() => setTab("edit")}
             >
-              {showClientForm ? 'Hide Client' : 'Add Client'}
+              Edit
             </button>
-            <button 
-              onClick={printInvoice}
-              style={{ 
-                padding: '8px 16px', 
-                border: '1px solid #d1d5db', 
-                backgroundColor: '#ffffff', 
-                color: '#374151',
-                cursor: 'pointer',
-                fontSize: '14px',
-                borderRadius: '6px'
-              }}
+            <button
+              className={`seg-btn ${tab === "preview" ? "active" : ""}`}
+              onClick={() => setTab("preview")}
             >
-              Print
-            </button>
-            <button 
-              id="download-btn"
-              onClick={downloadInvoice}
-              style={{ 
-                padding: '8px 16px', 
-                border: 'none', 
-                backgroundColor: '#2563eb', 
-                color: '#ffffff',
-                cursor: 'pointer',
-                fontSize: '14px',
-                borderRadius: '6px'
-              }}
-            >
-              Download PDF
+              Preview
             </button>
           </div>
-        </div>
-      </div>
+        )}
 
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
-        
-        {/* Client Form */}
-        {showClientForm && (
-          <div style={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', marginBottom: '24px', borderRadius: '8px' }} className="no-print">
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid #e5e7eb' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: '500', color: '#111827', margin: 0 }}>Client Details</h2>
+        <div className="layout">
+          {/* Editor (hidden on phones when Preview tab is active) */}
+          <div
+            className="grid"
+            style={{ alignContent: "start", display: isNarrow && tab === "preview" ? "none" : "grid" }}
+          >
+            {/* Add item */}
+            <section className="panel">
+              <div className="ph"><h2 className="pt">Add item</h2></div>
+              <div className="pb">
+                <div className="grid" style={{ gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
+                  <div style={{ gridColumn: "1 / span 2" }}>
+                    <label htmlFor="i1">Description</label>
+                    <input
+                      id="i1"
+                      className="input"
+                      name="description"
+                      placeholder="Yacht charter service…"
+                      value={invoice.description}
+                      onChange={onInvoice}
+                      onKeyDown={onAddKey}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="i2">Price (VAT incl.)</label>
+                    <input
+                      id="i2"
+                      className="input"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="unitPrice"
+                      placeholder="0.00"
+                      value={invoice.unitPrice}
+                      onChange={onInvoice}
+                      onKeyDown={onAddKey}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="i3">Discount %</label>
+                    <input
+                      id="i3"
+                      className="input"
+                      type="number"
+                      min="0"
+                      max="100"
+                      name="discount"
+                      placeholder="0"
+                      value={invoice.discount}
+                      onChange={onInvoice}
+                      onKeyDown={onAddKey}
+                    />
+                  </div>
+                  <button className="btn btn-primary" onClick={addItem} disabled={!invoice.description || !invoice.unitPrice}>Add item</button>
+                </div>
+              </div>
+            </section>
+
+            {/* Client details */}
+            <section className="panel">
+              <div className="ph"><h2 className="pt">Client details</h2></div>
+              <div className="pb">
+                <div className="grid g3">
+                  <div><label htmlFor="c1">Client name</label><input id="c1" className="input" name="name" value={client.name} onChange={onClient} placeholder="Full name" /></div>
+                  <div><label htmlFor="c2">Company</label><input id="c2" className="input" name="companyName" value={client.companyName} onChange={onClient} placeholder="Company name" /></div>
+                  <div><label htmlFor="c3">Tax/VAT ID</label><input id="c3" className="input" name="taxId" value={client.taxId} onChange={onClient} placeholder="e.g. ESB12345678" /></div>
+                  <div><label htmlFor="c4">Email</label><input id="c4" className="input" name="email" value={client.email} onChange={onClient} placeholder="email@example.com" /></div>
+                  <div><label htmlFor="c5">Phone</label><input id="c5" className="input" name="phone" value={client.phone} onChange={onClient} placeholder="Phone number" /></div>
+                  <div><label htmlFor="c6">Address</label><input id="c6" className="input" name="address" value={client.address} onChange={onClient} placeholder="Street address" /></div>
+                  <div><label htmlFor="c7">City</label><input id="c7" className="input" name="city" value={client.city} onChange={onClient} placeholder="City" /></div>
+                  <div><label htmlFor="c8">Postcode</label><input id="c8" className="input" name="postalCode" value={client.postalCode} onChange={onClient} placeholder="Postcode" /></div>
+                  <div><label htmlFor="c9">Country</label><input id="c9" className="input" name="country" value={client.country} onChange={onClient} placeholder="Country" /></div>
+                </div>
+              </div>
+            </section>
+
+            {/* Notes & Terms */}
+            <section className="panel">
+              <div className="ph"><h2 className="pt">Notes & Terms</h2></div>
+              <div className="pb grid">
+                <div>
+                  <label htmlFor="n1">Notes to client</label>
+                  <textarea id="n1" className="textarea" name="notes" value={invoice.notes} onChange={onInvoice} />
+                </div>
+                <div>
+                  <label htmlFor="n2">Payment terms</label>
+                  <textarea id="n2" className="textarea" name="terms" value={invoice.terms} onChange={onInvoice} />
+                </div>
+              </div>
+            </section>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {isNarrow && <button className="btn" onClick={() => setTab("preview")}>Preview</button>}
+              <button id="download-btn" className="btn btn-primary" onClick={downloadPDF}>Download PDF</button>
             </div>
-            <div style={{ padding: '24px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
+          </div>
+
+          {/* Fluid preview (hidden on phones while editing) */}
+          <div style={{ display: isNarrow && tab === "edit" ? "none" : "block" }}>
+            <section className="m-invoice">
+              <div className="m-hd">
+                <div className="m-brand"><span className="m-dot" /><h2 className="m-name">Just Enjoy Ibiza</h2></div>
+                <div style={{ textAlign: "right" }}>
+                  <h3 className="m-title">Invoice</h3>
+                  <div style={{ color: "#707784", fontSize: 12 }}>{todayPretty}</div>
+                </div>
+              </div>
+
+              <div className="m-body">
+                <div className="grid g2" style={{ marginBottom: 10 }}>
+                  <div>
+                    <h4 className="m-sect">Invoice details</h4>
+                    <div className="grid" style={{ maxWidth: 360 }}>
+                      <div><label htmlFor="d1">Invoice date</label><input id="d1" className="input" type="date" name="invoiceDate" value={invoice.invoiceDate} onChange={onInvoice} /></div>
+                      <div><label htmlFor="d2">Invoice number</label><input id="d2" className="input" type="text" name="invoiceNumber" placeholder="JEI-00000" value={invoice.invoiceNumber} onChange={onInvoice} /></div>
+                    </div>
+                  </div>
+
+                  {(client.name || client.companyName) && (
+                    <div>
+                      <h4 className="m-sect">Bill to</h4>
+                      <div style={{ lineHeight: 1.5, fontSize: 13 }}>
+                        {client.name && <div style={{ fontWeight: 900, color: "#0b0f19" }}>{client.name}</div>}
+                        {client.companyName && <div style={{ fontWeight: 800 }}>{client.companyName}</div>}
+                        {client.taxId && <div>Tax ID: {client.taxId}</div>}
+                        {client.address && <div>{client.address}</div>}
+                        {(client.city || client.postalCode) && <div>{client.city}{client.city && client.postalCode ? ", " : ""}{client.postalCode}</div>}
+                        {client.country && <div>{client.country}</div>}
+                        {client.email && <div>{client.email}</div>}
+                        {client.phone && <div>{client.phone}</div>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Items as compact cards on mobile */}
+                <div className="m-items">
+                  {items.length === 0 ? (
+                    <div style={{ textAlign: "center", color: "#8e97ab", padding: 16, border: "1px dashed #e5e7eb", borderRadius: 12 }}>
+                      No items added yet.
+                    </div>
+                  ) : (
+                    items.map((it, i) => {
+                      const discounted = it.unitPrice - (it.unitPrice * it.discount) / 100;
+                      const lineVat = Math.round(((discounted * VAT_RATE) / (1 + VAT_RATE)) * 100) / 100;
+                      return (
+                        <div key={it.id} className="m-item">
+                          <div style={{ minWidth: 0 }}>
+                            <h4>{i + 1}. {it.description}</h4>
+                            <div className="m-meta">Price (incl.): {fmt(it.unitPrice)} · Discount: {it.discount ? `${it.discount}%` : "—"} · VAT: {fmt(lineVat)}</div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "start" }}>
+                            <div className="m-amt">{fmt(discounted)}</div>
+                            <button className="m-remove" onClick={() => removeItem(it.id)} aria-label={`Remove item ${i + 1}`} title="Remove item">×</button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Totals */}
+                {items.length > 0 && (
+                  <div className="m-totals">
+                    <div className="m-row"><span style={{ color: "#8b90a0" }}>Subtotal (excl. VAT)</span><span>{fmt(totalNet)}</span></div>
+                    <div className="m-row"><span style={{ color: "#8b90a0" }}>VAT (21%)</span><span>{fmt(totalVat)}</span></div>
+                    <div className="m-row m-strong"><span>Total amount</span><span>{fmt(totalGross)}</span></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="m-ft">
                 <div>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Client Name</label>
-                  <input
-                    type="text"
-                    name="name"
-                    value={clientData.name}
-                    onChange={handleClientInputChange}
-                    placeholder="Full Name"
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px', 
-                      border: '1px solid #d1d5db', 
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: '#ffffff',
-                      color: '#111827'
-                    }}
-                  />
+                  <div style={{ fontWeight: 900, color: "#0b0f19", marginBottom: 6 }}>Payment information</div>
+                  <div style={{ color: "#6f7686", whiteSpace: "pre-wrap" }}>{invoice.terms}</div>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Company</label>
-                  <input
-                    type="text"
-                    name="companyName"
-                    value={clientData.companyName}
-                    onChange={handleClientInputChange}
-                    placeholder="Company Name"
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px', 
-                      border: '1px solid #d1d5db', 
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: '#ffffff',
-                      color: '#111827'
-                    }}
-                  />
+                  <div style={{ fontWeight: 900, color: "#0b0f19", marginBottom: 6 }}>Notes</div>
+                  <div style={{ color: "#6f7686", whiteSpace: "pre-wrap" }}>{invoice.notes}</div>
                 </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Tax ID</label>
-                  <input
-                    type="text"
-                    name="taxId"
-                    value={clientData.taxId}
-                    onChange={handleClientInputChange}
-                    placeholder="Tax/VAT Number"
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px', 
-                      border: '1px solid #d1d5db', 
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: '#ffffff',
-                      color: '#111827'
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Email</label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={clientData.email}
-                    onChange={handleClientInputChange}
-                    placeholder="email@example.com"
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px', 
-                      border: '1px solid #d1d5db', 
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: '#ffffff',
-                      color: '#111827'
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Phone</label>
-                  <input
-                    type="text"
-                    name="phone"
-                    value={clientData.phone}
-                    onChange={handleClientInputChange}
-                    placeholder="Phone Number"
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px', 
-                      border: '1px solid #d1d5db', 
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: '#ffffff',
-                      color: '#111827'
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Address</label>
-                  <input
-                    type="text"
-                    name="address"
-                    value={clientData.address}
-                    onChange={handleClientInputChange}
-                    placeholder="Street Address"
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px', 
-                      border: '1px solid #d1d5db', 
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: '#ffffff',
-                      color: '#111827'
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>City</label>
-                  <input
-                    type="text"
-                    name="city"
-                    value={clientData.city}
-                    onChange={handleClientInputChange}
-                    placeholder="City"
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px', 
-                      border: '1px solid #d1d5db', 
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: '#ffffff',
-                      color: '#111827'
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Postal Code</label>
-                  <input
-                    type="text"
-                    name="postalCode"
-                    value={clientData.postalCode}
-                    onChange={handleClientInputChange}
-                    placeholder="Postal Code"
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px', 
-                      border: '1px solid #d1d5db', 
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: '#ffffff',
-                      color: '#111827'
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Country</label>
-                  <input
-                    type="text"
-                    name="country"
-                    value={clientData.country}
-                    onChange={handleClientInputChange}
-                    placeholder="Country"
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px', 
-                      border: '1px solid #d1d5db', 
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: '#ffffff',
-                      color: '#111827'
-                    }}
-                  />
-                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        {/* Sticky mobile action bar */}
+        {isNarrow && (
+          <div className="bar">
+            <div className="bar-in">
+              <div className="bar-ttl">Total {fmt(totalGross)}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn" onClick={addItem} disabled={!invoice.description || !invoice.unitPrice}>Add item</button>
+                <button id="download-btn" className="btn btn-primary" onClick={downloadPDF}>PDF</button>
               </div>
             </div>
           </div>
         )}
-        
-        {/* Invoice */}
-        <div style={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '8px', minHeight: '297mm' }}>
-          <div ref={invoiceRef} className="invoice-to-print">
-            
-            {/* Header */}
-            <div style={{ padding: '48px 48px 32px 48px', borderBottom: '3px solid #2563eb' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '24px' }}>
-                    <div style={{ width: '8px', height: '8px', backgroundColor: '#2563eb', borderRadius: '50%', marginRight: '12px' }}></div>
-                    <h1 style={{ fontSize: '28px', fontWeight: '300', color: '#111827', margin: 0 }}>Just Enjoy Ibiza</h1>
-                  </div>
-                  <div style={{ color: '#6b7280', fontSize: '14px', lineHeight: '1.6' }}>
-                    <p style={{ margin: '0 0 4px 0' }}>Av. Sant Jordi 48/52</p>
-                    <p style={{ margin: '0 0 4px 0' }}>CIF: B56880875</p>
-                    <p style={{ margin: '0' }}>Ibiza, Spain</p>
-                  </div>
+      </div>
+
+      {/* Hidden A4 layout for PDF (off-screen by default) */}
+      <div className="pdf-stage" aria-hidden="true" ref={pdfRef}>
+        <div className="a4">
+          <header className="a4-hd">
+            <div className="a4-top">
+              <div>
+                <div className="a4-org"><span className="a4-dot" /><h2 className="a4-name">Just Enjoy Ibiza</h2></div>
+                <div className="a4-meta">
+                  <div>Av. Sant Jordi 48/52</div>
+                  <div>CIF: B56880875</div>
+                  <div>Ibiza, Spain</div>
                 </div>
-                
-                <div style={{ textAlign: 'right' }}>
-                  <h2 style={{ fontSize: '48px', fontWeight: '300', color: '#111827', margin: '0 0 16px 0' }}>INVOICE</h2>
-                  <p style={{ color: '#6b7280', fontSize: '14px', margin: 0 }}>{currentDate}</p>
-                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <h1 className="a4-title">INVOICE</h1>
+                <div className="a4-date">{todayPretty}</div>
               </div>
             </div>
+          </header>
+          <div className="a4-body">
+            <div className="grid g2" style={{ marginBottom: 10 }}>
+              <div>
+                <h3 className="a4-sect">Invoice details</h3>
+                <div className="grid" style={{ maxWidth: 360 }}>
+                  <div><label htmlFor="pd1">Invoice date</label><input id="pd1" className="input" type="date" name="invoiceDate" value={invoice.invoiceDate} onChange={onInvoice} /></div>
+                  <div><label htmlFor="pd2">Invoice number</label><input id="pd2" className="input" type="text" name="invoiceNumber" placeholder="JEI-00000" value={invoice.invoiceNumber} onChange={onInvoice} /></div>
+                </div>
+              </div>
 
-            {/* Details */}
-            <div style={{ padding: '32px 48px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '48px', marginBottom: '32px' }}>
-                
-                {/* Invoice Details */}
+              {(client.name || client.companyName) && (
                 <div>
-                  <h3 style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px' }}>Invoice Details</h3>
-                  <div style={{ marginBottom: '24px' }}>
-                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '8px' }}>Invoice Date</label>
-                    <input 
-                      type="date" 
-                      name="invoiceDate" 
-                      value={invoiceData.invoiceDate} 
-                      onChange={handleInputChange} 
-                      style={{ 
-                        display: 'block',
-                        width: '100%',
-                        maxWidth: '300px',
-                        padding: '10px 12px', 
-                        border: '1px solid #d1d5db', 
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        backgroundColor: '#ffffff',
-                        color: '#111827'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '8px' }}>Invoice Number</label>
-                    <input 
-                      type="text" 
-                      name="invoiceNumber" 
-                      value={invoiceData.invoiceNumber} 
-                      onChange={handleInputChange} 
-                      placeholder="JEI-00000" 
-                      style={{ 
-                        display: 'block',
-                        width: '100%',
-                        maxWidth: '300px',
-                        padding: '10px 12px', 
-                        border: '1px solid #d1d5db', 
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        backgroundColor: '#ffffff',
-                        color: '#111827'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Client Info */}
-                {(clientData.name || clientData.companyName) && (
-                  <div>
-                    <h3 style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px' }}>Bill To</h3>
-                    <div style={{ color: '#374151', fontSize: '14px', lineHeight: '1.6' }}>
-                      {clientData.name && <p style={{ fontWeight: '600', color: '#111827', margin: '0 0 8px 0' }}>{clientData.name}</p>}
-                      {clientData.companyName && <p style={{ fontWeight: '500', margin: '0 0 8px 0' }}>{clientData.companyName}</p>}
-                      {clientData.taxId && <p style={{ margin: '0 0 8px 0' }}>Tax ID: {clientData.taxId}</p>}
-                      {clientData.address && <p style={{ margin: '0 0 4px 0' }}>{clientData.address}</p>}
-                      {(clientData.city || clientData.postalCode) && (
-                        <p style={{ margin: '0 0 4px 0' }}>
-                          {clientData.city}
-                          {clientData.city && clientData.postalCode && ', '}
-                          {clientData.postalCode}
-                        </p>
-                      )}
-                      {clientData.country && <p style={{ margin: '0 0 8px 0' }}>{clientData.country}</p>}
-                      {clientData.email && <p style={{ margin: '0 0 4px 0' }}>{clientData.email}</p>}
-                      {clientData.phone && <p style={{ margin: '0' }}>{clientData.phone}</p>}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Add Item Form */}
-              <div style={{ padding: '24px', backgroundColor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '8px', marginBottom: '32px' }} className="no-print">
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 120px', gap: '16px', alignItems: 'end' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Description</label>
-                    <input
-                      type="text"
-                      placeholder="Yacht charter service..."
-                      name="description"
-                      value={invoiceData.description}
-                      onChange={handleInputChange}
-                      style={{ 
-                        width: '100%', 
-                        padding: '8px 12px', 
-                        border: '1px solid #d1d5db', 
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        backgroundColor: '#ffffff',
-                        color: '#111827'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Price (VAT incl.)</label>
-                    <input
-                      type="number"
-                      placeholder="0.00"
-                      name="unitPrice"
-                      value={invoiceData.unitPrice}
-                      onChange={handleInputChange}
-                      min="0"
-                      step="0.01"
-                      style={{ 
-                        width: '100%', 
-                        padding: '8px 12px', 
-                        border: '1px solid #d1d5db', 
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        backgroundColor: '#ffffff',
-                        color: '#111827'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '4px' }}>Discount %</label>
-                    <input
-                      type="number"
-                      placeholder="0"
-                      name="discount"
-                      value={invoiceData.discount}
-                      onChange={handleInputChange}
-                      min="0"
-                      max="100"
-                      style={{ 
-                        width: '100%', 
-                        padding: '8px 12px', 
-                        border: '1px solid #d1d5db', 
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        backgroundColor: '#ffffff',
-                        color: '#111827'
-                      }}
-                    />
-                  </div>
-                  <button 
-                    onClick={addItem}
-                    disabled={!invoiceData.description || !invoiceData.unitPrice}
-                    style={{ 
-                      padding: '9px 16px', 
-                      border: 'none', 
-                      backgroundColor: !invoiceData.description || !invoiceData.unitPrice ? '#9ca3af' : '#2563eb', 
-                      color: '#ffffff',
-                      cursor: !invoiceData.description || !invoiceData.unitPrice ? 'not-allowed' : 'pointer',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      borderRadius: '6px'
-                    }}
-                  >
-                    Add Item
-                  </button>
-                </div>
-              </div>
-
-              {/* Items */}
-              <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden', marginBottom: '32px' }}>
-                <div style={{ backgroundColor: '#f9fafb', padding: '16px 24px', borderBottom: '1px solid #e5e7eb' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr 120px 80px 120px 120px', gap: '16px', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    <div>#</div>
-                    <div>Description</div>
-                    <div style={{ textAlign: 'right' }}>Price (VAT incl.)</div>
-                    <div style={{ textAlign: 'right' }}>Discount</div>
-                    <div style={{ textAlign: 'right' }}>VAT (21%)</div>
-                    <div style={{ textAlign: 'right' }}>Total</div>
-                  </div>
-                </div>
-                
-                {items.length === 0 ? (
-                  <div style={{ padding: '48px 24px', textAlign: 'center', color: '#9ca3af' }}>
-                    <p style={{ margin: '0 0 4px 0' }}>No items added yet</p>
-                    <p style={{ fontSize: '12px', margin: 0 }}>Add your first service using the form above</p>
-                  </div>
-                ) : (
-                  items.map((item, index) => {
-                    const discountedPriceInclVat = item.unitPrice - (item.unitPrice * item.discount / 100);
-                    const itemVat = Math.round((discountedPriceInclVat * 0.21 / 1.21) * 100) / 100;
-                    const totalAmount = discountedPriceInclVat;
-                    
-                    return (
-                      <div key={`item-${item.id}`} style={{ padding: '16px 24px', borderBottom: '1px solid #f3f4f6', backgroundColor: '#ffffff' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr 120px 80px 120px 120px', gap: '16px', alignItems: 'center', fontSize: '14px' }}>
-                          <div style={{ color: '#111827', fontWeight: '500' }}>{index + 1}</div>
-                          <div style={{ color: '#111827' }}>{item.description}</div>
-                          <div style={{ textAlign: 'right', color: '#111827', fontWeight: '500' }}>{formatCurrency(item.unitPrice)}</div>
-                          <div style={{ textAlign: 'right', color: '#6b7280' }}>{item.discount > 0 ? `${item.discount}%` : '—'}</div>
-                          <div style={{ textAlign: 'right', color: '#6b7280' }}>{formatCurrency(itemVat)}</div>
-                          <div style={{ textAlign: 'right', color: '#111827', fontWeight: '600' }}>{formatCurrency(totalAmount)}</div>
-                          <div className="no-print" style={{ textAlign: 'center' }}>
-                            <button 
-                              onClick={() => removeItem(item.id)} 
-                              style={{ 
-                                color: '#ef4444', 
-                                backgroundColor: 'transparent',
-                                border: 'none',
-                                cursor: 'pointer',
-                                fontSize: '18px',
-                                padding: '4px'
-                              }}
-                            >
-                              ×
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-              
-              {/* Totals */}
-              {items.length > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '32px' }}>
-                  <div style={{ width: '320px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '24px' }}>
-                    <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-                      <span style={{ color: '#6b7280' }}>Subtotal (excl. VAT)</span>
-                      <span style={{ color: '#111827', fontWeight: '500' }}>{formatCurrency(subtotal)}</span>
-                    </div>
-                    <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-                      <span style={{ color: '#6b7280' }}>VAT (21%)</span>
-                      <span style={{ color: '#111827', fontWeight: '500' }}>{formatCurrency(vat)}</span>
-                    </div>
-                    <div style={{ paddingTop: '12px', borderTop: '1px solid #d1d5db', display: 'flex', justifyContent: 'space-between', fontSize: '18px' }}>
-                      <span style={{ color: '#111827', fontWeight: '600' }}>Total Amount</span>
-                      <span style={{ color: '#2563eb', fontWeight: '700' }}>{formatCurrency(total)}</span>
-                    </div>
+                  <h3 className="a4-sect">Bill to</h3>
+                  <div style={{ lineHeight: 1.5, fontSize: 13 }}>
+                    {client.name && <div style={{ fontWeight: 900, color: "#0b0f19" }}>{client.name}</div>}
+                    {client.companyName && <div style={{ fontWeight: 800 }}>{client.companyName}</div>}
+                    {client.taxId && <div>Tax ID: {client.taxId}</div>}
+                    {client.address && <div>{client.address}</div>}
+                    {(client.city || client.postalCode) && <div>{client.city}{client.city && client.postalCode ? ", " : ""}{client.postalCode}</div>}
+                    {client.country && <div>{client.country}</div>}
+                    {client.email && <div>{client.email}</div>}
+                    {client.phone && <div>{client.phone}</div>}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Footer */}
-            <div style={{ marginTop: 'auto', padding: '32px 48px', backgroundColor: '#f8fafc', borderTop: '1px solid #e5e7eb' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
-                <div>
-                  <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>Payment Information</h3>
-                  <div style={{ color: '#6b7280', fontSize: '14px', lineHeight: '1.6' }}>
-                    
-                    <p style={{ margin: '0 0 8px 0', fontWeight: '500' }}>Payment terms: Net 30 days from invoice date</p>
-                    <p style={{ margin: '0' }}>All payments should include the invoice number as reference</p>
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>Thank You</h3>
-                  <p style={{ color: '#6b7280', fontSize: '14px', lineHeight: '1.6', margin: '0' }}>Thank you for choosing Just Enjoy Ibiza for your luxury yacht experience.</p>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: 40 }}>#</th>
+                    <th>Description</th>
+                    <th className="num" style={{ width: 140 }}>Price (incl.)</th>
+                    <th className="num" style={{ width: 90 }}>Discount</th>
+                    <th className="num" style={{ width: 120 }}>VAT (21%)</th>
+                    <th className="num" style={{ width: 140 }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.length === 0 ? (
+                    <tr><td colSpan={6} style={{ textAlign: "center", color: "#8e97ab", padding: 20 }}>No items added yet.</td></tr>
+                  ) : (
+                    items.map((it, i) => {
+                      const discounted = it.unitPrice - (it.unitPrice * it.discount) / 100;
+                      const lineVat = Math.round(((discounted * VAT_RATE) / (1 + VAT_RATE)) * 100) / 100;
+                      return (
+                        <tr key={it.id}>
+                          <td>{i + 1}</td>
+                          <td>{it.description}</td>
+                          <td className="num">{fmt(it.unitPrice)}</td>
+                          <td className="num">{it.discount ? `${it.discount}%` : "—"}</td>
+                          <td className="num">{fmt(lineVat)}</td>
+                          <td className="num">{fmt(discounted)}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {items.length > 0 && (
+              <div className="a4-totals">
+                <div className="a4-card">
+                  <div className="a4-line"><span style={{ color: "#8b90a0" }}>Subtotal (excl. VAT)</span><span>{fmt(totalNet)}</span></div>
+                  <div className="a4-line"><span style={{ color: "#8b90a0" }}>VAT (21%)</span><span>{fmt(totalVat)}</span></div>
+                  <div className="a4-line a4-strong"><span>Total amount</span><span>{fmt(totalGross)}</span></div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
+          <footer className="a4-ft">
+            <div className="a4-grid">
+              <div>
+                <h4 style={{ margin: 0, color: "#0b0f19" }}>Payment information</h4>
+                <p style={{ margin: "6px 0 0", color: "#6f7686", whiteSpace: "pre-wrap" }}>{invoice.terms}</p>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <h4 style={{ margin: 0, color: "#0b0f19" }}>Notes</h4>
+                <p style={{ margin: "6px 0 0", color: "#6f7686", whiteSpace: "pre-wrap" }}>{invoice.notes}</p>
+              </div>
+            </div>
+          </footer>
         </div>
       </div>
     </div>
   );
-};
-
-export default InvoiceGenerator;
+}
