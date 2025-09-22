@@ -39,11 +39,15 @@ import _ from 'lodash';
 
 // ===================== CONFIG =====================
 // Use the legacy client.bookings[] field for linking? (dangerous if it contains stale/wrong IDs)
-const USE_CLIENT_BOOKINGS_ARRAY = false; // set to true only after you trust/migrate that data
+const USE_CLIENT_BOOKINGS_ARRAY = true; // TEMPORARILY ENABLE THIS
 // If true, we only match bookings by email/phone when that value is UNIQUE across all clients
 const REQUIRE_UNIQUE_FOR_CONTACT_MATCH = true;
 // Optionally include "contractClients" collection in the list
 const INCLUDE_CONTRACT_CLIENTS = false;
+
+// ===================== STRICT LINKING =====================
+// Only use the most reliable linking method for now
+const USE_STRICT_LINKING = false; // DISABLE STRICT MODE FOR NOW
 
 // ===================== UTILITIES =====================
 const modalClasses = {
@@ -455,10 +459,25 @@ const ClientDirectory = () => {
           id: d.id,
           ...b,
           _clientIdCandidate: idCandidate,
-          _emailCanon: canonicalEmail(b.clientEmail || b.contact?.email),
-          _phoneCanon: normPhone(b.clientPhone || b.contact?.phone),
+          _emailCanon: canonicalEmail(b.clientEmail || b.contact?.email || b.email),
+          _phoneCanon: normPhone(b.clientPhone || b.contact?.phone || b.phone),
         };
       });
+
+      // Debug logging
+      console.log('Total bookings loaded:', bookings.length);
+      console.log('Sample booking structure:', bookings[0]);
+      console.log('Booking fields with client info:', bookings.slice(0, 3).map(b => ({
+        id: b.id,
+        clientId: b.clientId,
+        clientRef: b.clientRef,
+        client: b.client,
+        clientEmail: b.clientEmail,
+        email: b.email,
+        contact: b.contact,
+        _clientIdCandidate: b._clientIdCandidate,
+        _emailCanon: b._emailCanon
+      })));
 
       // Groupings for fast joins
       const bookingsByClientId = groupByKey(bookings, (b) => b._clientIdCandidate);
@@ -468,22 +487,49 @@ const ClientDirectory = () => {
 
       // Build final clients with robust linking
       const clientsData = clientsCanon.map((c) => {
-        const viaId = bookingsByClientId[c.id] || [];
-        const viaArray = USE_CLIENT_BOOKINGS_ARRAY && Array.isArray(c.bookings)
-          ? c.bookings.map((bid) => bookingById.get(bid)).filter(Boolean)
-          : [];
-
+        let bookingsForThisClient = [];
+        let viaId = [];
+        let viaArray = [];
+        let viaEmail = [];
+        let viaPhone = [];
+        
+        // Always calculate these for debug info
         const canUseEmail = c._emailCanon && !isPlaceholder(c._emailCanon) && (!REQUIRE_UNIQUE_FOR_CONTACT_MATCH || uniqueEmail.has(c._emailCanon));
         const canUsePhone = c._phoneCanon && !isPlaceholder(c._phoneCanon) && (!REQUIRE_UNIQUE_FOR_CONTACT_MATCH || uniquePhone.has(c._phoneCanon));
-        const viaEmail = canUseEmail ? bookingsByEmail[c._emailCanon] || [] : [];
-        const viaPhone = canUsePhone ? bookingsByPhone[c._phoneCanon] || [] : [];
+        
+        if (USE_STRICT_LINKING) {
+          // Only use direct ID matching for now to avoid incorrect links
+          viaId = bookingsByClientId[c.id] || [];
+          bookingsForThisClient = viaId;
+        } else {
+          // Original complex matching logic
+          viaId = bookingsByClientId[c.id] || [];
+          viaArray = USE_CLIENT_BOOKINGS_ARRAY && Array.isArray(c.bookings)
+            ? c.bookings.map((bid) => bookingById.get(bid)).filter(Boolean)
+            : [];
+          viaEmail = canUseEmail ? bookingsByEmail[c._emailCanon] || [] : [];
+          viaPhone = canUsePhone ? bookingsByPhone[c._phoneCanon] || [] : [];
 
-        const merged = _.uniqBy([...viaId, ...viaArray, ...viaEmail, ...viaPhone], 'id');
+          bookingsForThisClient = _.uniqBy([...viaId, ...viaArray, ...viaEmail, ...viaPhone], 'id');
+        }
+        
+        // Debug logging for specific problematic clients
+        if (c.name === 'Isabella Maria' || c.name === 'Yacht share') {
+          console.log(`\n=== DEBUG: ${c.name} (${c.id}) ===`);
+          console.log('Client email:', c.email, '-> canonical:', c._emailCanon);
+          console.log('Client phone:', c.phone, '-> canonical:', c._phoneCanon);
+          console.log('Client bookings array:', c.bookings);
+          console.log('Via ID matches:', viaId.length, viaId.map(b => b.id));
+          console.log('Via Array matches:', viaArray.length, viaArray.map(b => b.id));
+          console.log('Via Email matches:', viaEmail.length, viaEmail.map(b => b.id));
+          console.log('Via Phone matches:', viaPhone.length, viaPhone.map(b => b.id));
+          console.log('Final bookings:', bookingsForThisClient.length, bookingsForThisClient.map(b => b.id));
+        }
 
         const createdAt = toIso(c.createdAt) || new Date().toISOString();
         const lastUpdated = toIso(c.lastUpdated) || createdAt;
 
-        const totalSpent = merged.reduce((sum, b) => sum + toNumber(b.pricing?.finalPrice ?? b.finalPrice ?? 0), 0);
+        const totalSpent = bookingsForThisClient.reduce((sum, b) => sum + toNumber(b.pricing?.finalPrice ?? b.finalPrice ?? 0), 0);
 
         return {
           id: c.id,
@@ -497,8 +543,8 @@ const ClientDirectory = () => {
           clientType: c.clientType || 'Direct',
           createdAt,
           lastUpdated,
-          bookings: merged,
-          totalBookings: merged.length,
+          bookings: bookingsForThisClient,
+          totalBookings: bookingsForThisClient.length,
           totalSpent,
           _linkHints: {
             byId: viaId.length,
@@ -507,6 +553,7 @@ const ClientDirectory = () => {
             byPhone: viaPhone.length,
             uniqueEmail: uniqueEmail.has(c._emailCanon),
             uniquePhone: uniquePhone.has(c._phoneCanon),
+            strictMode: USE_STRICT_LINKING,
           },
         };
       });
@@ -645,6 +692,7 @@ const ClientDirectory = () => {
 
   const LinkBadges = ({ hints }) => (
     <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-gray-600">
+      {hints.strictMode && <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">STRICT</span>}
       <span className={`px-1.5 py-0.5 rounded bg-gray-100`}>id:{hints.byId}</span>
       <span className={`px-1.5 py-0.5 rounded bg-gray-100`}>arr:{hints.byArray}</span>
       <span className={`px-1.5 py-0.5 rounded ${hints.uniqueEmail ? 'bg-green-100' : 'bg-gray-100'}`}>email:{hints.byEmail}</span>

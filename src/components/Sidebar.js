@@ -3,7 +3,7 @@ import {
   Menu, X, Calendar, PlusCircle, Users,  BarChart3,
   User, CreditCard, Euro, Ship, MessageSquare, Settings, Building,
   ChevronRight, Utensils, Package, ShoppingCart, FileText, LineChart,
-  QrCode, MapPin, DollarSign, Search, Clock
+  QrCode, MapPin, DollarSign, Search, Clock, UserCheck
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -210,6 +210,7 @@ const Sidebar = () => {
       title: 'Customers',
       icon: Users,
       items: [
+        { name: 'Client directory', icon: UserCheck, path: '/clients', allowed: true },
         { name: 'Partners', icon: Building, path: '/manage-partners', allowed: true },
         { name: 'Enquiries', icon: MessageSquare, path: '/inquiries', allowed: true },
       ]
