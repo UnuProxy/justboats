@@ -34,6 +34,8 @@ const BoatManagement = () => {
         }
     };
 
+    
+
     useEffect(() => {
         fetchBoats();
     }, []);
@@ -449,15 +451,42 @@ dynamicFeatures.forEach((feature) => {
 
     return (
         <div className="container mx-auto p-4">
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold">Boat Fleet Overview</h1>
-                <button
-                    onClick={() => navigate('/add-boat')}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                    Add New Boat
-                </button>
-            </div>
+           <div className="flex justify-between items-center mb-6">
+    <h1 className="text-2xl font-bold">Boat Fleet Overview</h1>
+    <div className="flex gap-2">
+        <button
+            onClick={async () => {
+                if (window.confirm(`Make all ${boats.length} boats visible on the website?`)) {
+                    try {
+                        const boatsRef = collection(db, 'boats');
+                        const snapshot = await getDocs(boatsRef);
+                        
+                        const updates = [];
+                        snapshot.forEach((doc) => {
+                            updates.push(updateDoc(doc.ref, { visible: true }));
+                        });
+                        
+                        await Promise.all(updates);
+                        alert(`Success! All ${updates.length} boats are now visible.`);
+                        fetchBoats();
+                    } catch (error) {
+                        console.error('Error:', error);
+                        alert('Error updating boats');
+                    }
+                }
+            }}
+            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+        >
+            Make All Visible
+        </button>
+        <button
+            onClick={() => navigate('/add-boat')}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        >
+            Add New Boat
+        </button>
+    </div>
+</div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {boats.map((boat) => (
                     <div 
