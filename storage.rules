@@ -1,8 +1,27 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function userDocPath() {
+      return /databases/(default)/documents/users/$(request.auth.uid);
+    }
+
+    function userRole() {
+      return isSignedIn() && exists(userDocPath())
+        ? get(userDocPath()).data.role
+        : null;
+    }
+
+    function isTeamMember() {
+      return userRole() == 'admin' || userRole() == 'staff';
+    }
+
     match /{allPaths=**} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isTeamMember();
     }
   }
 }

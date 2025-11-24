@@ -1,4 +1,21 @@
 // pages/api/calendar-proxy.js
+const ALLOWED_CALENDAR_HOSTS = new Set(['calendar.google.com']);
+
+function ensureAllowedCalendar(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (error) {
+    throw new Error('Invalid calendar URL');
+  }
+
+  if (!ALLOWED_CALENDAR_HOSTS.has(parsed.hostname)) {
+    throw new Error('Calendar host is not allowed');
+  }
+
+  return parsed.toString();
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -19,7 +36,7 @@ export default async function handler(req, res) {
     }
     
     // Construct Google Calendar URL (simplest approach)
-    const calendarUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics?nocache=${Date.now()}`;
+    const calendarUrl = ensureAllowedCalendar(`https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics?nocache=${Date.now()}`);
     
     console.log('Fetching calendar from:', calendarUrl);
     

@@ -1,46 +1,40 @@
 {
-  "short_name": "Just Boats",
-  "name": "Just Enjoy - Boat Booking",
-  "description": "Effortless boat tour and experience booking management. Streamline your operations and delight your customers.",
+  "short_name": "Nautiq",
+  "name": "Nautiq Ibiza Command Center",
+  "description": "Operate Nautiq Ibiza charters with a unified dashboard for bookings, fleet readiness, and guest experience.",
   "categories": ["travel", "business", "productivity"],
   "lang": "en-US",
   "dir": "ltr",
   "icons": [
     {
-      "src": "/WhiteLogo-Just-Enjoy.png",
-      "sizes": "64x64",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/WhiteLogo-Just-Enjoy.png",
-      "sizes": "32x32",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/WhiteLogo-Just-Enjoy.png",
-      "sizes": "24x24",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/WhiteLogo-Just-Enjoy.png",
-      "sizes": "16x16",
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
       "src": "/icon-192x192.png",
-      "type": "image/png",
       "sizes": "192x192",
-      "purpose": "maskable"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
-      "src": "public/JustEnjoyBookings.png",
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
       "type": "image/png",
-      "sizes": "512x512",
       "purpose": "any"
+    },
+    {
+      "src": "/favicon-16x16.png",
+      "sizes": "16x16",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ],
   "screenshots": [
@@ -63,8 +57,8 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "theme_color": "#0099cc",
-  "background_color": "#ffffff",
+  "theme_color": "#1d4ed8",
+  "background_color": "#f2f5ff",
   "prefer_related_applications": false,
   "serviceworker": {
     "src": "/service-worker.js",

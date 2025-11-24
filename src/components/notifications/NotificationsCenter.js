@@ -3,14 +3,32 @@ import { collection, query, orderBy, limit, onSnapshot, updateDoc, doc, writeBat
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/firebaseConfig';
 import { Bell, CreditCard, Gift, Calendar, User, AlertCircle, Clock, Ship, CheckCircle } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 const NotificationsCenter = () => {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const { user } = useAuth();
+
+  const CEO_UID = process.env.REACT_APP_CEO_UID;
+  const CEO_EMAIL = process.env.REACT_APP_CEO_EMAIL;
+  const isCeo = Boolean(
+    user &&
+    (
+      (CEO_UID && user.uid === CEO_UID) ||
+      (CEO_EMAIL && user.email === CEO_EMAIL)
+    )
+  );
 
   useEffect(() => {
+    if (!user || !isCeo) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
     const notificationsQuery = query(
       collection(db, 'notifications'),
       orderBy('timestamp', 'desc'),
@@ -28,10 +46,11 @@ const NotificationsCenter = () => {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user, isCeo]);
 
   const handleMarkAllAsRead = async () => {
     try {
+      if (!isCeo) return;
       const unreadNotifications = notifications.filter(n => !n.read);
       if (unreadNotifications.length === 0) return;
 
@@ -50,6 +69,7 @@ const NotificationsCenter = () => {
 
   const handleNotificationClick = async (notification) => {
     try {
+      if (!isCeo) return;
       if (!notification.read) {
         await updateDoc(doc(db, 'notifications', notification.id), {
           read: true
@@ -125,6 +145,10 @@ const NotificationsCenter = () => {
     if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
     return date.toLocaleDateString();
   };
+
+  if (!user || !isCeo) {
+    return null;
+  }
 
   return (
     <div className="relative">

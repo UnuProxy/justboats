@@ -1,13 +1,12 @@
 // Login.js
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { db } from '../firebase/firebaseConfig';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 const Login = () => {
   const { loginWithGoogle, authError, user, userRole, loading, setAuthError } = useAuth();
   const navigate = useNavigate();
+  const [authenticating, setAuthenticating] = useState(false);
 
   useEffect(() => {
     if (!loading && user && userRole) {
@@ -19,105 +18,62 @@ const Login = () => {
     }
   }, [user, userRole, loading, navigate]);
 
-  const updateUserActivity = async (userId, userData) => {
-    try {
-      const userRef = doc(db, 'users', userId);
-      
-      await setDoc(userRef, {
-        ...userData,
-        lastLogin: serverTimestamp(),
-        lastActive: serverTimestamp(),
-        loginCount: (userData.loginCount || 0) + 1,
-        deviceInfo: {
-          userAgent: navigator.userAgent,
-          platform: navigator.platform,
-          language: navigator.language
-        },
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-
-      console.log('User activity updated successfully');
-    } catch (error) {
-      console.error('Error updating user activity:', error);
-    }
-  };
-
   const handleGoogleLogin = async () => {
     try {
+      setAuthError(null);
+      setAuthenticating(true);
       const result = await loginWithGoogle();
-      
-      if (result.user) {
-        // Check if user exists in approvedUsers collection
-        const approvedUserDoc = await getDoc(doc(db, 'approvedUsers', result.user.email));
-        
-        if (approvedUserDoc.exists()) {
-          const approvedData = approvedUserDoc.data();
-          
-          // Prepare user data
-          const userData = {
-            email: result.user.email,
-            displayName: result.user.displayName,
-            photoURL: result.user.photoURL,
-            role: approvedData.role,
-            createdAt: new Date(),
-            // Track first login separately
-            firstLogin: serverTimestamp()
-          };
 
-          // Update user data and activity
-          await updateUserActivity(result.user.uid, userData);
-        } else {
-          // If user is not approved, delete their auth account
-          await result.user.delete();
-          throw new Error('Your account is not approved. Please contact an administrator.');
-        }
+      if (!result.success && result.error) {
+        console.error('Login error:', result.error);
       }
     } catch (error) {
       console.error('Login error:', error);
       setAuthError(error.message);
+    } finally {
+      setAuthenticating(false);
     }
   };
 
-  const isLoginLoading = loading && !user;
+  const isLoginLoading = (loading && !user) || authenticating;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Welcome to JustBoats
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
+      <div className="max-w-md w-full space-y-6 p-8 app-card">
+        <div className="text-center">
+          <img
+            src="/Nautiq.Logo03.png"
+            alt="Nautiq Ibiza"
+            className="w-32 h-auto mx-auto mb-6"
+          />
+          <h2 className="text-2xl font-semibold text-system-gray-900">
+            Welcome to Nautiq Ibiza
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
+          <p className="mt-2 text-[15px] text-system-gray-600">
             Please sign in to continue
           </p>
         </div>
 
         {authError && (
-          <div className="bg-red-50 border-l-4 border-red-400 p-4 my-4">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm text-red-700">
-                  {authError}
-                </p>
-              </div>
+          <div className="app-badge--danger p-4 rounded-lg" style={{ backgroundColor: 'var(--danger-light)', color: 'var(--danger)' }}>
+            <div className="flex gap-3">
+              <svg className="h-5 w-5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <p className="text-sm font-medium">
+                {authError}
+              </p>
             </div>
           </div>
         )}
 
         <button
           onClick={handleGoogleLogin}
-          className={`w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-md shadow-sm bg-white hover:bg-gray-50 transition-colors ${
-            isLoginLoading ? 'cursor-not-allowed opacity-50' : ''
-          }`}
+          className="app-button--secondary w-full"
           disabled={isLoginLoading}
         >
           {isLoginLoading ? (
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
           ) : (
             <>
               <svg className="w-5 h-5" viewBox="0 0 24 24">

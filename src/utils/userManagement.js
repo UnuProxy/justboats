@@ -15,6 +15,8 @@ const adminEmails = process.env.REACT_APP_ADMIN_EMAILS
   ? process.env.REACT_APP_ADMIN_EMAILS.split(',').map(email => email.trim())
   : ['julian.pirvu@gmail.com']; // Default admin email
 
+const ALLOWED_ROLES = ['admin', 'staff', 'employee', 'driver'];
+
 /**
  * Adds or updates a user in the 'approvedUsers' collection.
  * @param {Object} userData - The user data containing email, name, and role.
@@ -30,6 +32,10 @@ export const addApprovedUser = async (userData) => {
     // Validate required fields
     if (!userData.name || !userData.role) {
       throw new Error('Name and role are required');
+    }
+
+    if (!ALLOWED_ROLES.includes(userData.role)) {
+      throw new Error('Invalid role supplied');
     }
 
     console.log('Received user data:', userData); // Debug log
@@ -146,7 +152,7 @@ export const validateUserData = (userData) => {
     errors.push('Name is required');
   }
   
-  if (!userData.role || !['admin', 'staff'].includes(userData.role)) {
+  if (!userData.role || !ALLOWED_ROLES.includes(userData.role)) {
     errors.push('Valid role is required');
   }
   

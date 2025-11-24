@@ -1,12 +1,13 @@
-const CACHE_NAME = 'just-boats-v1';
+const CACHE_NAME = 'nautiq-ibiza-v1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/favicon-16x16.png',
   '/favicon-32x32.png',
-  '/WhiteLogo-Just-Enjoy.png',
+  '/Nautiq.Logo03.png',
   '/icon-192x192.png',
-  '/JustEnjoyBookings.png',
+  '/icon-512x512.png',
+  '/apple-touch-icon.png',
   '/manifest.json'
 ];
 

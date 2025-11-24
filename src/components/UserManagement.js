@@ -74,6 +74,19 @@ const removeUserCompletely = async (email, userId = null) => {
   }
 };
 
+const roleBadgeClass = (role) => {
+  switch (role) {
+    case 'admin':
+      return 'bg-purple-100 text-purple-800';
+    case 'employee':
+      return 'bg-blue-100 text-blue-800';
+    case 'driver':
+      return 'bg-amber-100 text-amber-800';
+    default:
+      return 'bg-green-100 text-green-800';
+  }
+};
+
 const UserManagement = () => {
   const { isAdmin, loading } = useAuth();
   const [approvedUsers, setApprovedUsers] = useState([]);
@@ -82,7 +95,7 @@ const UserManagement = () => {
   const [newUser, setNewUser] = useState({
     email: '',
     name: '',
-    role: 'staff'
+    role: 'employee'
   });
   const [error, setError] = useState('');
 
@@ -159,7 +172,7 @@ const UserManagement = () => {
 
       if (result.success) {
         setShowAddForm(false);
-        setNewUser({ email: '', name: '', role: 'staff' });
+        setNewUser({ email: '', name: '', role: 'employee' });
         alert(result.message || 'User added successfully.');
       } else {
         setError(result.error || 'Failed to add user');
@@ -270,9 +283,7 @@ const UserManagement = () => {
                     </div>
                   </td>
                   <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
-                    }`}>
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${roleBadgeClass(user.role)}`}>
                       {user.role || 'user'}
                     </span>
                   </td>
@@ -337,9 +348,7 @@ const UserManagement = () => {
                     </div>
                   </td>
                   <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
-                    }`}>
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${roleBadgeClass(user.role)}`}>
                       {user.role}
                     </span>
                   </td>
@@ -416,6 +425,8 @@ const UserManagement = () => {
                   className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-base"
                 >
                   <option value="staff">Staff</option>
+                  <option value="employee">Employee</option>
+                  <option value="driver">Driver</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
@@ -443,4 +454,3 @@ const UserManagement = () => {
 };
 
 export default UserManagement;
-

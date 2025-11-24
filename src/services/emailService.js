@@ -1,6 +1,36 @@
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 
+export const sendClientWelcomeEmail = async ({ name, email, source }) => {
+  const safeEmail = (email || '').trim().toLowerCase();
+  if (!safeEmail || !safeEmail.includes('@')) {
+    console.warn('sendClientWelcomeEmail skipped: missing/invalid email', email);
+    return { success: false, reason: 'invalid_email' };
+  }
+
+  try {
+    const emailData = {
+      to: safeEmail,
+      template: 'client-welcome',
+      data: {
+        clientName: name || 'Guest',
+        source: source || 'Nautiq',
+        createdAt: new Date().toISOString(),
+      },
+    };
+
+    const docRef = await addDoc(collection(db, 'mail'), emailData);
+    return { success: true, emailId: docRef.id };
+  } catch (error) {
+    console.error('Error in sendClientWelcomeEmail:', {
+      error: error.message,
+      stack: error.stack,
+      clientEmail: email,
+    });
+    return { success: false, error };
+  }
+};
+
 export const sendBookingEmail = async (bookingData) => {
   try {
     console.log('Starting sendBookingEmail for:', bookingData.clientDetails.email);

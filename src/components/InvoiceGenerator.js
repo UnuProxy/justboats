@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
+import { useLocation } from "react-router-dom";
 
 /**
- * Just Enjoy Ibiza — Invoice Generator (Luxury + Mobile-first + One-page PDF)
+ * Nautiq Ibiza — Invoice Generator (Luxury + Mobile-first + One-page PDF)
  * - Fluid mobile UI (Edit / Preview tabs), zero horizontal overflow
  * - Hidden A4 layout is captured for PDF at full opacity (no faint PDFs)
  * - British English copy, EUR formatting, 21% VAT from VAT-inclusive prices
@@ -14,6 +15,8 @@ const gbEur = new Intl.NumberFormat("en-GB", { style: "currency", currency: "EUR
 const fmt = (n) => gbEur.format(Math.round((Number(n) || 0) * 100) / 100);
 
 export default function InvoiceGenerator() {
+  const location = useLocation();
+  const prefillInvoice = location.state?.prefillInvoice;
   // Dates
   const todayIso = new Date().toISOString().split("T")[0];
   const todayPretty = new Date().toLocaleDateString("en-GB", {
@@ -57,6 +60,42 @@ export default function InvoiceGenerator() {
   });
 
   const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    if (!prefillInvoice) return;
+
+    if (prefillInvoice.invoice) {
+      setInvoice((prev) => ({
+        ...prev,
+        ...prefillInvoice.invoice,
+      }));
+    }
+
+    if (prefillInvoice.client) {
+      setClient((prev) => ({
+        ...prev,
+        ...prefillInvoice.client,
+      }));
+    }
+
+    if (prefillInvoice.items?.length) {
+      setItems(
+        prefillInvoice.items.map((item) => ({
+          id: item.id || Date.now() + Math.random(),
+          description: item.description || "",
+          unitPrice: Number(item.unitPrice) || 0,
+          discount: Number(item.discount) || 0,
+        }))
+      );
+    }
+
+    setTab("preview");
+
+    if (window.history?.replaceState) {
+      const { pathname, search } = window.location;
+      window.history.replaceState({}, document.title, pathname + search);
+    }
+  }, [prefillInvoice]);
 
   const onInvoice = (e) => setInvoice((s) => ({ ...s, [e.target.name]: e.target.value }));
   const onClient = (e) => setClient((s) => ({ ...s, [e.target.name]: e.target.value }));
@@ -253,26 +292,34 @@ export default function InvoiceGenerator() {
 
         /* Hidden A4 stage for PDF (off-screen by default) */
         .pdf-stage{position:fixed;left:0;top:-10000px;width:210mm;background:#fff;pointer-events:none;opacity:0;z-index:-1}
-        .a4{width:210mm;min-height:297mm;color:#2a3242;display:flex;flex-direction:column}
-        .a4-hd{padding:18mm 16mm 12mm;border-bottom:2px solid var(--gold)}
+        .a4{width:210mm;min-height:297mm;color:#1b2330;display:flex;flex-direction:column;background:#fbfcff}
+        .a4-hd{padding:18mm 16mm 12mm;border-bottom:2px solid var(--gold);background:linear-gradient(135deg,#f8f4eb,#ffffff)}
         .a4-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
         .a4-org{display:flex;align-items:center;gap:10px}
-        .a4-dot{width:10px;height:10px;border-radius:50%;background:var(--gold)}
-        .a4-name{margin:0;font-size:24px;font-weight:900;color:var(--ink)}
-        .a4-meta{color:#707784;font-size:12px;line-height:1.45;margin-top:6px}
-        .a4-title{margin:0;font-size:40px;font-weight:900;color:var(--ink)}
-        .a4-date{color:#707784;font-size:12px;text-align:right}
+        .a4-dot{width:12px;height:12px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 4px rgba(200,162,94,.15)}
+        .a4-name{margin:0;font-size:26px;font-weight:900;color:var(--ink)}
+        .a4-meta{color:#657087;font-size:12px;line-height:1.45;margin-top:6px}
+        .a4-title{margin:0;font-size:42px;font-weight:900;color:var(--ink);letter-spacing:0.08em}
+        .a4-date{color:#81879a;font-size:12px;text-align:right;margin-top:6px}
+        .a4-summary{margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+        .a4-pill{border:1px solid rgba(15,31,61,.08);border-radius:12px;padding:10px 12px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.08)}
+        .a4-pill span{display:block;font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:#8b90a0;margin-bottom:4px;font-weight:800}
+        .a4-pill strong{font-size:16px;color:#0f1929}
         .a4-body{padding:10mm 16mm}
         .a4-sect{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:#8b90a0;font-weight:900;margin:0 0 8px}
-        table{width:100%;border-collapse:collapse}
-        thead th{background:#fafbff;border-bottom:1px solid var(--border);font-size:12px;color:#8b90a0;text-transform:uppercase;letter-spacing:.06em;padding:9px 10px;text-align:left}
-        tbody td{border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:13.5px}
+        table{width:100%;border-collapse:collapse;border-radius:14px;overflow:hidden;box-shadow:0 16px 40px rgba(15,23,42,.08)}
+        thead th{background:#eef1fb;border-bottom:1px solid var(--border);font-size:12px;color:#7a8299;text-transform:uppercase;letter-spacing:.06em;padding:9px 10px;text-align:left}
+        tbody td{border-bottom:1px solid #eef2f7;padding:11px 10px;font-size:13.5px;background:#fff}
         th.num,td.num{text-align:right}
         .a4-totals{display:flex;justify-content:flex-end;margin-top:10px}
-        .a4-card{width:100%;max-width:340px;background:#fbfbfe;border:1px solid var(--border);border-radius:12px;padding:14px}
+        .a4-card{width:100%;max-width:360px;background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
         .a4-line{display:flex;justify-content:space-between;margin:6px 0;font-size:14px}
         .a4-strong{border-top:1px solid var(--border);margin-top:8px;padding-top:10px;font-size:18px;font-weight:900}
-        .a4-ft{margin-top:auto;padding:10mm 16mm;background:#fbfbfe;border-top:1px solid var(--border)}
+        .a4-payment{margin-top:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+        .a4-paycard{border:1px solid rgba(15,23,42,.08);border-radius:12px;padding:12px 14px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.06)}
+        .a4-paycard h4{margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.24em;color:#8b90a0}
+        .a4-paycard p{margin:2px 0;font-weight:600}
+        .a4-ft{margin-top:auto;padding:10mm 16mm;background:#f6f7fb;border-top:1px solid var(--border)}
         .a4-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
       `}</style>
 
@@ -396,7 +443,7 @@ export default function InvoiceGenerator() {
           <div style={{ display: isNarrow && tab === "edit" ? "none" : "block" }}>
             <section className="m-invoice">
               <div className="m-hd">
-                <div className="m-brand"><span className="m-dot" /><h2 className="m-name">Just Enjoy Ibiza</h2></div>
+                <div className="m-brand"><span className="m-dot" /><h2 className="m-name">Nautiq Ibiza</h2></div>
                 <div style={{ textAlign: "right" }}>
                   <h3 className="m-title">Invoice</h3>
                   <div style={{ color: "#707784", fontSize: 12 }}>{todayPretty}</div>
@@ -500,7 +547,7 @@ export default function InvoiceGenerator() {
           <header className="a4-hd">
             <div className="a4-top">
               <div>
-                <div className="a4-org"><span className="a4-dot" /><h2 className="a4-name">Just Enjoy Ibiza</h2></div>
+                <div className="a4-org"><span className="a4-dot" /><h2 className="a4-name">Nautiq Ibiza</h2></div>
                 <div className="a4-meta">
                   <div>Av. Sant Jordi 48/52</div>
                   <div>CIF: B56880875</div>
@@ -509,7 +556,25 @@ export default function InvoiceGenerator() {
               </div>
               <div style={{ textAlign: "right" }}>
                 <h1 className="a4-title">INVOICE</h1>
-                <div className="a4-date">{todayPretty}</div>
+                <div className="a4-date">{invoice.invoiceDate || todayPretty}</div>
+              </div>
+            </div>
+            <div className="a4-summary">
+              <div className="a4-pill">
+                <span>Invoice No.</span>
+                <strong>{invoice.invoiceNumber || "Pending"}</strong>
+              </div>
+              <div className="a4-pill">
+                <span>Bill to</span>
+                <strong>{client.name || client.companyName || "Client TBD"}</strong>
+              </div>
+              <div className="a4-pill">
+                <span>Total</span>
+                <strong>{fmt(totalGross)}</strong>
+              </div>
+              <div className="a4-pill">
+                <span>Balance outstanding</span>
+                <strong>{fmt(totalGross)}</strong>
               </div>
             </div>
           </header>
@@ -576,13 +641,28 @@ export default function InvoiceGenerator() {
             </div>
 
             {items.length > 0 && (
-              <div className="a4-totals">
-                <div className="a4-card">
-                  <div className="a4-line"><span style={{ color: "#8b90a0" }}>Subtotal (excl. VAT)</span><span>{fmt(totalNet)}</span></div>
-                  <div className="a4-line"><span style={{ color: "#8b90a0" }}>VAT (21%)</span><span>{fmt(totalVat)}</span></div>
-                  <div className="a4-line a4-strong"><span>Total amount</span><span>{fmt(totalGross)}</span></div>
+              <>
+                <div className="a4-totals">
+                  <div className="a4-card">
+                    <div className="a4-line"><span style={{ color: "#8b90a0" }}>Subtotal (excl. VAT)</span><span>{fmt(totalNet)}</span></div>
+                    <div className="a4-line"><span style={{ color: "#8b90a0" }}>VAT (21%)</span><span>{fmt(totalVat)}</span></div>
+                    <div className="a4-line a4-strong"><span>Total amount</span><span>{fmt(totalGross)}</span></div>
+                  </div>
                 </div>
-              </div>
+                <div className="a4-payment">
+                  <div className="a4-paycard">
+                    <h4>Payment reference</h4>
+                    <p>{invoice.invoiceNumber || "Please quote invoice number"}</p>
+                    <p>Due upon receipt</p>
+                  </div>
+                  <div className="a4-paycard">
+                    <h4>Bank details</h4>
+                    <p>Account: Nautiq Ibiza SL</p>
+                    <p>IBAN: ES12 3456 7890 1234 5678 9012</p>
+                    <p>SWIFT: NAU TES MM</p>
+                  </div>
+                </div>
+              </>
             )}
           </div>
           <footer className="a4-ft">

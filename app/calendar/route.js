@@ -1,6 +1,23 @@
 // app/api/calendar/route.js
 export const runtime = 'edge';
 
+const ALLOWED_CALENDAR_HOSTS = new Set(['calendar.google.com']);
+
+function ensureAllowedCalendarUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (error) {
+    throw new Error('Invalid calendar URL');
+  }
+
+  if (!ALLOWED_CALENDAR_HOSTS.has(parsed.hostname)) {
+    throw new Error('Calendar host is not allowed');
+  }
+
+  return parsed.toString();
+}
+
 /**
  * Reliable Edge function to fetch calendar data without CORS issues
  */
@@ -39,6 +56,8 @@ export async function GET(request) {
       calendarUrl = `${calendarUrl}${separator}nocache=${Date.now()}`;
     }
     
+    calendarUrl = ensureAllowedCalendarUrl(calendarUrl);
+
     console.log(`Fetching calendar data from: ${calendarUrl}`);
     
     // Fetch the calendar data with multiple retries

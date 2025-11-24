@@ -1,4 +1,21 @@
 // pages/api/ical-proxy.js
+const ALLOWED_CALENDAR_HOSTS = new Set(['calendar.google.com']);
+
+function ensureAllowedUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (error) {
+    throw new Error('Invalid calendar URL');
+  }
+
+  if (!ALLOWED_CALENDAR_HOSTS.has(parsed.hostname)) {
+    throw new Error('Calendar host is not allowed');
+  }
+
+  return parsed.toString();
+}
+
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET');
@@ -9,7 +26,7 @@ export default async function handler(req, res) {
     }
   
     try {
-      const decodedUrl = decodeURIComponent(url);
+      const decodedUrl = ensureAllowedUrl(decodeURIComponent(url));
       console.log('Fetching calendar from:', decodedUrl);
       const response = await fetch(decodedUrl, {
         headers: {

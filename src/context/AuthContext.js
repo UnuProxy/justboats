@@ -6,7 +6,7 @@ import {
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
-import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, increment } from 'firebase/firestore';
 
 const AuthContext = createContext({});
 
@@ -27,25 +27,39 @@ export function AuthProvider({ children }) {
     const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
       if (authUser) {
         try {
-          // Check if user already exists in 'users' collection
-          const usersRef = collection(db, 'users');
-          const userQuery = query(usersRef, where('email', '==', authUser.email));
-          const userSnapshot = await getDocs(userQuery);
+          const userDocRef = doc(db, 'users', authUser.uid);
+          const userSnapshot = await getDoc(userDocRef);
+          const deviceInfo = typeof navigator !== 'undefined'
+            ? {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language
+              }
+            : {};
 
-          if (!userSnapshot.empty) {
-            // User exists in 'users' collection
-            const userDoc = userSnapshot.docs[0];
+          if (userSnapshot.exists()) {
+            const existingUser = userSnapshot.data();
+
+            await setDoc(
+              userDocRef,
+              {
+                lastLogin: serverTimestamp(),
+                lastActive: serverTimestamp(),
+                loginCount: increment(1),
+                updatedAt: serverTimestamp(),
+                deviceInfo
+              },
+              { merge: true }
+            );
+
             setUser(authUser);
-            setUserRole(userDoc.data().role);
+            setUserRole(existingUser.role);
             setAuthError(null);
           } else {
-            // Check if user is in 'approvedUsers' collection
-            const approvedUsersRef = collection(db, 'approvedUsers');
-            const approvedQuery = query(approvedUsersRef, where('email', '==', authUser.email));
-            const approvedSnapshot = await getDocs(approvedQuery);
+            const approvedUserRef = doc(db, 'approvedUsers', authUser.email);
+            const approvedSnapshot = await getDoc(approvedUserRef);
 
-            if (approvedSnapshot.empty) {
-              // No approved user, unauthorized
+            if (!approvedSnapshot.exists()) {
               await signOut(auth);
               setAuthError("Unauthorized user. Please contact the administrator for access.");
               setUser(null);
@@ -54,22 +68,20 @@ export function AuthProvider({ children }) {
               return;
             }
 
-            // Get the approved user's data
-            const approvedUser = approvedSnapshot.docs[0].data();
+            const approvedUser = approvedSnapshot.data();
             const role = approvedUser.role;
 
-            // Create 'users' document
-            const userDocRef = doc(db, 'users', authUser.uid);
             await setDoc(userDocRef, {
               email: authUser.email,
               name: authUser.displayName,
-              role: role,
-              createdAt: new Date()
+              role,
+              createdAt: serverTimestamp(),
+              firstLogin: serverTimestamp(),
+              lastLogin: serverTimestamp(),
+              lastActive: serverTimestamp(),
+              loginCount: 1,
+              deviceInfo
             });
-
-            // Optionally, remove from 'approvedUsers' to prevent duplicate approvals
-            const approvedUserDocRef = doc(db, 'approvedUsers', authUser.email);
-            await deleteDoc(approvedUserDocRef);
 
             setUser(authUser);
             setUserRole(role);
@@ -95,8 +107,8 @@ export function AuthProvider({ children }) {
   const loginWithGoogle = async () => {
     try {
       setAuthError(null);
-      await signInWithPopup(auth, googleProvider);
-      return { success: true };
+      const credential = await signInWithPopup(auth, googleProvider);
+      return { success: true, credential };
     } catch (error) {
       console.error('Google sign-in error:', error);
       setAuthError(error.message);
@@ -107,6 +119,7 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     try {
       await signOut(auth);
+      setAuthError(null);
       return { success: true };
     } catch (error) {
       console.error('Logout error:', error);
@@ -116,6 +129,8 @@ export function AuthProvider({ children }) {
 
   const isAdmin = () => userRole === 'admin';
   const isStaff = () => userRole === 'staff';
+  const isEmployee = () => userRole === 'employee';
+  const isDriver = () => userRole === 'driver';
 
   return (
     <AuthContext.Provider value={{
@@ -125,8 +140,11 @@ export function AuthProvider({ children }) {
       logout,
       isAdmin,
       isStaff,
+      isEmployee,
+      isDriver,
       loading,
-      authError
+      authError,
+      setAuthError
     }}>
       {!loading && children}
     </AuthContext.Provider>
@@ -134,4 +152,3 @@ export function AuthProvider({ children }) {
 }
 
 export const useAuth = () => useContext(AuthContext);
-
