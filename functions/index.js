@@ -1,6 +1,7 @@
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onRequest } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 const axios = require('axios');
 const { getMessaging } = require('firebase-admin/messaging');
@@ -9,16 +10,83 @@ const { getMessaging } = require('firebase-admin/messaging');
 admin.initializeApp();
 const db = admin.firestore();
 
+const TEAM_ROLES = ['admin', 'staff'];
+
+async function getUserRole(uid) {
+  if (!uid) {
+    return null;
+  }
+
+  try {
+    const userDoc = await db.collection('users').doc(uid).get();
+    return userDoc.exists ? userDoc.data().role : null;
+  } catch (error) {
+    console.error('Role lookup failed:', error);
+    return null;
+  }
+}
+
+function hasAllowedRole(role, allowedRoles = TEAM_ROLES) {
+  return role != null && allowedRoles.includes(role);
+}
+
+async function assertCallableAuthorization(request, allowedRoles = TEAM_ROLES) {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+
+  const role = await getUserRole(request.auth.uid);
+  if (!hasAllowedRole(role, allowedRoles)) {
+    throw new HttpsError('permission-denied', 'Insufficient permissions');
+  }
+
+  return { uid: request.auth.uid, role };
+}
+
+async function authenticateHttpRequest(req, res, allowedRoles = TEAM_ROLES) {
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or invalid Authorization header' });
+    return null;
+  }
+
+  const idToken = authHeader.substring(7);
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const role = await getUserRole(decoded.uid);
+
+    if (!hasAllowedRole(role, allowedRoles)) {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return null;
+    }
+
+    return { uid: decoded.uid, role };
+  } catch (error) {
+    console.error('ID token verification failed:', error);
+    res.status(401).json({ error: 'Invalid authentication token' });
+    return null;
+  }
+}
+
 // Constants
 const SENDGRID_ORDER_NOTIFICATION_TEMPLATE_ID = 'd-19b8a21dc04c4c8aa3171f6faf5de453';
-const SENDGRID_TEMPLATE_ID = 'd-a0536d03f0c74ef2b52e722e8b26ef4e';
-const SENDGRID_MULTI_BOAT_TEMPLATE_ID = 'd-a0536d03f0c74ef2b52e722e8b26ef4e'; // Use same template or create a new one
+// Allow template IDs to be driven by secrets/env; fall back to known defaults
+const SENDGRID_TEMPLATE_ID = process.env.SENDGRID_TEMPLATE_ID || 'd-a0536d03f0c74ef2b52e722e8b26ef4e';
+const SENDGRID_MULTI_BOAT_TEMPLATE_ID = process.env.SENDGRID_MULTI_BOAT_TEMPLATE_ID || 'd-a0536d03f0c74ef2b52e722e8b26ef4e';
 const ALLOWED_ORIGINS = [
   'https://justboats.vercel.app',
   'https://justenjoyibizaboats.com',
   'http://localhost:3000'
 ];
 const ADMIN_EMAIL = 'unujulian@gmail.com';
+const SENDGRID_PAYMENT_REMINDER_TEMPLATE_ID = process.env.SENDGRID_PAYMENT_REMINDER_TEMPLATE_ID || null;
+const PAYMENT_REMINDER_WINDOW_DAYS = 5;
+const PAYMENT_REMINDER_LOOKAHEAD_DAYS = 14;
+const PAYMENT_REMINDER_MIN_HOURS_BETWEEN_EMAILS = 22;
+const OUTSTANDING_PAYMENT_STATUSES = ['No Payment', 'Partial', 'Pending', 'Deposit', 'Outstanding'];
+const BRAND_FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL || 'info@nautiqibiza.com';
+const CATERING_MENU_URL = 'https://nautiqibiza.com/catering';
 // Simplified API key handling using Firebase Secrets
 function getApiKey() {
   const apiKey = process.env.SENDGRID_API_KEY;
@@ -52,9 +120,66 @@ async function sendEmailDirectApi(emailData) {
 
     return { success: true, status: response.status };
   } catch (error) {
-    console.error('SendGrid Error:', error.response?.data);
-    throw new Error(`SendGrid API Error: ${error.message}`);
+    console.error('SendGrid Error:', {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
+    throw new Error(`SendGrid API Error: ${error.response?.status || ''} ${error.response?.data?.errors?.[0]?.message || error.message}`);
   }
+}
+
+async function sendPlainEmail(to, subject, text) {
+  const apiKey = getApiKey();
+  await axios({
+    method: 'post',
+    url: 'https://api.sendgrid.com/v3/mail/send',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    data: {
+      personalizations: [{ to: [{ email: to }] }],
+      from: { email: BRAND_FROM_EMAIL },
+      subject,
+      content: [{
+        type: 'text/plain',
+        value: text
+      }]
+    }
+  });
+
+  return { success: true };
+}
+
+async function sendSmsNotification(to, body) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    console.log('SMS skipped: Twilio not configured');
+    return { success: false, skipped: true, reason: 'twilio_not_configured' };
+  }
+
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+  const payload = new URLSearchParams({
+    To: to,
+    From: fromNumber,
+    Body: body
+  }).toString();
+
+  await axios.post(url, payload, {
+    auth: {
+      username: accountSid,
+      password: authToken
+    },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+
+  return { success: true };
 }
 
 // Format multi-boat booking data for email template
@@ -118,6 +243,254 @@ function formatMultiBoatEmailData(data) {
   };
 }
 
+function formatDisplayDate(value) {
+  if (!value) return 'TBC';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+}
+
+function formatCurrency(value) {
+  const amount = Number(value);
+  if (Number.isNaN(amount)) {
+    return `€${value}`;
+  }
+  return new Intl.NumberFormat('en-GB', {
+    style: 'currency',
+    currency: 'EUR'
+  }).format(amount);
+}
+
+function buildBookingEmailContent(dynamicData) {
+  const clientName = dynamicData.clientName || 'there';
+  const bookingDateDisplay = formatDisplayDate(dynamicData.bookingDate);
+  const timeRange = [dynamicData.startTime, dynamicData.endTime].filter(Boolean).join(' - ') || 'TBC';
+  const guestsLabel = dynamicData.isMultiBoat
+    ? `${dynamicData.totalPassengers || dynamicData.passengers || 'TBC'} guests`
+    : `${dynamicData.passengers || 'TBC'} guests`;
+
+  const introHtml = `
+    <h2 style="margin: 0 0 16px; font-weight: 600; font-size: 20px; color: #0f172a;">
+      Hi ${clientName},
+    </h2>
+    <p style="margin: 0 0 16px; color: #334155; font-size: 15px;">
+      Thanks for booking with Nautiq Ibiza. Your charter is confirmed – here are the details you need to share with your guests and crew.
+    </p>
+  `;
+
+  const cateringHtml = `
+    <p style="margin: 24px 0 12px; color: #334155; font-size: 15px;">
+      Start planning your onboard experience with our curated catering options:
+    </p>
+    <a href="${CATERING_MENU_URL}" target="_blank" rel="noopener"
+       style="display: inline-block; padding: 12px 18px; background-color: #0284c7; color: #ffffff; border-radius: 6px; text-decoration: none; font-weight: 600;">
+      View Catering Menu
+    </a>
+  `;
+
+  const footerHtml = `
+    <p style="margin: 24px 0 4px; color: #475569; font-size: 14px;">
+      Need to adjust anything? Reply to this email or call +34 123 456 789 and we&rsquo;ll be happy to help.
+    </p>
+    <p style="margin: 0; color: #94a3b8; font-size: 13px;">
+      See you on the dock,<br/>The Nautiq Ibiza team
+    </p>
+  `;
+
+  if (dynamicData.isMultiBoat) {
+    const boatsHtml = (dynamicData.boats || []).map((boat) => `
+      <tr>
+        <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #0f172a;">${boat.name}</td>
+        <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; color: #334155;">${boat.passengers || 'TBC'} guests</td>
+        <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; color: #334155;">${formatCurrency(boat.price || 0)}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f8fafc; padding: 32px;">
+        <div style="max-width: 640px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; padding: 32px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);">
+          ${introHtml}
+          <div style="margin-bottom: 24px;">
+            <h3 style="margin: 0 0 12px; font-size: 17px; color: #0f172a;">Charter overview</h3>
+            <p style="margin: 0 0 4px; color: #334155;">Date: <strong>${bookingDateDisplay}</strong></p>
+            <p style="margin: 0 0 4px; color: #334155;">Time: <strong>${timeRange}</strong></p>
+            <p style="margin: 0 0 4px; color: #334155;">Guests: <strong>${guestsLabel}</strong></p>
+            <p style="margin: 0 0 4px; color: #334155;">Total investment: <strong>${formatCurrency(dynamicData.totalAmount)}</strong></p>
+          </div>
+          <div style="margin-bottom: 24px;">
+            <h3 style="margin: 0 0 12px; font-size: 17px; color: #0f172a;">Boats in this charter</h3>
+            <table style="width: 100%; border-collapse: collapse; background-color: #f8fafc; border-radius: 12px; overflow: hidden;">
+              <thead>
+                <tr style="background-color: #e0f2fe; text-align: left;">
+                  <th style="padding: 10px 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #0369a1;">Boat</th>
+                  <th style="padding: 10px 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #0369a1;">Guests</th>
+                  <th style="padding: 10px 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #0369a1;">Agreed Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${boatsHtml}
+              </tbody>
+            </table>
+          </div>
+          ${cateringHtml}
+          ${footerHtml}
+        </div>
+      </div>
+    `;
+
+    const boatsText = (dynamicData.boats || []).map((boat, index) =>
+      `${index + 1}. ${boat.name} – ${boat.passengers || 'TBC'} guests – ${formatCurrency(boat.price || 0)}`
+    ).join('\n');
+
+    const text = [
+      `Hi ${clientName},`,
+      ``,
+      `Thanks for booking with Nautiq Ibiza. Your multi-boat charter is confirmed.`,
+      ``,
+      `Date: ${bookingDateDisplay}`,
+      `Time: ${timeRange}`,
+      `Guests: ${guestsLabel}`,
+      `Total investment: ${formatCurrency(dynamicData.totalAmount)}`,
+      ``,
+      `Boats:`,
+      boatsText,
+      ``,
+      `Catering menu: ${CATERING_MENU_URL}`,
+      ``,
+      `See you on the dock,`,
+      `The Nautiq Ibiza team`
+    ].join('\n');
+
+    const subject = `Your multi-boat charter confirmation | ${bookingDateDisplay}`;
+
+    return { subject, html, text };
+  }
+
+  const html = `
+    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f8fafc; padding: 32px;">
+      <div style="max-width: 640px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; padding: 32px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);">
+        ${introHtml}
+        <div style="margin-bottom: 24px;">
+          <h3 style="margin: 0 0 12px; font-size: 17px; color: #0f172a;">Charter overview</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tbody>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b;">Boat</td>
+                <td style="padding: 8px 0; color: #0f172a; font-weight: 600;">${dynamicData.boatName || 'TBC'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b;">Date</td>
+                <td style="padding: 8px 0; color: #0f172a; font-weight: 600;">${bookingDateDisplay}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b;">Time</td>
+                <td style="padding: 8px 0; color: #0f172a; font-weight: 600;">${timeRange}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b;">Guests</td>
+                <td style="padding: 8px 0; color: #0f172a; font-weight: 600;">${guestsLabel}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b;">Agreed price</td>
+                <td style="padding: 8px 0; color: #0f172a; font-weight: 600;">${formatCurrency(dynamicData.totalAmount)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        ${cateringHtml}
+        ${footerHtml}
+      </div>
+    </div>
+  `;
+
+  const text = [
+    `Hi ${clientName},`,
+    ``,
+    `Thanks for booking with Nautiq Ibiza. Your charter is confirmed.`,
+    ``,
+    `Boat: ${dynamicData.boatName || 'TBC'}`,
+    `Date: ${bookingDateDisplay}`,
+    `Time: ${timeRange}`,
+    `Guests: ${guestsLabel}`,
+    `Agreed price: ${formatCurrency(dynamicData.totalAmount)}`,
+    ``,
+    `Catering menu: ${CATERING_MENU_URL}`,
+    ``,
+    `See you on the dock,`,
+    `The Nautiq Ibiza team`
+  ].join('\n');
+
+  const subject = `${dynamicData.boatName || 'Your charter'} confirmed for ${bookingDateDisplay}`;
+
+  return { subject, html, text };
+}
+
+async function sendBookingConfirmationEmailFallbackSendgrid(toEmail, dynamicData) {
+  const templateId = dynamicData.isMultiBoat
+    ? SENDGRID_MULTI_BOAT_TEMPLATE_ID
+    : SENDGRID_TEMPLATE_ID;
+
+  if (!templateId) {
+    throw new Error('SendGrid template not configured for booking confirmation fallback');
+  }
+
+  await sendEmailDirectApi({
+    to: toEmail,
+    from: BRAND_FROM_EMAIL,
+    templateId,
+    dynamic_template_data: dynamicData
+  });
+
+  return { success: true, provider: 'sendgrid' };
+}
+
+async function sendBookingConfirmationEmail(toEmail, dynamicData) {
+  const fallbackResult = await sendBookingConfirmationEmailFallbackSendgrid(toEmail, dynamicData);
+  return { ...fallbackResult, provider: 'sendgrid' };
+}
+
+function formatReminderMessage(reminder) {
+  const dueDate = reminder?.dueDate instanceof Date
+    ? reminder.dueDate
+    : reminder?.dueDate?.toDate
+      ? reminder.dueDate.toDate()
+      : null;
+
+  const dueLabel = dueDate
+    ? dueDate.toLocaleString('en-GB', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    : 'No due date set';
+
+  const lines = [
+    `Reminder: ${reminder?.title || 'Untitled'}`,
+    `When: ${dueLabel}`,
+    reminder?.type ? `Type: ${reminder.type}` : null,
+    reminder?.people ? `People: ${reminder.people}` : null,
+    reminder?.relationship ? `Relationship: ${reminder.relationship}` : null,
+    reminder?.location ? `Location / link: ${reminder.location}` : null,
+    reminder?.relatedClient ? `Client: ${reminder.relatedClient}` : null,
+    reminder?.relatedBoat ? `Boat: ${reminder.relatedBoat}` : null,
+    reminder?.notes ? '',
+    reminder?.notes || null,
+    '',
+    '— Nautiq reminders'
+  ].filter(Boolean);
+
+  return lines.join('\n');
+}
+
 // Callable Function - Updated for multi-boat support
 exports.sendBookingConfirmation = onCall({
   cors: ALLOWED_ORIGINS,
@@ -126,37 +499,26 @@ exports.sendBookingConfirmation = onCall({
   maxInstances: 10
 }, async (request) => {
   try {
+    await assertCallableAuthorization(request);
     const data = request.data;
-    
+
     if (!data?.clientName || !data?.clientEmail) {
       throw new HttpsError('invalid-argument', 'Missing client details');
     }
 
-    // Check if this is a multi-boat booking
-    const isMultiBoat = data.multiBoat || 
-                        (data.bookingDetails && data.bookingDetails.multiBoatBooking) || 
-                        (data.boats && Array.isArray(data.boats) && data.boats.length > 1);
-    
-    const templateId = isMultiBoat ? SENDGRID_MULTI_BOAT_TEMPLATE_ID : SENDGRID_TEMPLATE_ID;
-    const dynamic_template_data = formatMultiBoatEmailData(data);
+    const emailContent = formatMultiBoatEmailData(data);
+    const result = await sendBookingConfirmationEmail(data.clientEmail, emailContent);
 
-    const emailData = {
-      to: data.clientEmail,
-      from: 'info@justenjoyibiza.com',
-      templateId: templateId,
-      dynamic_template_data: dynamic_template_data
-    };
-
-    await sendEmailDirectApi(emailData);
-    
-    // Log additional info for multi-boat bookings
-    if (isMultiBoat) {
-      console.log(`Multi-boat confirmation sent to ${data.clientEmail} for ${dynamic_template_data.boatCount} boats`);
+    if (emailContent.isMultiBoat) {
+      console.log(`Multi-boat confirmation sent via ${result.provider} to ${data.clientEmail} for ${emailContent.boatCount} boats`);
+    } else {
+      console.log(`Single boat confirmation sent via ${result.provider} to ${data.clientEmail} for ${emailContent.boatName}`);
     }
-    
+
     return { success: true };
   } catch (error) {
-    throw new HttpsError('internal', error.message);
+    console.error('sendBookingConfirmation error:', error);
+    throw new HttpsError('internal', error.message || 'Failed to send booking confirmation');
   }
 });
 
@@ -172,6 +534,11 @@ exports.sendBookingConfirmationHttp = onRequest({
       return;
     }
 
+    const authContext = await authenticateHttpRequest(req, res);
+    if (!authContext) {
+      return;
+    }
+
     const data = req.body;
     
     if (!data?.clientName || !data?.clientEmail) {
@@ -184,20 +551,293 @@ exports.sendBookingConfirmationHttp = onRequest({
                         (data.bookingDetails && data.bookingDetails.multiBoatBooking) || 
                         (data.boats && Array.isArray(data.boats) && data.boats.length > 1);
     
-    const templateId = isMultiBoat ? SENDGRID_MULTI_BOAT_TEMPLATE_ID : SENDGRID_TEMPLATE_ID;
     const dynamic_template_data = formatMultiBoatEmailData(data);
-
-    const emailData = {
-      to: data.clientEmail,
-      from: 'info@justenjoyibiza.com',
-      templateId: templateId,
-      dynamic_template_data: dynamic_template_data
-    };
-
-    await sendEmailDirectApi(emailData);
-    res.status(200).send({ success: true });
+    const result = await sendBookingConfirmationEmail(data.clientEmail, dynamic_template_data);
+    res.status(200).send({ success: true, provider: result.provider, multiBoat: isMultiBoat });
   } catch (error) {
-    res.status(500).send({ error: error.message });
+    console.error('sendBookingConfirmationHttp error:', error);
+    res.status(500).send({ error: error.message || 'Failed to send booking confirmation' });
+  }
+});
+
+// Scheduled Function - Payment reminders
+exports.paymentReminderSweep = onSchedule({
+  schedule: '0 9 * * *',
+  timeZone: 'Europe/Madrid',
+  secrets: ['SENDGRID_API_KEY'],
+  maxInstances: 1
+}, async () => {
+  console.log('Starting payment reminder sweep');
+  const now = new Date();
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+
+  try {
+    const snapshot = await db.collection('bookings')
+      .where('pricing.paymentStatus', 'in', OUTSTANDING_PAYMENT_STATUSES)
+      .get();
+
+    if (snapshot.empty) {
+      console.log('No outstanding bookings found for reminders');
+      return null;
+    }
+
+    let processed = 0;
+    let remindersQueued = 0;
+
+    for (const docSnap of snapshot.docs) {
+      processed += 1;
+      const booking = docSnap.data();
+      const bookingId = docSnap.id;
+
+      const clientEmail = booking?.clientDetails?.email;
+      if (!clientEmail) {
+        console.log(`Skipping ${bookingId}: missing client email`);
+        continue;
+      }
+
+      const bookingDate = booking?.bookingDetails?.date
+        ? new Date(booking.bookingDetails.date)
+        : booking?.bookingDate
+          ? new Date(booking.bookingDate)
+          : null;
+
+      let daysUntil = null;
+      if (bookingDate && !Number.isNaN(bookingDate.getTime())) {
+        const bookingMidnight = new Date(bookingDate);
+        bookingMidnight.setHours(0, 0, 0, 0);
+        const diffMs = bookingMidnight.getTime() - midnight.getTime();
+        daysUntil = Math.round(diffMs / (24 * 60 * 60 * 1000));
+      }
+
+      if (daysUntil !== null) {
+        if (daysUntil > PAYMENT_REMINDER_LOOKAHEAD_DAYS) {
+          continue;
+        }
+        if (daysUntil < -1) {
+          continue;
+        }
+        if (daysUntil > PAYMENT_REMINDER_WINDOW_DAYS) {
+          continue;
+        }
+      }
+
+      const agreedPrice = Number(booking?.pricing?.agreedPrice || 0);
+      const totalPaid = Number(booking?.pricing?.totalPaid || 0);
+      const balanceDue = Math.max(agreedPrice - totalPaid, 0);
+
+      if (balanceDue <= 0) {
+        console.log(`Skipping ${bookingId}: balance already cleared`);
+        continue;
+      }
+
+      const automation = booking?.automation || {};
+      let lastReminderDate = null;
+      if (automation.lastReminderSentAt) {
+        if (typeof automation.lastReminderSentAt.toDate === 'function') {
+          lastReminderDate = automation.lastReminderSentAt.toDate();
+        } else {
+          const parsed = new Date(automation.lastReminderSentAt);
+          if (!Number.isNaN(parsed.getTime())) {
+            lastReminderDate = parsed;
+          }
+        }
+      }
+
+      if (lastReminderDate) {
+        const hoursSinceLastReminder = (now.getTime() - lastReminderDate.getTime()) / (60 * 60 * 1000);
+        if (hoursSinceLastReminder < PAYMENT_REMINDER_MIN_HOURS_BETWEEN_EMAILS) {
+          console.log(`Skipping ${bookingId}: reminder sent ${hoursSinceLastReminder.toFixed(1)} hours ago`);
+          continue;
+        }
+      }
+
+      const clientName = booking?.clientDetails?.name || 'Guest';
+      const boatName = booking?.bookingDetails?.boatName || 'Charter';
+      const paymentStatus = booking?.pricing?.paymentStatus || 'Pending';
+      const paymentLink = `https://justboats.vercel.app/bookings/${bookingId}`;
+
+      let reminderStatus = 'queued';
+
+      if (SENDGRID_PAYMENT_REMINDER_TEMPLATE_ID) {
+        try {
+          const dynamicData = {
+            clientName,
+            boatName,
+            bookingDate: bookingDate && !Number.isNaN(bookingDate.getTime())
+              ? bookingDate.toISOString().split('T')[0]
+              : 'TBC',
+            balanceDue: balanceDue.toFixed(2),
+            paymentStatus,
+            daysUntil,
+            paymentLink,
+            bookingId
+          };
+
+          await sendEmailDirectApi({
+            to: clientEmail,
+            from: BRAND_FROM_EMAIL,
+            templateId: SENDGRID_PAYMENT_REMINDER_TEMPLATE_ID,
+            dynamic_template_data: dynamicData
+          });
+
+          reminderStatus = 'sent';
+          remindersQueued += 1;
+          console.log(`Reminder sent for booking ${bookingId} to ${clientEmail}`);
+        } catch (sendError) {
+          console.error(`Failed to send payment reminder for ${bookingId}:`, sendError);
+          reminderStatus = 'send_error';
+        }
+      } else {
+        console.log(`Payment reminder template not configured. Logging reminder for booking ${bookingId} only.`);
+        reminderStatus = 'template_missing';
+      }
+
+      try {
+        await docSnap.ref.set({
+          automation: {
+            ...automation,
+            lastReminderSentAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastReminderStatus: reminderStatus,
+            lastReminderContext: {
+              balanceDue,
+              daysUntil,
+              paymentStatus
+            }
+          }
+        }, { merge: true });
+      } catch (updateError) {
+        console.error(`Failed to update automation metadata for ${bookingId}:`, updateError);
+      }
+
+      try {
+        await db.collection('reminders').add({
+          bookingId,
+          clientEmail,
+          clientName,
+          boatName,
+          status: reminderStatus,
+          balanceDue,
+          bookingDate: bookingDate && !Number.isNaN(bookingDate?.getTime())
+            ? admin.firestore.Timestamp.fromDate(bookingDate)
+            : null,
+          daysUntil,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          paymentStatus
+        });
+      } catch (logError) {
+        console.error(`Failed to log reminder for ${bookingId}:`, logError);
+      }
+    }
+
+    console.log(`Payment reminder sweep processed ${processed} bookings. ${remindersQueued} reminders sent or queued.`);
+    return null;
+  } catch (error) {
+    console.error('Payment reminder sweep failed:', error);
+    throw error;
+  }
+});
+
+const REMINDER_SWEEP_WINDOW_MINUTES = 90;
+
+exports.reminderNotificationSweep = onSchedule({
+  schedule: '*/30 * * * *',
+  timeZone: 'Europe/Madrid',
+  secrets: ['SENDGRID_API_KEY'],
+  maxInstances: 1
+}, async () => {
+  const now = new Date();
+  const windowEnd = new Date(now.getTime() + REMINDER_SWEEP_WINDOW_MINUTES * 60 * 1000);
+  const windowStart = new Date(now.getTime() - 10 * 60 * 1000);
+
+  try {
+    const snapshot = await db.collection('reminders')
+      .where('source', '==', 'reminders_board')
+      .where('shouldNotify', '==', true)
+      .where('nextNotificationAt', '<=', admin.firestore.Timestamp.fromDate(windowEnd))
+      .get();
+
+    if (snapshot.empty) {
+      console.log('No reminders ready for notifications');
+      return null;
+    }
+
+    let processed = 0;
+    for (const docSnap of snapshot.docs) {
+      const reminder = docSnap.data();
+      const reminderId = docSnap.id;
+      const prefs = reminder.notificationPreferences || {};
+      const dueDate = reminder?.dueDate?.toDate ? reminder.dueDate.toDate() : null;
+      const minutesBefore = Number(reminder?.notifyMinutesBefore || prefs.minutesBefore || 120);
+      let nextAt = reminder?.nextNotificationAt?.toDate ? reminder.nextNotificationAt.toDate() : null;
+
+      if (!nextAt && dueDate && !Number.isNaN(minutesBefore)) {
+        nextAt = new Date(dueDate.getTime() - minutesBefore * 60 * 1000);
+      }
+
+      if (!prefs.email && !prefs.sms) {
+        continue;
+      }
+      if (nextAt && nextAt > windowEnd) {
+        continue;
+      }
+      if (nextAt && nextAt < windowStart) {
+        // Safety valve to avoid hammering legacy items stuck in the past
+        console.log(`Skipping ${reminderId}: notification window elapsed`);
+        continue;
+      }
+
+      const message = formatReminderMessage(reminder);
+      const status = {
+        lastAttempt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      if (prefs.email && prefs.notificationEmail) {
+        try {
+          await sendPlainEmail(
+            prefs.notificationEmail,
+            `Reminder: ${reminder.title || 'Nautiq reminder'}`,
+            message
+          );
+          status.email = {
+            sent: true,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+            to: prefs.notificationEmail
+          };
+        } catch (error) {
+          console.error(`Email send failed for reminder ${reminderId}:`, error);
+          status.email = { sent: false, error: error.message || 'Email send failed' };
+        }
+      }
+
+      if (prefs.sms && prefs.notificationPhone) {
+        try {
+          const smsResult = await sendSmsNotification(prefs.notificationPhone, message.slice(0, 900));
+          status.sms = {
+            sent: !!smsResult.success && !smsResult.skipped,
+            skipped: smsResult.skipped || false,
+            reason: smsResult.reason || null,
+            to: prefs.notificationPhone,
+            sentAt: admin.firestore.FieldValue.serverTimestamp()
+          };
+        } catch (error) {
+          console.error(`SMS send failed for reminder ${reminderId}:`, error);
+          status.sms = { sent: false, error: error.message || 'SMS send failed' };
+        }
+      }
+
+      await docSnap.ref.set({
+        notificationStatus: status,
+        nextNotificationAt: null
+      }, { merge: true });
+      processed += 1;
+    }
+
+    console.log(`Reminder notification sweep sent/queued ${processed} reminders`);
+    return null;
+  } catch (error) {
+    console.error('Reminder notification sweep failed:', error);
+    throw error;
   }
 });
 
@@ -256,32 +896,31 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
       const boatBookings = groupBookingsSnapshot.docs.map(doc => doc.data());
       
       // Build multi-boat email data
-      const emailData = {
-        to: booking.clientDetails.email,
-        from: 'info@justenjoyibiza.com',
-        templateId: SENDGRID_MULTI_BOAT_TEMPLATE_ID,
-        dynamic_template_data: formatMultiBoatEmailData({
-          clientName: booking.clientDetails.name || 'Guest',
-          boats: boatBookings.map(boat => ({
-            date: boat.bookingDetails?.date,
-            startTime: boat.bookingDetails?.startTime,
-            endTime: boat.bookingDetails?.endTime,
-            boatName: boat.bookingDetails?.boatName,
-            passengers: boat.bookingDetails?.passengers,
-            pricing: {
-              agreedPrice: boat.pricing?.agreedPrice
-            }
-          }))
-        })
+      const emailPayload = {
+        clientName: booking.clientDetails.name || 'Guest',
+        clientEmail: booking.clientDetails.email,
+        multiBoat: true,
+        boats: boatBookings.map(boat => ({
+          date: boat.bookingDetails?.date,
+          startTime: boat.bookingDetails?.startTime,
+          endTime: boat.bookingDetails?.endTime,
+          boatName: boat.bookingDetails?.boatName,
+          passengers: boat.bookingDetails?.passengers,
+          pricing: {
+            agreedPrice: boat.pricing?.agreedPrice
+          }
+        }))
       };
-      
-      await sendEmailDirectApi(emailData);
+
+      const dynamicData = formatMultiBoatEmailData(emailPayload);
+      const result = await sendBookingConfirmationEmail(emailPayload.clientEmail, dynamicData);
       
       // Mark this group as processed
       await emailSentRef.doc(groupId).set({
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
         clientEmail: booking.clientDetails.email,
-        boatCount: boatBookings.length
+        boatCount: boatBookings.length,
+        provider: result.provider
       });
       
       // Update all boats in the group
@@ -294,22 +933,21 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
       }
     } else {
       // Handle regular single-boat booking
-      const emailData = {
-        to: booking.clientDetails.email,
-        from: 'info@justenjoyibiza.com',
-        templateId: SENDGRID_TEMPLATE_ID,
-        dynamic_template_data: {
-          clientName: booking.clientDetails?.name || 'Guest',
-          bookingDate: booking.bookingDetails?.date || 'N/A',
-          startTime: booking.bookingDetails?.startTime || 'N/A',
-          endTime: booking.bookingDetails?.endTime || 'N/A',
-          boatName: booking.bookingDetails?.boatName || 'N/A',
-          passengers: booking.bookingDetails?.passengers || 'N/A',
-          totalAmount: booking.pricing?.finalPrice || booking.pricing?.agreedPrice || 0,
-        },
+      const emailPayload = {
+        clientName: booking.clientDetails?.name || 'Guest',
+        clientEmail: booking.clientDetails?.email,
+        bookingDetails: {
+          boatName: booking.bookingDetails?.boatName,
+          date: booking.bookingDetails?.date,
+          startTime: booking.bookingDetails?.startTime,
+          endTime: booking.bookingDetails?.endTime,
+          passengers: booking.bookingDetails?.passengers,
+          price: booking.pricing?.finalPrice || booking.pricing?.agreedPrice || 0,
+        }
       };
 
-      await sendEmailDirectApi(emailData);
+      const dynamicData = formatMultiBoatEmailData(emailPayload);
+      await sendBookingConfirmationEmail(emailPayload.clientEmail, dynamicData);
       await event.data.ref.update({
         emailSent: true,
         emailSentTimestamp: admin.firestore.FieldValue.serverTimestamp(),
@@ -328,6 +966,7 @@ exports.testEmail = onCall({
   secrets: ["SENDGRID_API_KEY"]
 }, async (request) => {
   try {
+    await assertCallableAuthorization(request, ['admin']);
     const testEmail = request.data?.testEmail || "test@example.com";
     const testMultiBoat = request.data?.testMultiBoat || false;
     
@@ -335,7 +974,7 @@ exports.testEmail = onCall({
       // Test single boat email
       await sendEmailDirectApi({
         to: testEmail,
-        from: 'info@justenjoyibiza.com',
+        from: BRAND_FROM_EMAIL,
         templateId: SENDGRID_TEMPLATE_ID,
         dynamic_template_data: {
           clientName: "Test User",
@@ -352,7 +991,7 @@ exports.testEmail = onCall({
       // Test multi-boat email
       await sendEmailDirectApi({
         to: testEmail,
-        from: 'info@justenjoyibiza.com',
+        from: BRAND_FROM_EMAIL,
         templateId: SENDGRID_MULTI_BOAT_TEMPLATE_ID,
         dynamic_template_data: formatMultiBoatEmailData({
           clientName: "Test User",
@@ -492,7 +1131,7 @@ exports.trackAndRedirect = onRequest({
     }
     
     // Build redirect URL with the promo code and location name
-    let redirectUrl = `https://www.justenjoyibizaboats.com/yacht-rental.html?promo=${promoCode}`;
+    let redirectUrl = `https://www.nautiqibiza.com/yacht-rental.html?promo=${promoCode}`;
     redirectUrl += `&placeName=${encodeURIComponent(locationName)}`;
     
     if (category) {
@@ -507,7 +1146,7 @@ exports.trackAndRedirect = onRequest({
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Redirecting to Just Enjoy Ibiza Boats</title>
+        <title>Redirecting to Nautiq Ibiza</title>
         <meta http-equiv="refresh" content="2;url=${redirectUrl}">
         <script>
           // Store values in localStorage with an expiration date (7 days)
@@ -549,7 +1188,7 @@ exports.trackAndRedirect = onRequest({
     `);
   } catch (error) {
     console.error('REDIRECT - Unhandled error:', error);
-    res.redirect(302, 'https://www.justenjoyibizaboats.com/yacht-rental.html');
+    res.redirect(302, 'https://www.nautiqibiza.com/yacht-rental.html');
   }
 });
 
@@ -560,6 +1199,7 @@ exports.recordPlaceConversion = onCall({
   maxInstances: 10
 }, async (request) => {
   try {
+    await assertCallableAuthorization(request);
     const data = request.data;
     
     if (!data?.placeId) {
@@ -612,7 +1252,7 @@ exports.recordPlaceConversion = onCall({
     const cleanNumber = placeData.whatsappNumber ? placeData.whatsappNumber.replace(/\D/g, '') : '34123456789'; // Default if not set
     const text = placeData.whatsappMessage ? 
       encodeURIComponent(placeData.whatsappMessage) : 
-      encodeURIComponent(`Hello, I'm interested in renting a boat from Just Enjoy Ibiza Boats!`);
+      encodeURIComponent(`Hello, I'm interested in chartering with Nautiq Ibiza!`);
     
     const waUrl = `https://wa.me/${cleanNumber}?text=${text}`;
     
@@ -719,8 +1359,6 @@ exports.notifyNewOrder = onDocumentCreated({
     
     // Check if SendGrid API key exists
     const apiKey = process.env.SENDGRID_API_KEY;
-    console.log('🔑 SendGrid API key exists:', !!apiKey);
-    console.log('🔑 API key starts with:', apiKey ? apiKey.substring(0, 10) + '...' : 'NOT FOUND');
     
     // Check admin email
     console.log('📧 Admin email:', ADMIN_EMAIL);
@@ -744,7 +1382,7 @@ exports.notifyNewOrder = onDocumentCreated({
     // Send email using SendGrid template
     const emailData = {
       to: ADMIN_EMAIL,
-      from: 'info@justenjoyibiza.com',
+      from: BRAND_FROM_EMAIL,
       templateId: SENDGRID_ORDER_NOTIFICATION_TEMPLATE_ID,
       dynamic_template_data: templateData
     };
@@ -776,6 +1414,7 @@ exports.testOrderNotification = onCall({
   maxInstances: 10
 }, async (request) => {
   try {
+    await assertCallableAuthorization(request, ['admin']);
     console.log('Test function called');
     
     // Test order based on your actual database structure
@@ -785,7 +1424,7 @@ exports.testOrderNotification = onCall({
       boatName: 'Luna',
       customerEmail: 'customer@test.com',
       phoneNumber: '695688348',
-      rentalCompany: 'Just Enjoy Ibiza',
+      rentalCompany: 'Nautiq Ibiza',
       orderDate: '2025-05-27',
       marina: 'Marina Ibiza',
       boatLocation: 'Marina Ibiza',
@@ -826,7 +1465,7 @@ exports.testOrderNotification = onCall({
     
     const emailData = {
       to: ADMIN_EMAIL,
-      from: 'info@justenjoyibiza.com',
+      from: BRAND_FROM_EMAIL,
       templateId: SENDGRID_ORDER_NOTIFICATION_TEMPLATE_ID,
       dynamic_template_data: templateData
     };

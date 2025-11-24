@@ -2,31 +2,165 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow access only for authenticated users
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
     }
 
-    // Example: Restrict access to a specific collection (e.g., "users")
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function approvedUserDocPath() {
+      return /databases/$(database)/documents/approvedUsers/$(request.auth.token.email);
+    }
+
+    function userRole() {
+      return isSignedIn() && exists(userDocPath())
+        ? get(userDocPath()).data.role
+        : null;
+    }
+
+    function approvedRole() {
+      return isSignedIn() &&
+        request.auth.token.email != null &&
+        exists(approvedUserDocPath())
+        ? get(approvedUserDocPath()).data.role
+        : null;
+    }
+
+    function isAdmin() {
+      return userRole() == 'admin';
+    }
+
+    function isStaff() {
+      return userRole() == 'staff';
+    }
+
+    function isTeamMember() {
+      return isAdmin() || isStaff();
+    }
+
     match /users/{userId} {
-      // Only the user who owns this document can read or write
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+
+      allow create: if isSignedIn() &&
+        request.auth.uid == userId &&
+        approvedRole() != null &&
+        request.resource.data.role == approvedRole();
+
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId &&
+          approvedRole() != null &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.role == approvedRole()) ||
+        isAdmin()
+      );
+
+      allow delete: if isAdmin();
     }
 
-    // Example: Public collection where everyone can read but only authenticated users can write
-    match /public/{docId} {
-      allow read: if true;
-      allow write: if request.auth != null;
+    match /approvedUsers/{email} {
+      allow read, write: if isAdmin();
     }
 
-    // Example: Allow admins to read/write to an "admin" collection
-    match /admin/{docId} {
-      allow read, write: if request.auth.token.admin == true;
+    match /chatConversations/{conversationId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /clients/{clientId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /collaborators/{collaboratorId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /boatCatalogs/{catalogId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /catalogScanEvents/{eventId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /placeConversionEvents/{eventId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /bookings/{bookingId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /boats/{boatId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /products/{productId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /pricingItems/{itemId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /orders/{orderId} {
+      allow read, write: if isTeamMember();
+
+      match /expenses/{expenseId} {
+        allow read, write: if isTeamMember();
+      }
+    }
+
+    match /payments/{paymentId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /reminders/{reminderId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /mail/{mailId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /expenses/{expenseId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /hotels/{hotelId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /inquiries/{inquiryId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /leadNotes/{noteId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /leadQualifications/{qualificationId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /scanLocations/{locationId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /locationScanEvents/{eventId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /chatMessages/{messageId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
-
-
-
-
-

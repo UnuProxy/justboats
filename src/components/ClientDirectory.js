@@ -10,6 +10,7 @@ import {
   addDoc,
   where,
 } from 'firebase/firestore';
+import { useSearchParams } from 'react-router-dom';
 import { db } from '../firebase/firebaseConfig';
 import {
   Phone,
@@ -36,6 +37,7 @@ import {
   Bug
 } from 'lucide-react';
 import _ from 'lodash';
+import { sendClientWelcomeEmail } from '../services/emailService';
 
 // ===================== CONFIG =====================
 // Use the legacy client.bookings[] field for linking? (dangerous if it contains stale/wrong IDs)
@@ -287,6 +289,13 @@ const AddClientModal = ({ onClose, onAdd }) => {
         createdAt: new Date().toISOString(),
         lastUpdated: new Date().toISOString(),
       });
+      if (email) {
+        sendClientWelcomeEmail({
+          name: formData.name,
+          email,
+          source: formData.clientType === 'Direct' ? formData.source : formData.clientType
+        }).catch((err) => console.error('Client welcome email failed (non-blocking):', err));
+      }
 
       onAdd();
       onClose();
@@ -375,6 +384,19 @@ const ClientDirectory = () => {
   const [clientsPerPage, setClientsPerPage] = useState(50); // now adjustable
   const [currentPage, setCurrentPage] = useState(1);
   const [debugLinks, setDebugLinks] = useState(false);
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const searchValue = searchParams.get('search') || '';
+    const clientId = searchParams.get('clientId');
+    if (searchValue && searchValue !== searchTerm) {
+      setSearchTerm(searchValue);
+    }
+    if (!searchValue && searchTerm) {
+      setSearchTerm('');
+    }
+    setExpandedClient(clientId);
+  }, [searchParams, searchTerm]);
 
   useEffect(() => { fetchClientsAndBookings(); }, []);
 
@@ -700,77 +722,135 @@ const ClientDirectory = () => {
     </div>
   );
 
-  const renderClientCard = (client) => (
-    <div key={client.id} className={`bg-white p-4 rounded-lg shadow hover:shadow-md transition-shadow relative ${selectedClients.includes(client.id) ? 'ring-2 ring-blue-500' : ''}`}>
-      {isSelectionMode && (
-        <div className="absolute top-3 right-3 cursor-pointer" onClick={(e) => { e.stopPropagation(); toggleSelectClient(client.id); }}>
-          {selectedClients.includes(client.id) ? <CheckSquare size={20} className="text-blue-500" /> : <Square size={20} className="text-gray-400" />}
-        </div>
-      )}
+  const renderClientCard = (client) => {
+    const isSelected = selectedClients.includes(client.id);
+    const isExpanded = expandedClient === client.id;
+    const totalBookings = client.totalBookings || 0;
+    const lifetimeValue = client.totalSpent || 0;
 
-      <div onClick={() => setExpandedClient(expandedClient === client.id ? null : client.id)}>
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
-          <div className="flex-grow">
-            <h3 className="font-semibold text-lg break-words pr-8">{client.name}</h3>
-            <div className="text-sm text-gray-500 mt-1">
-              <span className={`inline-block px-2 py-1 rounded-full text-xs my-1 ${client.clientType === 'Direct' ? 'bg-green-100 text-green-800' : client.clientType === 'Hotel' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
-                {client.clientType}
-                {client.clientType === 'Direct' && client.source && ` - ${client.source}`}
-                {client.clientType === 'Hotel' && client.hotelName && ` - ${client.hotelName}`}
-                {client.clientType === 'Collaborator' && client.collaboratorName && ` - ${client.collaboratorName}`}
-              </span>
-            </div>
-            {debugLinks && <LinkBadges hints={client._linkHints} />}
+    return (
+      <div
+        key={client.id}
+        className={`relative rounded-xl border ${isExpanded ? 'border-sky-200 shadow-md' : 'border-slate-200 shadow'} bg-white p-5 transition-shadow hover:shadow-md ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
+      >
+        {isSelectionMode && (
+          <div
+            className="absolute top-3 right-3 cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleSelectClient(client.id);
+            }}
+          >
+            {isSelected ? <CheckSquare size={20} className="text-blue-500" /> : <Square size={20} className="text-gray-400" />}
           </div>
+        )}
 
-          <div className="flex sm:flex-col items-start sm:items-end gap-4 sm:gap-2">
-            <div className="flex space-x-2">
-              <button onClick={(e) => { e.stopPropagation(); setEditingClient(client); }} className="p-2 text-gray-500 hover:text-blue-500 bg-gray-50 rounded-full hover:bg-gray-100" title="Edit client">
+        <div onClick={() => setExpandedClient(isExpanded ? null : client.id)}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex-1">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <h3 className="text-lg font-semibold text-gray-900 break-words pr-8">{client.name || 'Unnamed client'}</h3>
+                <span
+                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                    client.clientType === 'Direct'
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : client.clientType === 'Hotel'
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'bg-purple-50 text-purple-700'
+                  }`}
+                >
+                  {client.clientType}
+                  {client.clientType === 'Direct' && client.source && ` · ${client.source}`}
+                  {client.clientType === 'Hotel' && client.hotelName && ` · ${client.hotelName}`}
+                  {client.clientType === 'Collaborator' && client.collaboratorName && ` · ${client.collaboratorName}`}
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-slate-600">
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
+                  <Book size={13} />
+                  {totalBookings} booking{totalBookings === 1 ? '' : 's'}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
+                  €{lifetimeValue.toLocaleString()}
+                </span>
+                {client.lastUpdated && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
+                    <Calendar size={13} />
+                    Updated {formatDate(client.lastUpdated)}
+                  </span>
+                )}
+              </div>
+              {debugLinks && <LinkBadges hints={client._linkHints} />}
+            </div>
+
+            <div className="flex items-start gap-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingClient(client);
+                }}
+                className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                title="Edit client"
+              >
                 <Edit2 size={16} />
               </button>
-              <button onClick={(e) => { e.stopPropagation(); setDeletingClient(client); }} className="p-2 text-gray-500 hover:text-red-500 bg-gray-50 rounded-full hover:bg-gray-100" title="Delete client">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeletingClient(client);
+                }}
+                className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                title="Delete client"
+              >
                 <Trash2 size={16} />
               </button>
             </div>
-            <div className="text-sm text-gray-600">
-              <div className="flex items-center">
-                <Book size={16} className="mr-2" />
-                <span className="whitespace-nowrap">Bookings: {client.totalBookings || 0}</span>
-              </div>
-              <div className="flex items-center mt-1">
-                <span className="whitespace-nowrap">Total: €{client.totalSpent || 0}</span>
-              </div>
-            </div>
           </div>
-        </div>
 
-        <div className="mt-4 space-y-2 text-sm">
-          <div className="flex items-center break-words">
-            <Mail size={16} className="mr-2 flex-shrink-0" />
-            <span className="break-all">{client.email || '--'}</span>
-          </div>
-          <div className="flex items-center">
-            <Phone size={16} className="mr-2 flex-shrink-0" />
-            <span>{client.phone || '--'}</span>
-          </div>
-          {client.dob && (
-            <div className="flex items-center">
-              <Calendar size={16} className="mr-2 flex-shrink-0" />
-              <span>DOB: {formatDate(client.dob)}</span>
+          <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+            <div className="flex items-start gap-2 break-words">
+              <Mail size={16} className="mt-0.5 text-slate-400" />
+              <span className="break-all">{client.email || 'No email stored'}</span>
             </div>
-          )}
-          {client.notes && (
-            <div className="mt-2">
-              <p className="font-medium">Notes:</p>
-              <p className="text-gray-600 mt-1 break-words">{client.notes}</p>
+            <div className="flex items-start gap-2">
+              <Phone size={16} className="mt-0.5 text-slate-400" />
+              <span>{client.phone || 'No phone stored'}</span>
             </div>
-          )}
-        </div>
+            <div className="flex items-start gap-2">
+              <Calendar size={16} className="mt-0.5 text-slate-400" />
+              <span>{client.dob ? `Date of birth: ${formatDate(client.dob)}` : 'Add date of birth'}</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <User size={16} className="mt-0.5 text-slate-400" />
+              <span>{client.clientType === 'Collaborator' && client.collaboratorName ? client.collaboratorName : client.source || 'Source not recorded'}</span>
+            </div>
+          </div>
 
-        {expandedClient === client.id && renderBookingHistory(client)}
+          <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm text-slate-700">
+            <div className="flex items-center justify-between">
+              <p className="font-medium text-slate-800">Notes</p>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingClient(client);
+                }}
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+              >
+                {client.notes ? 'Edit' : 'Add'}
+              </button>
+            </div>
+            <p className="mt-1 whitespace-pre-wrap">
+              {client.notes
+                ? client.notes
+                : 'No notes yet. Capture preferences, key celebrations, or booking moments to personalise follow-ups.'}
+            </p>
+          </div>
+
+          {isExpanded && renderBookingHistory(client)}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderClientRow = (client) => (
     <tr key={client.id} className={`border-b hover:bg-gray-50 ${selectedClients.includes(client.id) ? 'bg-blue-50' : ''}`}>
@@ -1156,4 +1236,3 @@ async function main(){
 main();
 =========================================================
 */
-

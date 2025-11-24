@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { collection, query, where, addDoc, getDocs } from "firebase/firestore";
 import { db } from '../firebase/firebaseConfig';
-import { Users, Ship, Euro, MapPin} from "lucide-react";
+import { Users, Ship, Euro, MapPin, Clock } from "lucide-react";
 import { getAuth } from 'firebase/auth';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import ClientPaymentForm from './ClientPaymentForm';
@@ -10,6 +10,8 @@ import { increment } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../firebase/firebaseConfig';
 import MultiBoatBooking from './MultiBoatBooking';
+import { useNavigate } from "react-router-dom";
+import { sendClientWelcomeEmail } from '../services/emailService';
 
 // Updated email function that supports both single and multi-boat bookings
 const sendBookingConfirmationEmail = async (bookingData, isMultiBoat = false, allBoats = []) => {
@@ -79,11 +81,20 @@ const sendBookingConfirmationEmail = async (bookingData, isMultiBoat = false, al
       // Try HTTP fallback if callable fails
       try {
         console.log('Falling back to HTTP function for email');
+        const authInstance = getAuth();
+        const currentUser = authInstance.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : null;
+
+        if (!idToken) {
+          throw new Error('No authenticated user token available for secure fallback request.');
+        }
+
         const response = await fetch('https://sendbookingconfirmationhttp-xwscel2gqa-uc.a.run.app', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Origin': window.location.origin
+            'Origin': window.location.origin,
+            'Authorization': `Bearer ${idToken}`
           },
           body: JSON.stringify(emailPayload)
         });
@@ -118,7 +129,70 @@ const sendBookingConfirmationEmail = async (bookingData, isMultiBoat = false, al
   }
 };
 
+const SnapshotTile = ({ icon: Icon, label, value, accent = "text-slate-600" }) => (
+  <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+    <div className="rounded-full bg-slate-100 p-2 text-slate-500">
+      <Icon size={16} />
+    </div>
+    <div>
+      <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">{label}</p>
+      <p className={`text-sm font-semibold ${accent}`}>{value || "—"}</p>
+    </div>
+  </div>
+);
+
+const SuccessInvoiceBanner = ({ invoices = [], onGenerate, onDismiss }) => {
+  if (!invoices.length) return null;
+  return (
+    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 shadow-sm mb-6">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-emerald-900">
+            Booking saved • {invoices.length} invoice{invoices.length > 1 ? "s" : ""} ready
+          </p>
+          <p className="text-xs text-emerald-700">
+            Tap “Open invoice” to jump straight into the generator and download the PDF for your client.
+          </p>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="self-start rounded-full border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-white md:self-auto"
+        >
+          Hide banner
+        </button>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {invoices.map((inv, index) => (
+          <div
+            key={`${inv.bookingId}-${index}`}
+            className="flex flex-col gap-2 rounded-xl border border-emerald-100 bg-white/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div>
+              <p className="text-sm font-semibold text-emerald-900">
+                Invoice {index + 1} • {inv.items?.[0]?.description || "Booking"}
+              </p>
+              <p className="text-xs text-emerald-600">
+                Amount: €{Number(inv.items?.[0]?.unitPrice || 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => onGenerate(inv)}
+                className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+              >
+                Open invoice
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 function AddBooking() {
+  const navigate = useNavigate();
   const [activeStep, setActiveStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -166,12 +240,17 @@ function AddBooking() {
       required: false,
       pickup: {
         location: '',
-        locationDetail: ''
+        locationDetail: '',
+        time: ''
       },
       dropoff: {
         location: '',
         locationDetail: ''
       }
+    },
+    tripHandling: {
+      type: 'internal',
+      company: ''
     },
     notes: "",
   });
@@ -184,6 +263,84 @@ function AddBooking() {
   const [existingClients, setExistingClients] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [restaurantName, setRestaurantName] = useState('');
+  const [preparedInvoices, setPreparedInvoices] = useState([]);
+  const [showInvoiceBanner, setShowInvoiceBanner] = useState(false);
+
+  const buildInvoicePrefill = useCallback((bookingId, bookingData) => {
+    if (!bookingData) return null;
+    const fallbackDate = new Date().toISOString().split("T")[0];
+    const invoiceNumber = `INV-${new Date().getFullYear()}-${bookingId.slice(-5).toUpperCase()}`;
+    const boatName = bookingData.bookingDetails?.boatName || "Charter";
+    const charterDate = bookingData.bookingDetails?.date || fallbackDate;
+
+    return {
+      bookingId,
+      invoice: {
+        invoiceNumber,
+        invoiceDate: charterDate,
+        notes: bookingData.notes || "Courtesy drinks, towels and skipper included.",
+        terms:
+          "Payment terms: Net 30 days from invoice date. Please include the invoice number as the payment reference.",
+      },
+      client: {
+        name: bookingData.clientDetails?.name || "",
+        companyName: bookingData.clientDetails?.companyName || "",
+        email: bookingData.clientDetails?.email || "",
+        phone: bookingData.clientDetails?.phone || "",
+        address: bookingData.clientDetails?.address || "",
+        country: bookingData.clientDetails?.country || "",
+        city: bookingData.clientDetails?.city || "",
+        postalCode: bookingData.clientDetails?.postalCode || "",
+        taxId: bookingData.clientDetails?.taxId || "",
+      },
+      items: [
+        {
+          id: bookingId,
+          description: `${boatName} · ${charterDate}`,
+          unitPrice: Number(bookingData.pricing?.agreedPrice) || 0,
+          discount: 0,
+        },
+      ],
+    };
+  }, []);
+
+  const bookingSnapshot = useMemo(() => {
+    if (multiBoatMode && boats.length) {
+      const totalValue = boats.reduce(
+        (sum, boat) => sum + (parseFloat(boat.pricing?.agreedPrice) || 0),
+        0
+      );
+      return {
+        title: `${boats.length} boats scheduled`,
+        client: formData.clientDetails.name || "Client TBD",
+        schedule: `${boats[0]?.date || "Date TBC"} • ${boats[0]?.startTime || "--"}`,
+        boat: "Multi-boat charter",
+        passengers: boats.reduce((sum, boat) => sum + (parseInt(boat.passengers, 10) || 0), 0),
+        price: `€${totalValue.toFixed(2)}`,
+      };
+    }
+
+    return {
+      title: formData.bookingDetails.boatName || "Boat not selected",
+      client: formData.clientDetails.name || "Client TBD",
+      schedule: `${formData.bookingDetails.date || "Date TBC"} • ${
+        formData.bookingDetails.startTime || "--"
+      }`,
+      boat: formData.bookingDetails.boatName || "Boat not assigned",
+      passengers: formData.bookingDetails.passengers || "—",
+      price: formData.pricing.agreedPrice
+        ? `€${Number(formData.pricing.agreedPrice).toFixed(2)}`
+        : "—",
+    };
+  }, [boats, formData, multiBoatMode]);
+
+  const handleInvoiceNavigation = useCallback(
+    (invoicePrefill) => {
+      if (!invoicePrefill) return;
+      navigate("/invoice-generator", { state: { prefillInvoice: invoicePrefill } });
+    },
+    [navigate]
+  );
 
   // Load partners based on type
   useEffect(() => {
@@ -332,6 +489,16 @@ function AddBooking() {
               ...processedValue,
             },
           },
+        };
+      }
+
+      if (section === 'tripHandling') {
+        return {
+          ...prev,
+          tripHandling: {
+            ...prev.tripHandling,
+            [field]: processedValue
+          }
         };
       }
   
@@ -862,6 +1029,18 @@ function AddBooking() {
                     }
                   />
                 )}
+                <input
+                  type="time"
+                  className="w-full p-2 border rounded"
+                  value={formData.transfer.pickup.time || ''}
+                  onChange={(e) =>
+                    handleInputChange("transfer", "pickup", {
+                      ...formData.transfer.pickup,
+                      time: e.target.value,
+                    })
+                  }
+                  placeholder="Pickup time"
+                />
               </div>
             </div>
   
@@ -937,7 +1116,33 @@ function AddBooking() {
             </div>
           </div>
         )}
-  
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <h4 className="font-medium mb-2">Trip handling</h4>
+            <select
+              className="w-full p-2 border rounded"
+              value={formData.tripHandling.type}
+              onChange={(e) => handleInputChange("tripHandling", "type", e.target.value)}
+            >
+              <option value="internal">Nautiq Ibiza (internal)</option>
+              <option value="external">External company</option>
+            </select>
+          </div>
+          {formData.tripHandling.type === 'external' && (
+            <div>
+              <h4 className="font-medium mb-2">External company</h4>
+              <input
+                type="text"
+                className="w-full p-2 border rounded"
+                placeholder="Company handling this trip"
+                value={formData.tripHandling.company}
+                onChange={(e) => handleInputChange("tripHandling", "company", e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+
         <div className="mt-6">
           <label className="block text-sm font-medium text-gray-700">
             Additional Notes
@@ -1064,6 +1269,10 @@ function AddBooking() {
             alert("Please select a pickup location type");
             return false;
           }
+          if (!formData.transfer.pickup.time) {
+            alert("Please provide a pickup time");
+            return false;
+          }
           if (
             (formData.transfer.pickup.location === "Hotel" || formData.transfer.pickup.location === "Other") &&
             !formData.transfer.pickup.locationDetail
@@ -1086,6 +1295,12 @@ function AddBooking() {
             alert("Please provide drop-off location details");
             return false;
           }
+        }
+
+        // Trip handling validation
+        if (formData.tripHandling.type === 'external' && !formData.tripHandling.company) {
+          alert("Please enter the external company handling this trip");
+          return false;
         }
         break;
 
@@ -1113,6 +1328,7 @@ function AddBooking() {
 
     try {
         setLoading(true);
+        const invoicePrefills = [];
 
         // Process client information (same for both modes)
         let clientId = null;
@@ -1184,6 +1400,14 @@ function AddBooking() {
                 };
 
                 const clientDoc = await addDoc(clientsRef, clientData);
+                // Fire a welcome/confirmation email but do not block booking creation
+                if (formData.clientDetails.email) {
+                  sendClientWelcomeEmail({
+                    name: formData.clientDetails.name,
+                    email: formData.clientDetails.email,
+                    source: formData.clientType === "Direct" ? formData.clientSource : formData.clientType
+                  }).catch((err) => console.error('Client welcome email failed (non-blocking):', err));
+                }
                 await createClientUpdateNotification(
                     formData.clientDetails.name,
                     'created'
@@ -1278,6 +1502,7 @@ if (multiBoatMode) {
         ]
       },
       transfer: formData.transfer || {},
+      tripHandling: formData.tripHandling || { type: 'internal', company: '' },
       notes: formData.notes || "",
       createdAt: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
@@ -1296,6 +1521,11 @@ if (multiBoatMode) {
     await updateDoc(doc(db, "bookings", bookingRef.id), {
       id: bookingRef.id
     });
+
+    const invoicePrefill = buildInvoicePrefill(bookingRef.id, bookingData);
+    if (invoicePrefill) {
+      invoicePrefills.push(invoicePrefill);
+    }
     
     // Add booking notification
     await createBookingNotification(
@@ -1445,6 +1675,7 @@ if (multiBoatMode) {
                   ]
                 },
                 transfer: formData.transfer || {},
+                tripHandling: formData.tripHandling || { type: 'internal', company: '' },
                 notes: formData.notes || "",
                 createdAt: new Date().toISOString(),
                 lastUpdated: new Date().toISOString(),
@@ -1494,6 +1725,11 @@ if (multiBoatMode) {
                 id: bookingRef.id
             });
 
+            const singleInvoice = buildInvoicePrefill(bookingRef.id, bookingData);
+            if (singleInvoice) {
+                invoicePrefills.push(singleInvoice);
+            }
+
             const payments = bookingData.pricing.payments.filter(payment => payment.amount > 0);
             if (payments.length > 0) {
                 const paymentRecords = payments.map(payment => ({
@@ -1517,6 +1753,14 @@ if (multiBoatMode) {
             }
 
             alert("Booking saved successfully");
+        }
+
+        if (invoicePrefills.length) {
+            setPreparedInvoices(invoicePrefills);
+            setShowInvoiceBanner(true);
+        } else {
+            setPreparedInvoices([]);
+            setShowInvoiceBanner(false);
         }
 
         // Reset form and state
@@ -1563,8 +1807,12 @@ if (multiBoatMode) {
             },
             transfer: {
                 required: false,
-                pickup: { location: "", locationDetail: "" },
+                pickup: { location: "", locationDetail: "", time: "" },
                 dropoff: { location: "", locationDetail: "" },
+            },
+            tripHandling: {
+                type: 'internal',
+                company: ''
             },
             notes: "",
         });
@@ -1623,7 +1871,30 @@ if (multiBoatMode) {
         </div>
 
         {/* Form Content */}
-        <div className="p-4 sm:p-6">
+        <div className="p-4 sm:p-6 space-y-6">
+          {showInvoiceBanner && (
+            <SuccessInvoiceBanner
+              invoices={preparedInvoices}
+              onGenerate={handleInvoiceNavigation}
+              onDismiss={() => {
+                setShowInvoiceBanner(false);
+                setPreparedInvoices([]);
+              }}
+            />
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SnapshotTile icon={Users} label="Client" value={bookingSnapshot.client} />
+            <SnapshotTile icon={Clock} label="Schedule" value={bookingSnapshot.schedule} />
+            <SnapshotTile icon={Ship} label="Boat" value={bookingSnapshot.boat} />
+            <SnapshotTile
+              icon={Euro}
+              label="Contract value"
+              value={bookingSnapshot.price}
+              accent="text-emerald-600"
+            />
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Add bottom margin for mobile fixed buttons */}
             <div className="mb-24 sm:mb-0">

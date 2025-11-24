@@ -1,6 +1,23 @@
 // pages/api/calendar.js - For Next.js Pages Router
 import fetch from 'node-fetch';
 
+const ALLOWED_CALENDAR_HOSTS = new Set(['calendar.google.com']);
+
+function assertAllowedHost(calendarUrl) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(calendarUrl);
+  } catch (error) {
+    throw new Error('Invalid calendar URL');
+  }
+
+  if (!ALLOWED_CALENDAR_HOSTS.has(parsedUrl.hostname)) {
+    throw new Error('Calendar host is not allowed');
+  }
+
+  return parsedUrl.toString();
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -38,6 +55,8 @@ export default async function handler(req, res) {
       calendarUrl = `${calendarUrl}${separator}nocache=${Date.now()}`;
     }
     
+    calendarUrl = assertAllowedHost(calendarUrl);
+
     console.log(`Fetching calendar from: ${calendarUrl}`);
     
     // Use node-fetch with appropriate headers

@@ -19,7 +19,6 @@ import {
     Clock,
     CheckCircle,
     Info,
-    Euro,
     Layers,
     ArrowUp,
     ArrowDown,
@@ -619,6 +618,9 @@ const PaymentTracking = () => {
                     data.transfer?.required === true) &&
                     passengerCount > 4;
 
+                const tripHandlingType = data.tripHandling?.type || 'internal';
+                const tripHandlingCompany = data.tripHandling?.company || '';
+
                 const transferDetails = {
                     pickup: data.transfer?.pickup || {},
                     dropoff: data.transfer?.dropoff || {},
@@ -664,6 +666,8 @@ const PaymentTracking = () => {
                     priority,
                     hasTransfer,
                     transferDetails,
+                    tripHandlingType,
+                    tripHandlingCompany,
                     totalAmount: data.pricing?.agreedPrice || 0,
                     isSanAntonioTour,
                     firstPayment: {
@@ -1381,12 +1385,7 @@ const PaymentTracking = () => {
                     icon={AlertTriangle} 
                     color="border-red-600" 
                 />
-                <PaymentSummaryCard 
-                    title="Total Revenue" 
-                    value={formatCurrency(summaryData.totalRevenue)} 
-                    icon={Euro} 
-                    color="border-purple-600" 
-                />
+                {/* Revenue intentionally hidden to keep payments overview focused */}
             </div>
 
             {/* Tab Navigation */}
@@ -1563,7 +1562,6 @@ const PaymentTracking = () => {
                         />
                         <span className="text-sm text-blue-800">Include San Antonio Tours</span>
                     </label>
-                    
                     <div className="text-sm text-gray-600">
                         Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, filteredBookings.length)} of {filteredBookings.length} entries
                     </div>
@@ -1618,6 +1616,13 @@ const PaymentTracking = () => {
                             } else if (booking.isSanAntonioTour) {
                                 rowBgClass = 'bg-blue-50';
                             }
+
+                            const statusBadge = percentComplete === 100
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : percentComplete > 0
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-rose-100 text-rose-800';
+                            const statusLabel = percentComplete === 100 ? 'Fully paid' : percentComplete > 0 ? 'Partial' : 'Pending';
                             
                             // Check if payment due date is past
                             const isDueDatePast = booking.paymentDueDate ? 
@@ -1629,6 +1634,16 @@ const PaymentTracking = () => {
                                         <td className="px-4 py-2">
                                             <div className="flex flex-col">
                                                 <span>{booking.boatName}</span>
+                                                <div className="mt-1 flex flex-wrap gap-2">
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                                                        {booking.tripHandlingType === 'external' ? 'External' : 'Internal'}
+                                                    </span>
+                                                    {booking.tripHandlingType === 'external' && booking.tripHandlingCompany && (
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                                                            {booking.tripHandlingCompany}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 {percentComplete < 100 && (
                                                     <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
                                                         <div 
@@ -1709,24 +1724,20 @@ const PaymentTracking = () => {
                                             )}
                                         </td>
                                         <td className="px-4 py-2">
-                                            <div className="flex flex-col">
-                                                <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                                                    percentComplete === 100 
-                                                    ? 'bg-green-100 text-green-800' 
-                                                    : percentComplete > 0
-                                                    ? 'bg-yellow-100 text-yellow-800'
-                                                    : 'bg-red-100 text-red-800'
-                                                }`}>
-                                                    {percentComplete === 100 
-                                                        ? 'Complete' 
-                                                        : percentComplete > 0
-                                                        ? 'Partial'
-                                                        : 'Pending'
-                                                    }
+                                            <div className="flex flex-col gap-1">
+                                                <span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${statusBadge}`}>
+                                                    {statusLabel}
                                                 </span>
-                                                <span className="text-xs mt-1">
-                                                    {completedPayments}/{totalPayments} payments
-                                                </span>
+                                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                                    <div 
+                                                        className="h-2 rounded-full bg-emerald-500 transition-all"
+                                                        style={{ width: `${percentComplete}%` }}
+                                                    />
+                                                </div>
+                                                <div className="text-xs text-gray-600 flex justify-between">
+                                                    <span>{completedPayments}/{totalPayments} payments</span>
+                                                    <span>{percentComplete}%</span>
+                                                </div>
                                             </div>
                                         </td>
                                         <td className="px-4 py-2 text-right">
@@ -1903,4 +1914,3 @@ const PaymentTracking = () => {
 };
 
 export default PaymentTracking;
-

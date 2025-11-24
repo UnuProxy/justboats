@@ -59,7 +59,7 @@ const AutomatedBookings = () => {
                         { className: 'whitespace-pre-wrap font-sans text-sm' },
                         `Dear {customerName},
 
-Thank you for booking with Just Enjoy Ibiza Boats!
+Thank you for booking with Nautiq Ibiza!
 
 Booking Details:
 - Date: {bookingDate}
@@ -82,7 +82,7 @@ Cancellation Policy:
 Need to modify your booking? Contact us at {contactEmail}
 
 See you soon!
-Just Boats Ibiza Team`
+Nautiq Ibiza Crew`
                     )
                 )
             )

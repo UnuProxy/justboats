@@ -35,8 +35,8 @@ const SplashScreen = ({ onFinish }) => {
     >
       <div className="text-center">
         <img
-          src="/WhiteLogo-Just-Enjoy.png"
-          alt="Just Enjoy Ibiza"
+          src="/Nautiq.Logo03.png"
+          alt="Nautiq Ibiza"
           className="w-48 h-auto animate-pulse mx-auto"
         />
         <div className="flex space-x-2 justify-center mt-6">

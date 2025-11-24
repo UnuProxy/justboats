@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import PropTypes from "prop-types";
 import { formatDateTime } from "../utils/date.js";
 import {
@@ -8,6 +8,7 @@ import {
   onSnapshot,
   doc,
   updateDoc,
+  deleteDoc,
   getDoc,
   serverTimestamp,
 } from "firebase/firestore";
@@ -15,6 +16,18 @@ import { format } from "date-fns";
 import { db } from "../firebase/firebaseConfig";
 import PaymentDetails from "./PaymentDetails.js";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import {
+  Phone,
+  MessageSquare,
+  MessageCircle,
+  Mail,
+  Anchor,
+  Users as UsersIcon,
+  Briefcase,
+  Clock,
+  FileText
+} from "lucide-react";
 
 /**
  * BookingDetails.jsx — enhanced UI
@@ -103,6 +116,118 @@ const PaymentProgress = ({ totalPaid = 0, agreedPrice = 0 }) => {
     </div>
   );
 };
+
+const SummaryChip = ({ icon: Icon, label, value }) => (
+  <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+      <Icon size={14} className="text-slate-400" />
+      {label}
+    </div>
+    <p className="mt-1 text-base font-semibold text-slate-900">{value || "—"}</p>
+  </div>
+);
+
+const QuickActionButton = ({ icon: Icon, label, href, disabled, target }) => {
+  const baseClasses =
+    "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-1";
+  const enabledClasses =
+    "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-900 focus:ring-slate-200";
+  const disabledClasses = "border-slate-100 bg-slate-50 text-slate-400 cursor-not-allowed";
+
+  const inner = (
+    <>
+      <Icon size={15} />
+      {label}
+    </>
+  );
+
+  if (disabled) {
+    return <span className={`${baseClasses} ${disabledClasses}`}>{inner}</span>;
+  }
+
+  return (
+    <a
+      href={href}
+      target={target}
+      rel={target === "_blank" ? "noreferrer" : undefined}
+      className={`${baseClasses} ${enabledClasses}`}
+    >
+      {inner}
+    </a>
+  );
+};
+
+const QuickActionsBar = ({ booking, showContact = true }) => {
+  if (!showContact) return null;
+
+  const phone = booking?.clientPhone
+    ? String(booking.clientPhone).replace(/\s+/g, "")
+    : "";
+  const whatsappLink = phone ? `https://wa.me/${phone.replace(/\D/g, "")}` : "#";
+
+  const actions = [
+    {
+      label: "Call client",
+      icon: Phone,
+      href: phone ? `tel:${phone}` : "#",
+      disabled: !phone
+    },
+    {
+      label: "Send SMS",
+      icon: MessageSquare,
+      href: phone ? `sms:${phone}` : "#",
+      disabled: !phone
+    },
+    {
+      label: "WhatsApp",
+      icon: MessageCircle,
+      href: whatsappLink,
+      disabled: !phone,
+      target: "_blank"
+    },
+    {
+      label: "Email",
+      icon: Mail,
+      href: booking?.clientEmail ? `mailto:${booking.clientEmail}` : "#",
+      disabled: !booking?.clientEmail
+    }
+  ];
+
+  return (
+    <div className="mt-4 flex flex-wrap gap-2">
+      {actions.map((action) => (
+        <QuickActionButton key={action.label} {...action} />
+      ))}
+    </div>
+  );
+};
+
+const KeyStatCard = ({ label, value, helper }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
+      {label}
+    </p>
+    <p className="mt-1 text-xl font-semibold text-slate-900">{value || "—"}</p>
+    {helper && <p className="text-xs text-slate-500">{helper}</p>}
+  </div>
+);
+
+const InfoCard = ({ title, subtitle, actions, children }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <div>
+        {subtitle && (
+          <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+            {subtitle}
+          </p>
+        )}
+        <h4 className="text-lg font-semibold text-slate-900">{title}</h4>
+      </div>
+      {actions}
+    </div>
+    {children}
+  </div>
+);
 
 const TabBar = ({ tabs, active, onChange }) => (
   <div className="flex flex-wrap gap-2 border-b border-gray-200 mb-4">
@@ -219,83 +344,94 @@ const FoodOrderIndicator = ({ booking }) => {
 };
 
 // --------------------- Summary Header ---------------------
-const SummaryHeader = ({ booking }) => (
-  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-    <div className="space-y-1">
-      <div className="flex items-center gap-2">
-        <h3 className="text-lg font-semibold text-gray-900">
-          {booking.clientName || "Unknown client"}
-        </h3>
-        {booking.isCancelled && <Badge tone="red">Cancelled</Badge>}
-        <FoodOrderIndicator booking={booking} />
+const SummaryHeader = ({ booking }) => {
+  const chipData = [
+    {
+      label: "Boat",
+      value: booking.boatName || "Unassigned",
+      icon: Anchor
+    },
+    {
+      label: "Schedule",
+      value: booking.startTime
+        ? `${booking.startTime}${booking.endTime ? ` – ${booking.endTime}` : ""}`
+        : booking.bookingDate || "TBD",
+      icon: Clock
+    },
+    {
+      label: "Guests",
+      value:
+        booking.numberOfPassengers !== undefined &&
+        booking.numberOfPassengers !== null
+          ? `${booking.numberOfPassengers} pax`
+          : "No passenger data",
+      icon: UsersIcon
+    },
+    {
+      label: "Partner",
+      value: booking.partnerName || booking.clientType || "Direct",
+      icon: Briefcase
+    }
+  ];
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+            Primary guest
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h3 className="text-2xl font-semibold text-slate-900">
+              {booking.clientName || "Unknown client"}
+            </h3>
+            {booking.isCancelled && <Badge tone="red">Cancelled</Badge>}
+            <FoodOrderIndicator booking={booking} />
+          </div>
+          <p className="text-sm text-slate-600">
+            {booking.bookingDate || "Date TBC"} ·{" "}
+            {booking.boatName || "Boat unassigned"}
+          </p>
+        </div>
+        <div className="w-full lg:max-w-sm">
+          <PaymentProgress
+            totalPaid={booking?.pricing?.totalPaid}
+            agreedPrice={booking?.pricing?.agreedPrice || booking?.finalPrice}
+          />
+          <div className="mt-1 text-xs text-slate-500">
+            Status: {booking?.pricing?.paymentStatus || "No Payment"} · Paid €
+            {Number(booking?.pricing?.totalPaid || 0).toFixed(2)} of €
+            {Number(booking?.pricing?.agreedPrice || 0).toFixed(2)}
+          </div>
+        </div>
       </div>
-      <div className="text-sm text-gray-600">
-        {booking.boatName ? `${booking.boatName}` : "Boat: N/A"} · {booking.bookingDate || "Date: N/A"} · {booking.startTime || "—"}
-        {booking.endTime ? `–${booking.endTime}` : ""}
-      </div>
-      <div className="flex flex-wrap gap-2 text-sm text-gray-700">
-        {booking.clientPhone && (
-          <a
-            href={`tel:${booking.clientPhone}`}
-            className="underline hover:no-underline"
-            title="Call"
-          >
-            Call
-          </a>
-        )}
-        {booking.clientPhone && (
-          <a
-            href={`sms:${booking.clientPhone}`}
-            className="underline hover:no-underline"
-            title="Send SMS"
-          >
-            SMS
-          </a>
-        )}
-        {booking.clientPhone && (
-          <a
-            href={`https://wa.me/${String(booking.clientPhone).replace(/\D/g, "")}`}
-            target="_blank"
-            rel="noreferrer"
-            className="underline hover:no-underline"
-            title="Open WhatsApp"
-          >
-            WhatsApp
-          </a>
-        )}
-        {booking.clientEmail && (
-          <a
-            href={`mailto:${booking.clientEmail}`}
-            className="underline hover:no-underline"
-            title="Email"
-          >
-            Email
-          </a>
-        )}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {chipData.map((chip) => (
+          <SummaryChip key={chip.label} {...chip} />
+        ))}
       </div>
     </div>
-    <div className="md:col-span-2 flex flex-col justify-center">
-      <PaymentProgress
-        totalPaid={booking?.pricing?.totalPaid}
-        agreedPrice={booking?.pricing?.agreedPrice || booking?.finalPrice}
-      />
-      <div className="mt-1 text-xs text-gray-600">
-        Status: {booking?.pricing?.paymentStatus || "No Payment"} · Paid €
-        {Number(booking?.pricing?.totalPaid || 0).toFixed(2)} of €
-        {Number(booking?.pricing?.agreedPrice || 0).toFixed(2)}
-      </div>
-    </div>
-  </div>
-);
+  );
+};
 
 // ------------------------ BookingDetails ------------------------
 const BookingDetails = ({ booking, onClose }) => {
   const navigate = useNavigate();
+  const { isAdmin, isEmployee, isDriver, isStaff } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [tab, setTab] = useState("Overview");
   const modalRef = useRef(null);
   const [linkedExpenses, setLinkedExpenses] = useState([]);
   const [copySuccess, setCopySuccess] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [invoiceShareOption, setInvoiceShareOption] = useState("outstanding");
+  const [customInvoiceAmount, setCustomInvoiceAmount] = useState("");
+  const isAdminUser = isAdmin?.();
+  const isEmployeeUser = isEmployee?.();
+  const isDriverUser = isDriver?.();
+  const isStaffUser = isStaff?.();
+  const hideContactInfo = isDriverUser || ((isEmployeeUser || isStaffUser) && !isAdminUser);
+  const redactedText = "Not available";
 
   // Dirty state baseline
   const baselineRef = useRef(null);
@@ -526,6 +662,30 @@ const BookingDetails = ({ booking, onClose }) => {
     }
   };
 
+  const handleDeleteBooking = useCallback(async () => {
+    if (!booking?.id) return;
+    if (!isAdmin?.()) {
+      alert("Only administrators can delete bookings.");
+      return;
+    }
+    const confirm = window.confirm(
+      "Delete this booking permanently? This cannot be undone."
+    );
+    if (!confirm) return;
+
+    try {
+      setIsDeleting(true);
+      await deleteDoc(doc(db, "bookings", booking.id));
+      alert("Booking deleted.");
+      onClose();
+    } catch (error) {
+      console.error("Failed to delete booking:", error);
+      alert("Failed to delete booking. Please try again.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [booking?.id, isAdmin, onClose]);
+
   const copyToClipboard = (text, field) => {
     navigator.clipboard
       .writeText(text)
@@ -540,12 +700,13 @@ const BookingDetails = ({ booking, onClose }) => {
   };
 
   const copyAllClientInfo = () => {
+    const redactedValue = hideContactInfo ? redactedText : null;
     const clientInfo = `Client Name: ${editedBooking.clientName || "N/A"}
 Client Type: ${editedBooking.clientType || "N/A"}
-Phone: ${editedBooking.clientPhone || "N/A"}
-Email: ${editedBooking.clientEmail || "N/A"}
-Passport: ${editedBooking.clientPassport || "N/A"}
-Address: ${editedBooking.clientDetails?.address || editedBooking.address || "N/A"}`;
+Phone: ${redactedValue ?? editedBooking.clientPhone ?? "N/A"}
+Email: ${redactedValue ?? editedBooking.clientEmail ?? "N/A"}
+Passport: ${redactedValue ?? editedBooking.clientPassport ?? "N/A"}
+Address: ${redactedValue ?? editedBooking.clientDetails?.address ?? editedBooking.address ?? "N/A"}`;
     copyToClipboard(clientInfo, "All client info");
   };
 
@@ -1250,6 +1411,440 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || "N/A
     </button>
   );
 
+  const renderField = (field) => {
+    const {
+      label,
+      key,
+      value,
+      display,
+      copyValue,
+      editable = true,
+      type = "text",
+      placeholder,
+      inputProps = {}
+    } = field;
+
+    const resolvedValue = value ?? "";
+    const displayValue = display ?? (typeof resolvedValue === "number" ? resolvedValue : resolvedValue || "");
+    const canEdit = isEditing && editable !== false && Boolean(key);
+    const effectiveKey = field.id || key || label;
+    const copyText = copyValue ?? displayValue ?? "";
+    const onChange = field.onChange
+      ? field.onChange
+      : (val) => key && handleInputChange(key, val);
+
+    const baseInputClasses =
+      "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200";
+
+    let control = null;
+    if (canEdit) {
+      if (type === "textarea") {
+        control = (
+          <textarea
+            className={`${baseInputClasses} resize-none`}
+            rows={3}
+            value={resolvedValue || ""}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        );
+      } else {
+        control = (
+          <input
+            type={type}
+            className={baseInputClasses}
+            value={resolvedValue || ""}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+            {...inputProps}
+          />
+        );
+      }
+    } else {
+      control = (
+        <p className="text-sm text-slate-900">
+          {displayValue || "—"}
+        </p>
+      );
+    }
+
+    return (
+      <div key={effectiveKey} className="space-y-1">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+          {label}
+          {!canEdit && copyText && (
+            <CopyButton text={copyText} field={label} />
+          )}
+        </div>
+        {control}
+      </div>
+    );
+  };
+
+  const totalPaidValue = Number(editedBooking?.pricing?.totalPaid || 0);
+  const agreedPriceValue = Number(
+    editedBooking?.pricing?.agreedPrice || editedBooking?.finalPrice || 0
+  );
+  const paymentStatusLabel =
+    editedBooking?.pricing?.paymentStatus ||
+    editedBooking.paymentStatus ||
+    "No Payment";
+  const bookingReference =
+    editedBooking.bookingReference ||
+    editedBooking.reference ||
+    editedBooking.id ||
+    booking?.id ||
+    "";
+  const transferSummary = editedBooking.privateTransfer
+    ? `${editedBooking.pickupLocation || "Pickup TBD"} → ${
+        editedBooking.dropoffLocation || "Drop-off TBD"
+      }`
+    : "Tap edit to add transfer details";
+  const bookingDateDisplay =
+    formatDateForDisplay(editedBooking.bookingDate) ||
+    editedBooking.bookingDate ||
+    "";
+  const bookingDateInputValue =
+    formatDateForStorage(editedBooking.bookingDate) || "";
+  const passengerDisplay =
+    editedBooking.numberOfPassengers || editedBooking.numberOfPassengers === 0
+      ? `${editedBooking.numberOfPassengers} guests`
+      : "";
+  const notePreview =
+    editedBooking.clientNotes?.trim() ||
+    editedBooking.notes?.trim() ||
+    "";
+  const paymentBreakdown = useMemo(() => {
+    const payments = Array.isArray(editedBooking?.pricing?.payments)
+      ? editedBooking.pricing.payments
+      : [];
+    const firstPayment = payments.find((p) => p.type === "first");
+    const secondPayment = payments.find((p) => p.type === "second");
+    const firstAmount = Number(firstPayment?.amount) || 0;
+    const secondAmount = Number(secondPayment?.amount) || 0;
+    const totalPaid =
+      payments.reduce((sum, payment) => sum + (Number(payment?.amount) || 0), 0) || 0;
+    const outstanding = Math.max(agreedPriceValue - totalPaid, 0);
+
+    return {
+      firstAmount,
+      secondAmount,
+      firstPercentage: Number(firstPayment?.percentage) || null,
+      totalPaid,
+      outstanding: Number.isFinite(outstanding) ? outstanding : 0
+    };
+  }, [editedBooking?.pricing?.payments, agreedPriceValue]);
+
+  const clientFieldsConfig = [
+    {
+      label: "Client name",
+      key: "clientName",
+      value: editedBooking.clientName || "",
+      copyValue: editedBooking.clientName || ""
+    },
+    {
+      label: "Client type",
+      value: editedBooking.clientType || "",
+      copyValue: editedBooking.clientType || "",
+      editable: false
+    },
+    {
+      label: "Phone",
+      key: "clientPhone",
+      value: hideContactInfo ? redactedText : (editedBooking.clientPhone || ""),
+      copyValue: hideContactInfo ? "" : (editedBooking.clientPhone || ""),
+      editable: !hideContactInfo
+    },
+    {
+      label: "Email",
+      key: "clientEmail",
+      value: hideContactInfo ? redactedText : (editedBooking.clientEmail || ""),
+      copyValue: hideContactInfo ? "" : (editedBooking.clientEmail || ""),
+      editable: !hideContactInfo
+    },
+    {
+      label: "Passport",
+      key: "clientPassport",
+      value: hideContactInfo ? redactedText : (editedBooking.clientPassport || ""),
+      copyValue: hideContactInfo ? "" : (editedBooking.clientPassport || ""),
+      editable: !hideContactInfo
+    },
+    {
+      label: "Address",
+      key: "address",
+      value: hideContactInfo
+        ? redactedText
+        : editedBooking.clientDetails?.address ||
+          editedBooking.address ||
+          "",
+      display: hideContactInfo
+        ? redactedText
+        : editedBooking.clientDetails?.address ||
+          editedBooking.address ||
+          "",
+      copyValue: hideContactInfo
+        ? ""
+        : editedBooking.clientDetails?.address ||
+          editedBooking.address ||
+          "",
+      type: "textarea",
+      placeholder: "Street, city, country"
+    }
+  ];
+
+  const tripFieldsConfig = [
+    {
+      label: "Booking date",
+      key: "bookingDate",
+      value: bookingDateInputValue,
+      display: bookingDateDisplay,
+      type: "date"
+    },
+    {
+      label: "Start time",
+      key: "startTime",
+      value: editedBooking.startTime || "",
+      type: "time"
+    },
+    {
+      label: "End time",
+      key: "endTime",
+      value: editedBooking.endTime || "",
+      type: "time"
+    },
+    {
+      label: "Boat name",
+      key: "boatName",
+      value: editedBooking.boatName || "",
+      copyValue: editedBooking.boatName || ""
+    },
+    {
+      label: "Company / Supplier",
+      key: "boatCompanyName",
+      value: editedBooking.boatCompanyName || "",
+      copyValue: editedBooking.boatCompanyName || ""
+    },
+    {
+      label: "Passengers",
+      key: "numberOfPassengers",
+      value:
+        editedBooking.numberOfPassengers ||
+        editedBooking.numberOfPassengers === 0
+          ? String(editedBooking.numberOfPassengers)
+          : "",
+      display: passengerDisplay,
+      type: "number",
+      inputProps: { min: 0 }
+    },
+    {
+      label: "Restaurant / experience",
+      key: "restaurantName",
+      value: editedBooking.restaurantName || "",
+      copyValue: editedBooking.restaurantName || ""
+    }
+  ];
+
+  const logisticsFieldsConfig = [
+    {
+      label: "Transfer booked",
+      display: editedBooking.privateTransfer ? "Yes" : "No",
+      editable: false
+    },
+    {
+      label: "Pickup location",
+      key: "pickupLocation",
+      value: editedBooking.pickupLocation || "",
+      copyValue: editedBooking.pickupLocation || ""
+    },
+    {
+      label: "Pickup address",
+      key: "pickupAddress",
+      value: editedBooking.pickupAddress || "",
+      copyValue: editedBooking.pickupAddress || "",
+      type: "textarea",
+      placeholder: "Dock / Hotel / Street"
+    },
+    {
+      label: "Drop-off location",
+      key: "dropoffLocation",
+      value: editedBooking.dropoffLocation || "",
+      copyValue: editedBooking.dropoffLocation || ""
+    },
+    {
+      label: "Drop-off address",
+      key: "dropoffAddress",
+      value: editedBooking.dropoffAddress || "",
+      copyValue: editedBooking.dropoffAddress || "",
+      type: "textarea",
+      placeholder: "Dock / Hotel / Street"
+    }
+  ];
+
+  const systemFieldsConfig = [
+    {
+      label: "Booking ID",
+      display: bookingReference,
+      copyValue: bookingReference,
+      editable: false
+    },
+    {
+      label: "Created at",
+      display: editedBooking.createdAt
+        ? formatDateTime(editedBooking.createdAt)
+        : "",
+      editable: false
+    },
+    {
+      label: "Last updated",
+      display: editedBooking.lastUpdated
+        ? formatDateTime(editedBooking.lastUpdated)
+        : "",
+      editable: false
+    },
+    {
+      label: "Created by",
+      display:
+        editedBooking.createdBy?.displayName ||
+        editedBooking.createdBy?.email ||
+        "—",
+      editable: false
+    }
+  ];
+
+  const highlightCards = [
+    {
+      label: "Booking ref",
+      value: bookingReference || "Not set",
+      helper: "Share this ID with partners"
+    },
+    {
+      label: "Payment status",
+      value: paymentStatusLabel,
+      helper: `Paid €${totalPaidValue.toFixed(2)} of €${agreedPriceValue.toFixed(2)}`
+    },
+    {
+      label: "Transfer",
+      value: editedBooking.privateTransfer ? "Transfer arranged" : "No transfer planned",
+      helper: transferSummary
+    }
+  ];
+
+  const invoiceOptions = useMemo(() => {
+    const options = [
+      {
+        id: "full",
+        label: "Full balance",
+        helper: `€${agreedPriceValue.toFixed(2)} total`,
+        amount: agreedPriceValue
+      }
+    ];
+
+    if (paymentBreakdown.outstanding > 0 && paymentBreakdown.outstanding !== agreedPriceValue) {
+      options.push({
+        id: "outstanding",
+        label: "Outstanding balance",
+        helper: `€${paymentBreakdown.outstanding.toFixed(2)} remaining`,
+        amount: paymentBreakdown.outstanding
+      });
+    }
+
+    if (paymentBreakdown.firstAmount > 0) {
+      options.push({
+        id: "first",
+        label: "Deposit (first payment)",
+        helper: `€${paymentBreakdown.firstAmount.toFixed(2)}`,
+        amount: paymentBreakdown.firstAmount
+      });
+    }
+
+    if (paymentBreakdown.secondAmount > 0) {
+      options.push({
+        id: "second",
+        label: "Final installment",
+        helper: `€${paymentBreakdown.secondAmount.toFixed(2)}`,
+        amount: paymentBreakdown.secondAmount
+      });
+    }
+
+    options.push({
+      id: "custom",
+      label: "Custom amount",
+      helper: customInvoiceAmount
+        ? `€${Number(customInvoiceAmount || 0).toFixed(2)}`
+        : "Enter any figure",
+      amount: Number(customInvoiceAmount) || 0
+    });
+
+    return options;
+  }, [agreedPriceValue, paymentBreakdown, customInvoiceAmount]);
+
+  const selectedInvoiceOption =
+    invoiceOptions.find((opt) => opt.id === invoiceShareOption) || invoiceOptions[0];
+
+  useEffect(() => {
+    if (!invoiceOptions.find((opt) => opt.id === invoiceShareOption) && invoiceOptions[0]) {
+      setInvoiceShareOption(invoiceOptions[0].id);
+    }
+  }, [invoiceOptions, invoiceShareOption]);
+
+  const invoicePrefill = useMemo(() => {
+    if (!editedBooking?.id) return null;
+    const bookingDate =
+      editedBooking.bookingDetails?.date ||
+      editedBooking.bookingDate ||
+      new Date().toISOString().split("T")[0];
+    if (!selectedInvoiceOption) return null;
+    const amount = Number(selectedInvoiceOption?.amount) || 0;
+    const isDepositInvoice = selectedInvoiceOption?.id === "first";
+    const depositPercentage = paymentBreakdown.firstPercentage || 50;
+    const baseNotes =
+      editedBooking.notes || "Courtesy drinks, towels and skipper included.";
+    const depositNote = isDepositInvoice
+      ? `Deposit invoice (${depositPercentage}% down payment). `
+      : "";
+
+    return {
+      bookingId: editedBooking.id,
+      invoice: {
+        invoiceNumber: `INV-${new Date().getFullYear()}-${editedBooking.id.slice(-5).toUpperCase()}`,
+        invoiceDate: bookingDate,
+        notes: `${depositNote}${baseNotes}`.trim(),
+        terms:
+          "Payment terms: Net 30 days from invoice date. Please include the invoice number as the payment reference.",
+      },
+      client: {
+        name: editedBooking.clientDetails?.name || editedBooking.clientName || "",
+        companyName: hideContactInfo ? "" : (editedBooking.clientDetails?.companyName || ""),
+        address: hideContactInfo ? redactedText : (editedBooking.clientDetails?.address || editedBooking.address || ""),
+        city: hideContactInfo ? "" : (editedBooking.clientDetails?.city || ""),
+        postalCode: hideContactInfo ? "" : (editedBooking.clientDetails?.postalCode || ""),
+        country: hideContactInfo ? "" : (editedBooking.clientDetails?.country || ""),
+        email: hideContactInfo ? "" : (editedBooking.clientDetails?.email || editedBooking.clientEmail || ""),
+        phone: hideContactInfo ? "" : (editedBooking.clientDetails?.phone || editedBooking.clientPhone || ""),
+        taxId: hideContactInfo ? "" : (editedBooking.clientDetails?.taxId || ""),
+      },
+      items: [
+        {
+          id: editedBooking.id,
+          description: `${editedBooking.bookingDetails?.boatName || editedBooking.boatName || "Charter"} · ${bookingDate}${
+            isDepositInvoice ? ` • ${depositPercentage}% Down Payment` : ""
+          }`,
+          unitPrice: amount,
+          discount: 0,
+        },
+      ],
+    };
+  }, [editedBooking, selectedInvoiceOption]);
+
+  const isInvoiceReady = Boolean(
+    invoicePrefill && invoicePrefill.items?.[0]?.unitPrice > 0
+  );
+
+  const handleGenerateInvoice = useCallback(() => {
+    if (!invoicePrefill) return;
+    navigate("/invoice-generator", { state: { prefillInvoice: invoicePrefill } });
+  }, [invoicePrefill, navigate]);
+
   if (!booking) return null;
 
   return (
@@ -1271,10 +1866,20 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || "N/A
             editedBooking.isCancelled ? "bg-red-100" : "bg-gray-100"
           }`}
         >
-          <div className="flex items-center">
+          <div className="flex items-center gap-3">
             <h3 id="booking-details-title" className="text-xl font-bold text-gray-800">
               Booking Details
             </h3>
+            {isAdmin?.() && (
+              <button
+                onClick={handleDeleteBooking}
+                disabled={isDeleting}
+                className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                title="Delete booking"
+              >
+                {isDeleting ? "Deleting…" : "Delete"}
+              </button>
+            )}
           </div>
           <button
             onClick={handleBackdropClick}
@@ -1295,8 +1900,67 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || "N/A
         </div>
 
         {/* Summary header */}
-        <div className="p-6 pt-4 pb-2">
+        <div className="p-6 pt-4 pb-2 space-y-4">
           <SummaryHeader booking={editedBooking} />
+          <QuickActionsBar booking={editedBooking} showContact={!hideContactInfo} />
+          <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Invoice amount</p>
+                <p className="text-sm text-slate-600">
+                  Choose which portion of the booking to invoice.
+                </p>
+              </div>
+              <select
+                value={invoiceShareOption}
+                onChange={(e) => setInvoiceShareOption(e.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              >
+                {invoiceOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label} — {option.helper}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {invoiceShareOption === "custom" && (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                  Custom value (€)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={customInvoiceAmount}
+                  onChange={(e) => setCustomInvoiceAmount(e.target.value)}
+                  className="w-40 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  placeholder="0.00"
+                />
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={handleGenerateInvoice}
+                disabled={!invoicePrefill || !isInvoiceReady}
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow ${
+                  invoicePrefill && isInvoiceReady
+                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                    : "bg-slate-200 text-slate-500 cursor-not-allowed"
+                }`}
+              >
+                <FileText size={16} />
+                Generate invoice
+              </button>
+              <span className="text-xs text-slate-500">
+                {isInvoiceReady
+                  ? `Invoice for €${Number(selectedInvoiceOption?.amount || 0).toFixed(2)}`
+                  : "Choose a non-zero amount to enable invoice generation."}
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Cancellation banner */}
@@ -1342,358 +2006,79 @@ Address: ${editedBooking.clientDetails?.address || editedBooking.address || "N/A
         {/* Body */}
         <div className="px-6 pb-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 18rem)" }}>
           {tab === "Overview" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Client Info */}
-              <div>
-                <div className="p-4 border rounded-lg">
-                  <div className="flex justify-between items-center mb-3">
-                    <h4 className="text-lg font-bold">Client Information</h4>
+            <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-3">
+                {highlightCards.map((card) => (
+                  <KeyStatCard
+                    key={card.label}
+                    label={card.label}
+                    value={card.value}
+                    helper={card.helper}
+                  />
+                ))}
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <InfoCard
+                  title="Client profile"
+                  subtitle="Guest contact"
+                  actions={
                     <button
                       onClick={copyAllClientInfo}
-                      className="text-blue-600 hover:text-blue-800 text-sm flex items-center"
-                      title="Copy all client information"
+                      className="text-sm font-semibold text-blue-600 hover:text-blue-800"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4 mr-1"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                        />
-                      </svg>
-                      Copy All
+                      Copy profile
                     </button>
-                  </div>
+                  }
+                >
                   {copySuccess && (
-                    <div className="bg-green-100 text-green-800 px-3 py-1 rounded mb-3 text-sm">
+                    <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
                       {copySuccess}
                     </div>
                   )}
-                  <div className="mb-4">
-                    <label className="text-sm font-medium text-gray-700 flex items-center">
-                      Client Name:
-                      {!isEditing && (
-                        <CopyButton text={editedBooking.clientName || ""} field="Client Name" />
-                      )}
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.clientName || ""}
-                        onChange={(e) => handleInputChange("clientName", e.target.value)}
-                      />
-                    ) : (
-                      <p className="mt-1">{editedBooking.clientName || "N/A"}</p>
-                    )}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {clientFieldsConfig.map(renderField)}
                   </div>
-                  <div className="mb-4">
-                    <label className="text-sm font-medium text-gray-700 flex items-center">
-                      Client Type:
-                      {!isEditing && (
-                        <CopyButton text={editedBooking.clientType || ""} field="Client Type" />
-                      )}
-                    </label>
-                    <p className="mt-1">{editedBooking.clientType || "N/A"}</p>
+                </InfoCard>
+
+                <InfoCard title="Trip plan" subtitle="Schedule & boat">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {tripFieldsConfig.map(renderField)}
                   </div>
-                  <div className="mb-4">
-                    <label className="text-sm font-medium text-gray-700 flex items-center">
-                      Phone:
-                      {!isEditing && (
-                        <CopyButton text={editedBooking.clientPhone || ""} field="Phone" />
-                      )}
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.clientPhone || ""}
-                        onChange={(e) => handleInputChange("clientPhone", e.target.value)}
-                      />
-                    ) : (
-                      <p className="mt-1">{editedBooking.clientPhone || "N/A"}</p>
-                    )}
-                  </div>
-                  <div className="mb-4">
-                    <label className="text-sm font-medium text-gray-700 flex items-center">
-                      Email:
-                      {!isEditing && (
-                        <CopyButton text={editedBooking.clientEmail || ""} field="Email" />
-                      )}
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="email"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.clientEmail || ""}
-                        onChange={(e) => handleInputChange("clientEmail", e.target.value)}
-                      />
-                    ) : (
-                      <p className="mt-1">{editedBooking.clientEmail || "N/A"}</p>
-                    )}
-                  </div>
-                  <div className="mb-4">
-                    <label className="text-sm font-medium text-gray-700 flex items-center">
-                      Passport:
-                      {!isEditing && (
-                        <CopyButton text={editedBooking.clientPassport || ""} field="Passport" />
-                      )}
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.clientPassport || ""}
-                        onChange={(e) => handleInputChange("clientPassport", e.target.value)}
-                      />
-                    ) : (
-                      <p className="mt-1">{editedBooking.clientPassport || "N/A"}</p>
-                    )}
-                  </div>
-                  <div className="mb-4">
-                    <label className="text-sm font-medium text-gray-700 flex items-center">
-                      Address:
-                      {!isEditing && (
-                        <CopyButton
-                          text={
-                            editedBooking.clientDetails?.address ||
-                            editedBooking.address ||
-                            ""
-                          }
-                          field="Address"
-                        />
-                      )}
-                    </label>
-                    {isEditing ? (
-                      <textarea
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={
-                          editedBooking.clientDetails?.address ||
-                          editedBooking.address ||
-                          ""
-                        }
-                        onChange={(e) => handleInputChange("address", e.target.value)}
-                        rows={3}
-                        placeholder="Enter client's address"
-                      />
-                    ) : (
-                      <p className="mt-1 whitespace-pre-line">
-                        {editedBooking.clientDetails?.address ||
-                          editedBooking.address ||
-                          "N/A"}
-                      </p>
-                    )}
-                  </div>
-                </div>
+                </InfoCard>
               </div>
 
-              {/* Booking Details */}
-              <div>
-                <div className="p-4 border rounded-lg mb-4">
-                  <h4 className="text-lg font-bold mb-3">Booking Details</h4>
-                  <div className="mb-4">
-                    <label className="text-sm font-medium text-gray-700 flex items-center">
-                      Boat Name:
-                      {!isEditing && (
-                        <CopyButton text={editedBooking.boatName || ""} field="Boat Name" />
-                      )}
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.boatName || ""}
-                        onChange={(e) => handleInputChange("boatName", e.target.value)}
-                      />
-                    ) : (
-                      <p className="mt-1">{editedBooking.boatName || "N/A"}</p>
-                    )}
+              <div className="grid gap-6 lg:grid-cols-2">
+                <InfoCard title="Logistics" subtitle="Transfers & locations">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {logisticsFieldsConfig.map(renderField)}
                   </div>
-                  <div className="mb-4">
-                    <label className="text-sm font-medium text-gray-700 flex items-center">
-                      Company:
-                      {!isEditing && (
-                        <CopyButton
-                          text={editedBooking.boatCompanyName || ""}
-                          field="Company"
-                        />
-                      )}
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.boatCompanyName || ""}
-                        onChange={(e) => handleInputChange("boatCompanyName", e.target.value)}
-                      />
-                    ) : (
-                      <p className="mt-1">{editedBooking.boatCompanyName || "N/A"}</p>
-                    )}
+                </InfoCard>
+                <InfoCard title="Internal timeline" subtitle="Audit trail">
+                  <div className="grid gap-4">
+                    {systemFieldsConfig.map(renderField)}
                   </div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Passengers:
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="number"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={
-                          isNaN(editedBooking.numberOfPassengers)
-                            ? ""
-                            : editedBooking.numberOfPassengers
-                        }
-                        onChange={(e) =>
-                          handleInputChange("numberOfPassengers", e.target.value)
-                        }
-                      />
-                    ) : (
-                      <p className="mt-1">
-                        {editedBooking.numberOfPassengers >= 0
-                          ? `${editedBooking.numberOfPassengers} passengers`
-                          : "N/A"}
-                      </p>
-                    )}
-                  </div>
-                  <div className="mb-4">
-                    <label className="text-sm font-medium text-gray-700 flex items-center">
-                      Restaurant Name:
-                      {!isEditing && (
-                        <CopyButton
-                          text={editedBooking.restaurantName || ""}
-                          field="Restaurant Name"
-                        />
-                      )}
-                    </label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={editedBooking.restaurantName || ""}
-                        onChange={(e) => handleInputChange("restaurantName", e.target.value)}
-                        placeholder="Enter restaurant name"
-                      />
-                    ) : (
-                      <p className="mt-1">{editedBooking.restaurantName || "N/A"}</p>
-                    )}
-                  </div>
-                </div>
-
-                {editedBooking.privateTransfer && (
-                  <div className="p-4 border rounded-lg">
-                    <h4 className="text-lg font-bold mb-3">Transfer Details</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <h5 className="font-medium">Pickup</h5>
-                        <p className="flex items-center">
-                          <span className="font-semibold">Location:</span>{" "}
-                          {editedBooking.pickupLocation || "N/A"}
-                          <CopyButton
-                            text={editedBooking.pickupLocation || ""}
-                            field="Pickup Location"
-                          />
-                        </p>
-                        {editedBooking.pickupAddress && (
-                          <p className="flex items-center">
-                            <span className="font-semibold">Address:</span>{" "}
-                            <span className="break-words">
-                              {editedBooking.pickupAddress}
-                            </span>
-                            <CopyButton
-                              text={editedBooking.pickupAddress || ""}
-                              field="Pickup Address"
-                            />
-                          </p>
-                        )}
-                      </div>
-                      <div>
-                        <h5 className="font-medium">Drop-off</h5>
-                        <p className="flex items-center">
-                          <span className="font-semibold">Location:</span>{" "}
-                          {editedBooking.dropoffLocation || "N/A"}
-                          <CopyButton
-                            text={editedBooking.dropoffLocation || ""}
-                            field="Dropoff Location"
-                          />
-                        </p>
-                        {editedBooking.dropoffAddress && (
-                          <p className="flex items-center">
-                            <span className="font-semibold">Address:</span>{" "}
-                            <span className="break-words">
-                              {editedBooking.dropoffAddress}
-                            </span>
-                            <CopyButton
-                              text={editedBooking.dropoffAddress || ""}
-                              field="Dropoff Address"
-                            />
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
+                </InfoCard>
               </div>
 
-              {/* Booking Time */}
-              <div className="col-span-full">
-                <div className="p-4 border rounded-lg">
-                  <h4 className="text-lg font-bold mb-3">Booking Time</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Date:
-                      </label>
-                      {isEditing ? (
-                        <input
-                          type="date"
-                          className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          value={formatDateForStorage(editedBooking.bookingDate) || ""}
-                          onChange={(e) => handleInputChange("bookingDate", e.target.value)}
-                        />
-                      ) : (
-                        <p className="mt-1">{editedBooking.bookingDate || "N/A"}</p>
-                      )}
-                    </div>
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Time:
-                      </label>
-                      {isEditing ? (
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="time"
-                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            value={editedBooking.startTime || ""}
-                            onChange={(e) => handleInputChange("startTime", e.target.value)}
-                          />
-                          <span>-</span>
-                          <input
-                            type="time"
-                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            value={editedBooking.endTime || ""}
-                            onChange={(e) => handleInputChange("endTime", e.target.value)}
-                          />
-                        </div>
-                      ) : (
-                        <p className="mt-1">
-                          {editedBooking.startTime && editedBooking.endTime
-                            ? `${editedBooking.startTime} - ${editedBooking.endTime}`
-                            : "N/A"}
-                        </p>
-                      )}
-                    </div>
-                  </div>
+              <InfoCard
+                title="Notes snapshot"
+                subtitle="Crew briefing"
+                actions={
+                  <button
+                    onClick={() => setTab("Notes")}
+                    className="text-sm font-semibold text-blue-600 hover:text-blue-800"
+                  >
+                    Open notes
+                  </button>
+                }
+              >
+                <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  {notePreview || "No notes added yet."}
                 </div>
-              </div>
+              </InfoCard>
             </div>
           )}
-
           {tab === "Payments" && (
             <div className="grid grid-cols-1 gap-6">
               {/* Price Information */}
@@ -1922,8 +2307,3 @@ BookingDetails.propTypes = {
 };
 
 export default BookingDetails;
-
-
-
-
-

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Navigate, Route, Routes, useNavigate, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from 'react-error-boundary';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Sidebar from './components/Sidebar';
@@ -27,12 +27,21 @@ import InvoiceGenerator from './components/InvoiceGenerator';
 import SanAntonioBookingsAdmin from './components/SanAntonioBookingsAdmin';
 import PlaceQRManager from './components/PlaceQRManager';
 import FinancialDashboard from './components/FinancialDashboard';
-import PricingManager from './components/PricingManager';
+
 import ExpenseTracker from './components/ExpenseTracker';
 import CateringExpensesTracker from './components/CateringExpensesTracker';
-import ContractGenerator from './components/ContractGenerator';
-import ClientDataCollection from './components/ClientDataCollection';
-import CharterManagementSystem from './components/CharterManagementSystem';
+import CollaboratorManagement from './components/CollaboratorManagement';
+import DataInsights from './components/DataInsights';
+import { Clock } from 'lucide-react';
+import RemindersBoard from './components/RemindersBoard';
+import GlobalSearch from './components/search/GlobalSearch';
+import CEOCommandMenu from './components/CEOCommandMenu';
+import BoatPerformanceAnalytics from './components/BoatPerformanceAnalytics';
+import PartnerPerformanceReports from './components/PartnerPerformanceReports';
+import DataBackup from './components/DataBackup';
+import OpsCommandWorkspace from './components/OpsCommandWorkspace';
+import CrewFieldApp from './components/CrewFieldApp';
+import { canRoleAccessPath } from './config/accessControl';
 const Splash = ({ onFinish }) => {
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -44,22 +53,22 @@ const Splash = ({ onFinish }) => {
     return (
         <div
             id="splash-screen"
-            className="fixed inset-0 flex flex-col items-center justify-center bg-[#0099cc] transition-opacity duration-300 ease-in-out z-50"
+            className="fixed inset-0 flex flex-col items-center justify-center bg-white transition-opacity duration-300 ease-in-out z-50"
         >
             <div className="flex flex-col items-center">
                 <img
-                    src="/WhiteLogo-Just-Enjoy.png"
-                    alt="Just Enjoy Ibiza"
-                    className="w-48 h-auto animate-pulse"
+                    src="/Nautiq.Logo03.png"
+                    alt="Nautiq Ibiza"
+                    className="w-44 h-auto"
                 />
                 <div className="flex space-x-2 mt-8">
-                    <div className="w-2 h-2 bg-white rounded-full animate-bounce"
+                    <div className="w-2 h-2 rounded-full bg-system-gray-400 animate-bounce"
                         style={{ animationDelay: '-0.32s' }}
                     />
-                    <div className="w-2 h-2 bg-white rounded-full animate-bounce"
+                    <div className="w-2 h-2 rounded-full bg-system-gray-400 animate-bounce"
                         style={{ animationDelay: '-0.16s' }}
                     />
-                    <div className="w-2 h-2 bg-white rounded-full animate-bounce" />
+                    <div className="w-2 h-2 rounded-full bg-system-gray-400 animate-bounce" />
                 </div>
             </div>
         </div>
@@ -68,12 +77,12 @@ const Splash = ({ onFinish }) => {
 
 function ErrorFallback({ error }) {
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100">
-            <div className="p-6 max-w-sm w-full bg-white shadow-md rounded-lg">
-                <h2 className="text-red-600 text-xl font-semibold mb-4">
+        <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
+            <div className="app-card p-6 max-w-sm w-full">
+                <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--danger)' }}>
                     Something went wrong
                 </h2>
-                <pre className="text-sm text-gray-700 overflow-auto">
+                <pre className="text-sm overflow-auto" style={{ color: 'var(--text-secondary)' }}>
                     {error.message}
                 </pre>
             </div>
@@ -81,32 +90,55 @@ function ErrorFallback({ error }) {
     );
 }
 
-const ProtectedRoute = ({ children }) => {
-    const { user, loading, isAdmin } = useAuth();
-    
-    // List of paths regular users are allowed to access
-    const regularUserPaths = ['/bookings', '/san-antonio-tours'];
+const ProtectedRoute = ({ children, adminOnly = false, requiredPermission }) => {
+    const { user, loading, userRole, isAdmin, isStaff, isEmployee, isDriver } = useAuth();
+    const location = useLocation();
 
     if (loading) {
         return (
-            <div className="flex min-h-screen items-center justify-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500" />
+            <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--accent)' }} />
             </div>
         );
     }
 
     if (!user) {
-        return <Navigate to="/login" />;
+        return <Navigate to="/login" replace state={{ from: location }} />;
     }
-    
-    // Get the current path
-    const currentPath = window.location.pathname;
-    
-    // If user is not admin and tries to access a restricted path
-    if (!isAdmin() && !regularUserPaths.includes(currentPath) && 
-        !currentPath.startsWith('/bookings/')) { // Allow viewing specific bookings
-        console.log("Access denied: Redirecting to bookings");
-        return <Navigate to="/bookings" />;
+
+    const requiresAdmin = adminOnly || requiredPermission === 'admin';
+    if (requiresAdmin && !isAdmin()) {
+        return <Navigate to="/bookings" replace />;
+    }
+
+    if (requiredPermission) {
+        const permissions = Array.isArray(requiredPermission)
+            ? requiredPermission
+            : [requiredPermission];
+
+        const hasPermission = permissions.some((permission) => {
+            switch (permission) {
+                case 'admin':
+                    return isAdmin();
+                case 'staff':
+                    return isAdmin() || isStaff();
+                case 'employee':
+                    return isAdmin() || isEmployee?.();
+                case 'driver':
+                    return isAdmin() || isDriver?.();
+                default:
+                    return false;
+            }
+        });
+
+        if (!hasPermission) {
+            return <Navigate to="/bookings" replace />;
+        }
+    }
+
+    const effectiveRole = isAdmin() ? 'admin' : (userRole || 'staff');
+    if (effectiveRole !== 'admin' && !canRoleAccessPath(effectiveRole, location.pathname)) {
+        return <Navigate to="/bookings" replace />;
     }
 
     return children;
@@ -114,25 +146,53 @@ const ProtectedRoute = ({ children }) => {
 
 function ProtectedLayout({ children }) {
     const navigate = useNavigate();
+    const today = new Date();
+    const formattedDate = today.toLocaleDateString('en-GB', {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric'
+    });
 
     return (
-        <div className="relative bg-gray-100 min-h-screen">
+        <div className="relative min-h-screen text-slate-900">
             <Sidebar />
-            <div className="md:ml-64 flex flex-col">
-                <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center">
-                    <div></div>
-                    <div className="flex items-center gap-4">
-                        <NotificationsCenter />
-                        <h1 
-                            className="text-xl font-semibold cursor-pointer hover:text-blue-500 transition-colors"
-                            onClick={() => navigate('/')}
-                        >
-                            Just Enjoy Bookings
-                        </h1>
+            <div
+                className="min-h-screen transition-all duration-300"
+                style={{ marginLeft: 'var(--sidebar-offset, 0px)' }}
+            >
+                <header className="sticky top-0 z-30 border-b bg-white/85 backdrop-blur-md" style={{ borderColor: 'var(--border)' }}>
+                    <div className="flex flex-col gap-4 px-6 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-10">
+                        <div className="flex items-center gap-4">
+                            <button
+                                onClick={() => navigate('/')}
+                                className="group flex items-center gap-3 rounded-xl border bg-white/90 px-3.5 py-2.5 shadow-sm transition hover:-translate-y-0.5"
+                                style={{ borderColor: 'var(--border)' }}
+                            >
+                                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-light)] text-[var(--accent)]">
+                                    <Clock className="h-4 w-4" />
+                                </span>
+                                <div className="text-left leading-tight">
+                                    <span className="block text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">Nautiq Operations</span>
+                                </div>
+                            </button>
+                        </div>
+                        <div className="flex flex-col gap-2 lg:w-[30rem] lg:flex-row lg:items-center lg:justify-end">
+                            <GlobalSearch />
+                            <div className="flex items-center gap-3">
+                                <CEOCommandMenu />
+                                <span className="hidden items-center gap-2 rounded-full border bg-white/90 px-3.5 py-2 text-xs font-medium text-[var(--text-secondary)] sm:inline-flex shadow-sm" style={{ borderColor: 'var(--border)' }}>
+                                    <Clock className="h-4 w-4 text-[var(--text-tertiary)]" />
+                                    {formattedDate}
+                                </span>
+                                <NotificationsCenter />
+                            </div>
+                        </div>
                     </div>
                 </header>
-                <main className="flex-1 overflow-y-auto p-6">
-                    {children}
+                <main className="shell-gradient relative flex-1 overflow-y-auto px-6 pb-12 pt-8 sm:px-8 lg:px-12">
+                    <div className="relative mx-auto max-w-7xl space-y-8">
+                        {children}
+                    </div>
                 </main>
             </div>
         </div>
@@ -189,18 +249,30 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
- 
+
+                            {/* Ops Workspace */}
+                            <Route
+                                path="/ops-command"
+                                element={
+                                    <ProtectedRoute requiredPermission="staff">
+                                        <ProtectedLayout>
+                                            <OpsCommandWorkspace />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/crew-app"
+                                element={
+                                    <ProtectedRoute requiredPermission={['staff', 'driver']}>
+                                        <ProtectedLayout>
+                                            <CrewFieldApp />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+
                             
-                                    <Route
-                                        path="/client-data-collection"
-                                        element={
-                                            <ProtectedRoute>
-                                                <ProtectedLayout>
-                                                    <ClientDataCollection />
-                                                </ProtectedLayout>
-                                            </ProtectedRoute>
-                                        }
-                                    />
                             {/* San Antonio Tours */}
                             <Route
                                 path="/san-antonio-tours"
@@ -212,27 +284,13 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
-                            <Route
-                                path="/charter-management"
-                                element={
-                                    <ProtectedRoute>
-                                        <ProtectedLayout>
-                                            <CharterManagementSystem />
-                                        </ProtectedLayout>
-                                    </ProtectedRoute>
-                                }
-                            />
-                             <Route path="/contract-generator" element={
-                                <ProtectedRoute adminOnly={true}>
-                                    <ContractGenerator />
-                                </ProtectedRoute>
-                                } />
+                            
 
                             {/* Financial Routes */}
                             <Route
                                 path="/payment-tracking"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission={['admin', 'employee']}>
                                         <ProtectedLayout>
                                             <PaymentTracking />
                                         </ProtectedLayout>
@@ -264,7 +322,7 @@ function App() {
                             <Route
                                 path="/products"
                                 element={
-                                    <ProtectedRoute requiredPermission="admin">
+                                    <ProtectedRoute requiredPermission="staff">
                                         <ProtectedLayout>
                                             <ProductManagement />
                                         </ProtectedLayout>
@@ -274,7 +332,7 @@ function App() {
                             <Route
                                 path="/add-product"
                                 element={
-                                    <ProtectedRoute requiredPermission="admin">
+                                    <ProtectedRoute requiredPermission="staff">
                                         <ProtectedLayout>
                                             <AddEditProduct />
                                         </ProtectedLayout>
@@ -284,7 +342,7 @@ function App() {
                             <Route
                                 path="/edit-product/:id"
                                 element={
-                                    <ProtectedRoute requiredPermission="admin">
+                                    <ProtectedRoute requiredPermission="staff">
                                         <ProtectedLayout>
                                             <AddEditProduct />
                                         </ProtectedLayout>
@@ -311,12 +369,12 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
-                            <Route
-                                path="/pricing-manager"
+                           <Route
+                                path="/collaborator-management"
                                 element={
                                     <ProtectedRoute>
                                         <ProtectedLayout>
-                                            <PricingManager />
+                                            <CollaboratorManagement />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }
@@ -344,14 +402,14 @@ function App() {
                                 }
                             />
                             <Route
-                            path="/available-boats"
-                            element={
-                                <ProtectedRoute>
-                                <ProtectedLayout>
-                                    <BoatFinder />
-                                </ProtectedLayout>
-                                </ProtectedRoute>
-                            }
+                                path="/available-boats"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <BoatFinder />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
                             />
                             <Route
                                 path="/edit-boat/:id"
@@ -378,9 +436,19 @@ function App() {
                             <Route
                                 path="/clients"
                                 element={
-                                    <ProtectedRoute>
+                                    <ProtectedRoute requiredPermission="admin">
                                         <ProtectedLayout>
                                             <ClientDirectory />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/reminders"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <RemindersBoard />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }
@@ -407,13 +475,53 @@ function App() {
                             />
 
                             {/* Administration Routes */}
-                            
+
                             <Route
                                 path="/financial-dashboard"
                                 element={
                                     <ProtectedRoute>
                                         <ProtectedLayout>
                                             <FinancialDashboard />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/insights"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <DataInsights />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/boat-performance"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <BoatPerformanceAnalytics />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/partner-performance"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <PartnerPerformanceReports />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/data-backup"
+                                element={
+                                    <ProtectedRoute requiredPermission="admin">
+                                        <ProtectedLayout>
+                                            <DataBackup />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }

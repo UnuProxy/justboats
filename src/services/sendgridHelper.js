@@ -1,6 +1,8 @@
 // src/services/sendgridHelper.js
 const SENDGRID_API_KEY = process.env.REACT_APP_SENDGRID_API_KEY;
 const SENDGRID_API_URL = 'https://api.sendgrid.com/v3/mail/send';
+const DEFAULT_FROM_EMAIL = 'info@nautiqibiza.com';
+const DEFAULT_FROM_NAME = 'Nautiq Ibiza';
 
 export const sendEmail = async ({ to, subject, text, html }) => {
   try {
@@ -15,8 +17,8 @@ export const sendEmail = async ({ to, subject, text, html }) => {
           to: [{ email: to }],
         }],
         from: {
-          email: 'info@justenjoyibiza.com',
-          name: 'Just Boats Ibiza'
+          email: process.env.REACT_APP_SENDGRID_FROM_EMAIL || DEFAULT_FROM_EMAIL,
+          name: DEFAULT_FROM_NAME
         },
         subject: subject,
         content: [

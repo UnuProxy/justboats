@@ -54,10 +54,18 @@ const ExpenseTracker = () => {
   // New state for showing summary
   const [showSummary, setShowSummary] = useState(false);
   const [summaryData, setSummaryData] = useState({
-    totalProfit: 0,
     totalIncome: 0,
-    totalExpenses: 0
+    totalExpenses: 0,
+    totalOwnerPaid: 0,
+    totalOwnerOutstanding: 0,
+    totalProfit: 0, // Net profit after owner payouts
+    manualProfit: 0
   });
+  
+  const parseAmount = (value) => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   
   // State for new entry form
   const [newEntry, setNewEntry] = useState({
@@ -116,48 +124,40 @@ const ExpenseTracker = () => {
   const calculateSummary = (entriesData) => {
     const data = entriesData || entries;
     
-    let totalProfit = 0;
+    let manualProfitTotal = 0;
     let totalIncome = 0;
     let totalExpenses = 0;
+    let totalOwnerPaid = 0;
+    let totalOwnerOutstanding = 0;
     
     data.forEach(entry => {
-      // Calculate profit
-      if (entry.profitTotal) {
-        totalProfit += parseFloat(entry.profitTotal) || 0;
-      }
+      manualProfitTotal += parseAmount(entry.profitTotal || 0);
       
-      // Calculate income (sum of all income fields)
-      const income = (
-        parseFloat(entry.sumUpIulian || 0) +
-        parseFloat(entry.stripeIulian || 0) +
-        parseFloat(entry.caixaJustEnjoy || 0) +
-        parseFloat(entry.sumUpAlin || 0) +
-        parseFloat(entry.stripeAlin || 0) +
-        parseFloat(entry.cashIulian || 0) +
-        parseFloat(entry.cashAlin || 0)
-      );
+      const income = entry.calculatedIncome !== undefined
+        ? entry.calculatedIncome
+        : calculateEntryIncome(entry);
+      const expenses = entry.calculatedExpenses !== undefined
+        ? entry.calculatedExpenses
+        : calculateEntryExpenses(entry);
       
       totalIncome += income;
-      
-      // Calculate expenses (sum of expense-related fields)
-      const expenses = (
-        parseFloat(entry.suma1 || 0) +
-        parseFloat(entry.suma2 || 0) +
-        parseFloat(entry.sumaIntegral || 0) +
-        parseFloat(entry.skipperCost || 0) +   
-        parseFloat(entry.transferCost || 0) +   
-        parseFloat(entry.fuelCost || 0) +      
-        parseFloat(entry.boatExpense || 0) +    
-        parseFloat(entry.comisioane || 0)
-      );
-      
       totalExpenses += expenses;
+      
+      if (entry.ownerPaymentSummary) {
+        totalOwnerPaid += parseAmount(entry.ownerPaymentSummary.ownerPaidAmount || 0);
+        totalOwnerOutstanding += parseAmount(entry.ownerPaymentSummary.ownerOutstandingAmount || 0);
+      }
     });
     
+    const netProfit = totalIncome - totalExpenses - totalOwnerPaid;
+    
     setSummaryData({
-      totalProfit,
       totalIncome,
-      totalExpenses
+      totalExpenses,
+      totalOwnerPaid,
+      totalOwnerOutstanding,
+      totalProfit: netProfit,
+      manualProfit: manualProfitTotal
     });
   };
   
@@ -166,171 +166,244 @@ const ExpenseTracker = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        
-        // Fetch expenses
+
         const expensesRef = collection(db, 'expenses');
         const expensesQuery = query(expensesRef, orderBy('createdAt', 'desc'));
         const expensesSnapshot = await getDocs(expensesQuery);
-        
-        const fetchedEntries = [];
-        const past = [];
-        const current = []; // Today + Tomorrow
-        const future = []; // Day after tomorrow onwards
-        const expenseBookingIds = new Set(); // To track which bookings already have expense entries
-        
-        // Get today's date at midnight for comparison
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todayTimestamp = today.getTime();
-        
-        // Get day after tomorrow's date
-        const dayAfterTomorrow = new Date(today);
-        dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
-        const dayAfterTomorrowTimestamp = dayAfterTomorrow.getTime();
-        
-        expensesSnapshot.forEach((doc) => {
-          const data = doc.data();
-          
-          // Convert Firebase timestamps to date strings
-          const dataDate = data.data ? 
-            (data.data instanceof Timestamp ? data.data.toDate().toISOString().split('T')[0] : data.data) 
+
+        const rawEntries = [];
+        const expenseBookingIds = new Set();
+
+        expensesSnapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const dataDate = data.data
+            ? (data.data instanceof Timestamp
+              ? data.data.toDate().toISOString().split('T')[0]
+              : data.data)
             : '';
-            
-          const dataCompanie = data.dataCompanie ? 
-            (data.dataCompanie instanceof Timestamp ? data.dataCompanie.toDate().toISOString().split('T')[0] : data.dataCompanie) 
+          const dataCompanie = data.dataCompanie
+            ? (data.dataCompanie instanceof Timestamp
+              ? data.dataCompanie.toDate().toISOString().split('T')[0]
+              : data.dataCompanie)
             : '';
-          
+
           const entry = {
-            id: doc.id,
+            id: docSnap.id,
             ...data,
             data: dataDate,
-            dataCompanie: dataCompanie,
+            dataCompanie,
             createdAt: data.createdAt
           };
-          
-          fetchedEntries.push(entry);
-          
-          // Keep track of bookings that already have expense entries
+
+          rawEntries.push(entry);
+
           if (data.bookingId) {
             expenseBookingIds.add(data.bookingId);
           }
-          
-          // Sort into past, current (today+tomorrow), and future based on date
-          if (dataDate) {
-            const entryDate = new Date(dataDate);
-            entryDate.setHours(0, 0, 0, 0);
-            const entryTimestamp = entryDate.getTime();
-            
-            if (entryTimestamp < todayTimestamp) {
-              // Past entries (before today)
-              past.push(entry);
-            } else if (entryTimestamp >= todayTimestamp && entryTimestamp < dayAfterTomorrowTimestamp) {
-              // Current entries (today + tomorrow)
-              current.push(entry);
-            } else {
-              // Future entries (day after tomorrow onwards)
-              future.push(entry);
-            }
-          } else {
-            // If no date, consider it as current
-            current.push(entry);
-          }
         });
-        
-        // Fetch bookings
+
         const bookingsRef = collection(db, 'bookings');
         const bookingsQuery = query(bookingsRef, orderBy('bookingDate', 'desc'));
         const bookingsSnapshot = await getDocs(bookingsQuery);
-        
+
+        const bookingSummaryMap = {};
         const allPendingBookings = [];
         const pastPendingBookings = [];
-        const currentPendingBookings = [];
+        const currentPendingBookingsLocal = [];
         const futurePendingBookings = [];
-        
-        bookingsSnapshot.forEach((doc) => {
-          const bookingData = doc.data();
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayTimestamp = today.getTime();
+
+        const dayAfterTomorrow = new Date(today);
+        dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+        const dayAfterTomorrowTimestamp = dayAfterTomorrow.getTime();
+
+        bookingsSnapshot.forEach((docSnap) => {
+          const bookingData = docSnap.data();
           const booking = {
-            id: doc.id,
+            id: docSnap.id,
             ...bookingData,
-            // Make sure the dates are consistently formatted
             bookingDate: bookingData.bookingDate || '',
             createdAt: bookingData.createdAt || ''
           };
-          
-          // If this booking doesn't have an expense entry yet and is active, add to pending
-          if (!expenseBookingIds.has(doc.id) && bookingData.status === 'active') {
+
+          if (!expenseBookingIds.has(docSnap.id) && bookingData.status === 'active') {
             allPendingBookings.push(booking);
-            
-            // Categorize pending bookings by date like expense entries
+
             if (booking.bookingDate) {
               const bookingDate = new Date(booking.bookingDate);
               bookingDate.setHours(0, 0, 0, 0);
               const bookingTimestamp = bookingDate.getTime();
-              
+
               if (bookingTimestamp < todayTimestamp) {
-                // Past pending bookings
                 pastPendingBookings.push(booking);
               } else if (bookingTimestamp >= todayTimestamp && bookingTimestamp < dayAfterTomorrowTimestamp) {
-                // Current pending bookings (today + tomorrow)
-                currentPendingBookings.push(booking);
+                currentPendingBookingsLocal.push(booking);
               } else {
-                // Future pending bookings (day after tomorrow onwards)
                 futurePendingBookings.push(booking);
               }
             } else {
-              // If no date, consider it as current
-              currentPendingBookings.push(booking);
+              currentPendingBookingsLocal.push(booking);
             }
           }
+
+          const ownerPayments = bookingData.ownerPayments || {};
+          const breakdown = {};
+
+          let ownerPaidAmount = 0;
+          let ownerTotalDue = 0;
+
+          const paymentConfigs = [
+            { key: 'firstPayment', label: 'First Payment' },
+            { key: 'secondPayment', label: 'Second Payment' }
+          ];
+
+          if (bookingData.hasTransfer || (ownerPayments.transferPayment && ownerPayments.transferPayment.amount)) {
+            paymentConfigs.push({ key: 'transferPayment', label: 'Transfer Payment' });
+          }
+
+          paymentConfigs.forEach(({ key, label }) => {
+            const payment = ownerPayments[key];
+            if (!payment) {
+              return;
+            }
+
+            const amount = parseAmount(payment.amount || 0);
+            if (amount <= 0) {
+              breakdown[key] = {
+                label,
+                amount: 0,
+                paid: false
+              };
+              return;
+            }
+
+            ownerTotalDue += amount;
+            const isPaid = Boolean(payment.paid) || Boolean(payment.signature);
+            if (isPaid) {
+              ownerPaidAmount += amount;
+            }
+
+            breakdown[key] = {
+              label,
+              amount,
+              paid: isPaid,
+              date: payment.date || null,
+              paidBy: payment.paidBy || '',
+              invoice: payment.invoice || ''
+            };
+          });
+
+          const ownerOutstandingAmount = Math.max(ownerTotalDue - ownerPaidAmount, 0);
+
+          bookingSummaryMap[docSnap.id] = {
+            ownerPaidAmount,
+            ownerOutstandingAmount,
+            ownerTotalDue,
+            breakdown,
+            clientName: booking.clientName || booking.clientDetails?.name || '',
+            boatName: booking.bookingDetails?.boatName || '',
+            boatCompany: booking.bookingDetails?.boatCompany || '',
+            agreedPrice: parseAmount(
+              bookingData.pricing?.finalPrice ??
+              bookingData.pricing?.agreedPrice ??
+              0
+            )
+          };
         });
-        
-        // Sort ALL entries by date (ascending - earliest first)
+
+        const pastEntriesLocal = [];
+        const currentEntriesLocal = [];
+        const futureEntriesLocal = [];
+
+        const enrichedEntries = rawEntries.map((entry) => {
+          const bookingSummary = entry.bookingId ? bookingSummaryMap[entry.bookingId] : null;
+
+          const calculatedIncome = calculateEntryIncome(entry);
+          const calculatedExpenses = calculateEntryExpenses(entry);
+
+          const ownerSummary = bookingSummary || {
+            ownerPaidAmount: 0,
+            ownerOutstandingAmount: 0,
+            ownerTotalDue: 0,
+            breakdown: {}
+          };
+
+          const autoProfitActual = calculatedIncome - calculatedExpenses - ownerSummary.ownerPaidAmount;
+          const autoProfitProjected = calculatedIncome - calculatedExpenses - ownerSummary.ownerTotalDue;
+
+          const enriched = {
+            ...entry,
+            ownerPaymentSummary: ownerSummary,
+            calculatedIncome,
+            calculatedExpenses,
+            autoProfitActual,
+            autoProfitProjected
+          };
+
+          if (entry.data) {
+            const entryDate = new Date(entry.data);
+            entryDate.setHours(0, 0, 0, 0);
+            const entryTimestamp = entryDate.getTime();
+
+            if (entryTimestamp < todayTimestamp) {
+              pastEntriesLocal.push(enriched);
+            } else if (entryTimestamp >= todayTimestamp && entryTimestamp < dayAfterTomorrowTimestamp) {
+              currentEntriesLocal.push(enriched);
+            } else {
+              futureEntriesLocal.push(enriched);
+            }
+          } else {
+            currentEntriesLocal.push(enriched);
+          }
+
+          return enriched;
+        });
+
         const sortByDateAscending = (a, b) => {
           const aTimestamp = a.data ? new Date(a.data).getTime() : 0;
           const bTimestamp = b.data ? new Date(b.data).getTime() : 0;
-          
+
           if (aTimestamp && bTimestamp) {
             return aTimestamp - bTimestamp;
           }
-          
+
           return 0;
         };
-        
-        past.sort(sortByDateAscending);
-        current.sort(sortByDateAscending);
-        future.sort(sortByDateAscending);
-        
-        // Sort pending bookings by date (closest first)
+
         const sortBookingsByDate = (a, b) => {
           const aDate = a.bookingDate ? new Date(a.bookingDate).getTime() : 0;
           const bDate = b.bookingDate ? new Date(b.bookingDate).getTime() : 0;
           return aDate - bDate;
         };
-        
+
+        pastEntriesLocal.sort(sortByDateAscending);
+        currentEntriesLocal.sort(sortByDateAscending);
+        futureEntriesLocal.sort(sortByDateAscending);
+
         allPendingBookings.sort(sortBookingsByDate);
         pastPendingBookings.sort(sortBookingsByDate);
-        currentPendingBookings.sort(sortBookingsByDate);
+        currentPendingBookingsLocal.sort(sortBookingsByDate);
         futurePendingBookings.sort(sortBookingsByDate);
-        
-        setEntries(fetchedEntries);
-        setPastEntries(past);
-        setCurrentEntries(current);
-        setFutureEntries(future);
+
+        setEntries(enrichedEntries);
+        setPastEntries(pastEntriesLocal);
+        setCurrentEntries(currentEntriesLocal);
+        setFutureEntries(futureEntriesLocal);
         setPendingBookings(allPendingBookings);
         setPastPendingBookings(pastPendingBookings);
-        setCurrentPendingBookings(currentPendingBookings);
+        setCurrentPendingBookings(currentPendingBookingsLocal);
         setFuturePendingBookings(futurePendingBookings);
-        
-        // Show only current entries and current pending bookings by default
-        const combinedDisplayList = showPendingBookings 
-          ? [...current, ...currentPendingBookings] 
-          : current;
-        
+
+        const combinedDisplayList = showPendingBookings
+          ? [...currentEntriesLocal, ...currentPendingBookingsLocal]
+          : currentEntriesLocal;
+
         setFilteredEntries(combinedDisplayList);
-        
-        // Calculate summary based on visible entries (current entries)
-        calculateSummary(current);
-        
+        calculateSummary(currentEntriesLocal);
+
         setError(null);
       } catch (err) {
         console.error("Error fetching data from Firebase:", err);
@@ -339,7 +412,7 @@ const ExpenseTracker = () => {
         setLoading(false);
       }
     };
-    
+
     fetchData();
   }, [showPendingBookings]);
   
@@ -1014,12 +1087,12 @@ const ExpenseTracker = () => {
   const exportToCSV = () => {
     // Define headers based on your Excel structure
     const headers = [
-      "Data", "Detalii", "Booking ID", "SumUp - Iulian", "Stripe - Iulian", "Caixa - Just Enjoy Company",
+      "Data", "Detalii", "Booking ID", "SumUp - Iulian", "Stripe - Iulian", "Caixa - Nautiq Ibiza Company",
       "SumUp - Alin", "Stripe - Alin", "Cash - Iulian", "Cash - Alin", "Data",
       "Companie Barci", "Numele Barci", "Suma 1", "Suma 2", "Suma Integral",
-      "Skipper Cost", "Transfer Cost", "Fuel Cost", "Boat Expense", // Add new fields to CSV export
+      "Skipper Cost", "Transfer Cost", "Fuel Cost", "Boat Expense",
       "Metoda Plata", "Comisioane", "Colaboratori", "Metoda Plata", "Suma",
-      "Profit Provizoriu", "Profit Total", "Transferat Cont Cheltuieli"
+      "Profit Provizoriu", "Profit Total", "Net Profit (Owner Paid)", "Projected Profit (Owner Due)", "Owner Paid", "Owner Outstanding", "Transferat Cont Cheltuieli"
     ];
     
     const csvRows = [headers.join(',')];
@@ -1028,6 +1101,16 @@ const ExpenseTracker = () => {
     const expenseEntries = filteredEntries.filter(entry => !entry.bookingDetails); // Bookings have bookingDetails
     
     expenseEntries.forEach(entry => {
+      const ownerSummary = entry.ownerPaymentSummary || {};
+      const ownerPaidAmount = ownerSummary.ownerPaidAmount || 0;
+      const ownerOutstandingAmount = ownerSummary.ownerOutstandingAmount || 0;
+      const netProfitValue = entry.autoProfitActual !== undefined
+        ? entry.autoProfitActual
+        : calculateEntryIncome(entry) - calculateEntryExpenses(entry) - ownerPaidAmount;
+      const projectedProfitValue = entry.autoProfitProjected !== undefined
+        ? entry.autoProfitProjected
+        : calculateEntryIncome(entry) - calculateEntryExpenses(entry) - (ownerSummary.ownerTotalDue || (ownerPaidAmount + ownerOutstandingAmount));
+      
       const values = [
         formatDate(entry.data),
         `"${entry.detalii || ''}"`,
@@ -1045,7 +1128,7 @@ const ExpenseTracker = () => {
         entry.suma1 || 0,
         entry.suma2 || 0,
         entry.sumaIntegral || 0,
-        entry.skipperCost || 0,    // Add new fields to CSV export
+        entry.skipperCost || 0,
         entry.transferCost || 0,
         entry.fuelCost || 0,
         entry.boatExpense || 0,
@@ -1056,6 +1139,10 @@ const ExpenseTracker = () => {
         entry.suma || 0,
         entry.profitProvizoriu || 0,
         entry.profitTotal || 0,
+        Number.isFinite(netProfitValue) ? netProfitValue : 0,
+        Number.isFinite(projectedProfitValue) ? projectedProfitValue : 0,
+        ownerPaidAmount || 0,
+        ownerOutstandingAmount || 0,
         entry.transferatContCheltuieli
       ];
       csvRows.push(values.join(','));
@@ -1177,8 +1264,26 @@ const ExpenseTracker = () => {
     const isExpanded = expandedEntryId === entry.id;
     
     // Calculate income and expenses for this entry
-    const entryIncome = calculateEntryIncome(entry);
-    const entryExpenses = calculateEntryExpenses(entry);
+    const entryIncome = entry.calculatedIncome !== undefined
+      ? entry.calculatedIncome
+      : calculateEntryIncome(entry);
+    const entryExpenses = entry.calculatedExpenses !== undefined
+      ? entry.calculatedExpenses
+      : calculateEntryExpenses(entry);
+    const ownerSummary = entry.ownerPaymentSummary || {
+      ownerPaidAmount: 0,
+      ownerOutstandingAmount: 0,
+      ownerTotalDue: 0,
+      breakdown: {}
+    };
+    const ownerPaidAmount = ownerSummary.ownerPaidAmount || 0;
+    const ownerOutstandingAmount = ownerSummary.ownerOutstandingAmount || 0;
+    const autoProfitActual = entry.autoProfitActual !== undefined
+      ? entry.autoProfitActual
+      : entryIncome - entryExpenses - ownerPaidAmount;
+    const autoProfitProjected = entry.autoProfitProjected !== undefined
+      ? entry.autoProfitProjected
+      : entryIncome - entryExpenses - (ownerSummary.ownerTotalDue || (ownerPaidAmount + ownerOutstandingAmount));
     
     return (
       <div 
@@ -1270,11 +1375,41 @@ const ExpenseTracker = () => {
           </div>
         </div>
         
-        <div className="mt-3 p-2 rounded bg-gray-50 flex justify-between items-center">
-          <span className="text-sm font-medium">Profit:</span>
-          <span className={`text-lg font-bold ${parseFloat(entry.profitTotal || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {formatCurrency(entry.profitTotal)}
-          </span>
+        <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
+          <div className="flex flex-col bg-amber-50 p-2 rounded">
+            <span className="text-amber-700 font-semibold text-center mb-1">Owner Paid</span>
+            <span className="text-lg font-bold text-center text-amber-800">
+              {formatCurrency(ownerPaidAmount)}
+            </span>
+          </div>
+          
+          <div className="flex flex-col bg-yellow-50 p-2 rounded">
+            <span className="text-yellow-700 font-semibold text-center mb-1">Owner Outstanding</span>
+            <span className="text-lg font-bold text-center text-yellow-800">
+              {formatCurrency(ownerOutstandingAmount)}
+            </span>
+          </div>
+        </div>
+        
+        <div className="mt-3 space-y-2">
+          <div className="p-2 rounded bg-green-50 flex justify-between items-center">
+            <span className="text-sm font-medium text-green-800">Net Profit (after owner paid)</span>
+            <span className={`text-lg font-bold ${autoProfitActual >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {formatCurrency(autoProfitActual)}
+            </span>
+          </div>
+          <div className="p-2 rounded bg-emerald-50 flex justify-between items-center">
+            <span className="text-sm font-medium text-emerald-800">Projected Profit (after all owner due)</span>
+            <span className={`text-lg font-bold ${autoProfitProjected >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {formatCurrency(autoProfitProjected)}
+            </span>
+          </div>
+          <div className="p-2 rounded bg-gray-50 flex justify-between items-center">
+            <span className="text-sm font-medium text-gray-700">Recorded Profit</span>
+            <span className={`text-lg font-bold ${parseFloat(entry.profitTotal || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {formatCurrency(entry.profitTotal)}
+            </span>
+          </div>
         </div>
         
         {/* Expand/Collapse button */}
@@ -1316,7 +1451,7 @@ const ExpenseTracker = () => {
               <div className="text-gray-600">Cash - Alin:</div>
               <div className="font-medium text-right">{formatCurrency(entry.cashAlin)}</div>
               
-              <div className="text-gray-600">Caixa - Just Enjoy:</div>
+              <div className="text-gray-600">Caixa - Nautiq Ibiza:</div>
               <div className="font-medium text-right">{formatCurrency(entry.caixaJustEnjoy)}</div>
             </div>
             
@@ -1346,6 +1481,33 @@ const ExpenseTracker = () => {
               <div className="text-gray-600">Comisioane:</div>
               <div className="font-medium text-right">{formatCurrency(entry.comisioane)}</div>
             </div>
+            
+            {entry.bookingId && (
+              <>
+                <h4 className="font-medium text-sm mb-2 text-amber-600">Owner Payments</h4>
+                <div className="grid grid-cols-2 gap-1 text-xs mb-3">
+                  {Object.keys(ownerSummary.breakdown || {}).length > 0 ? (
+                    Object.values(ownerSummary.breakdown).map((payment, idx) => (
+                      <React.Fragment key={`${entry.id}-owner-${idx}`}>
+                        <div className="text-gray-600">{payment.label}:</div>
+                        <div className="font-medium text-right flex items-center justify-end space-x-2">
+                          <span>{formatCurrency(payment.amount)}</span>
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                            payment.paid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {payment.paid ? 'Paid' : 'Pending'}
+                          </span>
+                        </div>
+                      </React.Fragment>
+                    ))
+                  ) : (
+                    <div className="col-span-2 text-gray-500 italic">
+                      No owner payment records linked to this booking yet.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
             
             <div className="grid grid-cols-2 gap-1 text-xs">
               <div className="text-gray-600">Payment Method:</div>
@@ -1794,7 +1956,7 @@ const ExpenseTracker = () => {
           </div>
           
           <div className="p-4 md:p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-6">
               <div className="bg-blue-50 p-3 md:p-4 rounded-lg border border-blue-200 shadow-sm">
                 <h3 className="font-medium text-blue-800 mb-1 flex items-center">
                   <TrendingUp size={16} className="mr-2" /> Total Income
@@ -1819,13 +1981,37 @@ const ExpenseTracker = () => {
                 </p>
               </div>
               
+              <div className="bg-amber-50 p-3 md:p-4 rounded-lg border border-amber-200 shadow-sm">
+                <h3 className="font-medium text-amber-800 mb-1 flex items-center">
+                  <Ship size={16} className="mr-2" /> Paid to Owners
+                </h3>
+                <p className="text-xl md:text-2xl font-bold text-amber-900">
+                  {new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'EUR'
+                  }).format(summaryData.totalOwnerPaid)}
+                </p>
+              </div>
+              
+              <div className="bg-yellow-50 p-3 md:p-4 rounded-lg border border-yellow-200 shadow-sm">
+                <h3 className="font-medium text-yellow-800 mb-1 flex items-center">
+                  <AlertTriangle size={16} className="mr-2" /> Owner Outstanding
+                </h3>
+                <p className="text-xl md:text-2xl font-bold text-yellow-900">
+                  {new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'EUR'
+                  }).format(summaryData.totalOwnerOutstanding)}
+                </p>
+              </div>
+              
               <div className={`p-3 md:p-4 rounded-lg border shadow-sm ${
                 summaryData.totalProfit >= 0 
                   ? 'bg-green-50 border-green-200' 
                   : 'bg-red-50 border-red-200'
               }`}>
                 <h3 className="font-medium text-gray-800 mb-1 flex items-center">
-                  <DollarSign size={16} className="mr-2" /> Total Profit
+                  <DollarSign size={16} className="mr-2" /> Net Profit (after owner paid)
                 </h3>
                 <p className={`text-xl md:text-2xl font-bold ${
                   summaryData.totalProfit >= 0 
@@ -1836,6 +2022,18 @@ const ExpenseTracker = () => {
                     style: 'currency',
                     currency: 'EUR'
                   }).format(summaryData.totalProfit)}
+                </p>
+              </div>
+              
+              <div className="bg-gray-50 p-3 md:p-4 rounded-lg border border-gray-200 shadow-sm">
+                <h3 className="font-medium text-gray-800 mb-1 flex items-center">
+                  <PieChart size={16} className="mr-2" /> Recorded Profit (manual)
+                </h3>
+                <p className="text-xl md:text-2xl font-bold text-gray-900">
+                  {new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'EUR'
+                  }).format(summaryData.manualProfit)}
                 </p>
               </div>
             </div>
@@ -1868,7 +2066,7 @@ const ExpenseTracker = () => {
                       let bookingsToSum = [...currentPendingBookings];
                       if (showPastEntries) bookingsToSum = [...pastPendingBookings, ...bookingsToSum];
                       if (showFutureEntries) bookingsToSum = [...bookingsToSum, ...futurePendingBookings];
-                      return bookingsToSum.reduce((sum, booking) => sum + (booking.pricing?.agreedPrice || 0), 0);
+                      return bookingsToSum.reduce((sum, booking) => sum + parseAmount(booking.pricing?.agreedPrice || 0), 0);
                     })())}
                   </p>
                 </div>
@@ -1994,7 +2192,7 @@ const ExpenseTracker = () => {
                     </div>
                   </div>
                   <div className="col-span-2 sm:col-span-1">
-                    <label className="block text-sm font-medium text-gray-700">Caixa - Just Enjoy</label>
+                    <label className="block text-sm font-medium text-gray-700">Caixa - Nautiq Ibiza</label>
                     <div className="mt-1 relative rounded-md shadow-sm">
                       <input
                         type="number"
@@ -2362,7 +2560,7 @@ const ExpenseTracker = () => {
         <button 
           onClick={toggleSummary}
           className={`flex items-center justify-center p-3 md:p-4 rounded-full shadow-lg text-white ${showSummary ? 'bg-green-600' : 'bg-green-500 hover:bg-green-600'} transform transition-transform hover:scale-105`}
-          title="View Total Profit Summary"
+          title="View Net Profit Summary"
         >
           <Euro size={20} className="md:hidden" />
           <Euro size={24} className="hidden md:block" />
@@ -2548,7 +2746,10 @@ const ExpenseTracker = () => {
                   
                   <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Metoda</th>
                   <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Comisioane</th>
-                  <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Profit</th>
+                  <th className="px-2 py-3 bg-amber-100 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider sticky top-0 border-b-2 border-amber-200">Owner Paid</th>
+                  <th className="px-2 py-3 bg-yellow-100 text-left text-xs font-semibold text-yellow-800 uppercase tracking-wider sticky top-0 border-b-2 border-yellow-200">Owner Outstanding</th>
+                  <th className="px-2 py-3 bg-green-100 text-left text-xs font-semibold text-green-800 uppercase tracking-wider sticky top-0 border-b-2 border-green-200">Net Profit</th>
+                  <th className="px-2 py-3 bg-gray-100 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider sticky top-0 border-b-2 border-gray-200">Recorded Profit</th>
                   <th className="px-2 py-3 bg-red-100 text-left text-xs font-semibold text-red-800 uppercase tracking-wider sticky top-0 border-b-2 border-red-200">Transferat</th>
                   <th className="px-2 py-3 bg-gray-100 text-center text-xs font-semibold text-gray-800 uppercase tracking-wider sticky top-0 border-b-2 border-gray-200 w-20">Actions</th>
                 </tr>
@@ -2565,6 +2766,12 @@ const ExpenseTracker = () => {
                     const isPastEntry = entryDate < today;
                     const isTodayEntry = entryDate.getTime() === today.getTime();
                     const isTomorrowEntry = entryDate.getTime() === (today.getTime() + 24 * 60 * 60 * 1000);
+                    const ownerSummary = entry.ownerPaymentSummary || {};
+                    const ownerPaidAmount = ownerSummary.ownerPaidAmount || 0;
+                    const ownerOutstandingAmount = ownerSummary.ownerOutstandingAmount || 0;
+                    const netProfit = entry.autoProfitActual !== undefined
+                      ? entry.autoProfitActual
+                      : calculateEntryIncome(entry) - calculateEntryExpenses(entry) - ownerPaidAmount;
                     
                     return (
                       <tr 
@@ -2622,7 +2829,12 @@ const ExpenseTracker = () => {
                         
                         <td className="px-2 py-3 text-xs border-r border-red-100">{entry.metodaPlata}</td>
                         <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right">{formatCurrency(entry.comisioane)}</td>
-                        <td className="px-2 py-3 text-xs border-r border-red-100 font-mono text-right font-bold">{formatCurrency(entry.profitTotal)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-amber-100 font-mono text-right">{formatCurrency(ownerPaidAmount)}</td>
+                        <td className="px-2 py-3 text-xs border-r border-yellow-100 font-mono text-right">{formatCurrency(ownerOutstandingAmount)}</td>
+                        <td className={`px-2 py-3 text-xs border-r border-green-100 font-mono text-right font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatCurrency(netProfit)}
+                        </td>
+                        <td className="px-2 py-3 text-xs border-r border-gray-200 font-mono text-right font-bold">{formatCurrency(entry.profitTotal)}</td>
                         <td className="px-2 py-3 text-xs border-r border-red-100">
                           <span className={`inline-block rounded-full px-2 py-1 text-xs ${
                             entry.transferatContCheltuieli === 'Yes' ? 'bg-green-100 text-green-800' :

@@ -1,8 +1,8 @@
 {
   "functions": {
     "source": "functions",
-    "runtime": "nodejs18",
-    "secrets": ["SENDGRID_API_KEY"],
+    "runtime": "nodejs20",
+    "secrets": ["SENDGRID_API_KEY", "RESEND_API_KEY"],
     "ignore": [
       "node_modules",
       ".git",
