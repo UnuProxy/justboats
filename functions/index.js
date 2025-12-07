@@ -150,19 +150,25 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
   if (!stripeLinkId) return;
 
   try {
-    const snapshot = await db
-      .collection('paymentLinks')
-      .where('stripeLinkId', '==', stripeLinkId)
-      .limit(1)
-      .get();
+    // Primary lookup by document ID (now matches Stripe link ID)
+    let ref = db.collection('paymentLinks').doc(stripeLinkId);
+    let docSnap = await ref.get();
 
-    if (snapshot.empty) {
-      console.warn('Payment link not found for Stripe ID', stripeLinkId);
-      return;
+    // Fallback: older records created before ID alignment
+    if (!docSnap.exists) {
+      const snapshot = await db
+        .collection('paymentLinks')
+        .where('stripeLinkId', '==', stripeLinkId)
+        .limit(1)
+        .get();
+      if (snapshot.empty) {
+        console.warn('Payment link not found for Stripe ID', stripeLinkId);
+        return;
+      }
+      docSnap = snapshot.docs[0];
+      ref = docSnap.ref;
     }
 
-    const docSnap = snapshot.docs[0];
-    const ref = docSnap.ref;
     const existing = docSnap.data() || {};
 
     if (existing.paymentStatus === 'paid' && paymentStatus === 'paid') {
@@ -305,7 +311,10 @@ async function createStripePaymentLinkInternal(data, authContext) {
 
   const link = response.data;
 
-  await db.collection('paymentLinks').add({
+  // Use Stripe link ID as Firestore doc ID for direct lookup from webhook events
+  const linkRef = db.collection('paymentLinks').doc(link.id);
+
+  await linkRef.set({
     amount: numericAmount,
     currency: currency.toLowerCase(),
     description: linkDescription,
@@ -321,6 +330,22 @@ async function createStripePaymentLinkInternal(data, authContext) {
     paidAt: null,
     notes: notes || null
   });
+
+  // Backfill metadata onto the Stripe link for webhook correlation
+  if (stripe) {
+    try {
+      await stripe.paymentLinks.update(link.id, {
+        metadata: {
+          firestoreId: link.id,
+          bookingId: bookingId || '',
+          customerEmail: customerEmail || '',
+          customerName: customerName || ''
+        }
+      });
+    } catch (err) {
+      console.error('Failed to attach metadata to Stripe link', err);
+    }
+  }
 
   return {
     success: true,
@@ -435,15 +460,17 @@ exports.stripeWebhook = onRequest({
       }
       case 'payment_intent.succeeded': {
         const intent = event.data.object;
-        if (intent.payment_link) {
-          await updatePaymentLinkStatus(intent.payment_link, 'paid', intent);
+        const linkId = intent.payment_link || intent.metadata?.firestoreId || intent.metadata?.payment_link;
+        if (linkId) {
+          await updatePaymentLinkStatus(linkId, 'paid', intent);
         }
         break;
       }
       case 'payment_intent.payment_failed': {
         const intent = event.data.object;
-        if (intent.payment_link) {
-          await updatePaymentLinkStatus(intent.payment_link, 'failed', intent);
+        const linkId = intent.payment_link || intent.metadata?.firestoreId || intent.metadata?.payment_link;
+        if (linkId) {
+          await updatePaymentLinkStatus(linkId, 'failed', intent);
         }
         break;
       }
@@ -455,6 +482,71 @@ exports.stripeWebhook = onRequest({
   } catch (error) {
     console.error('Stripe webhook handler failed:', error);
     res.status(500).send('Webhook handler error');
+  }
+});
+
+// Scheduled reconciliation to backfill payment statuses and enforce single-use even if webhooks are missed
+exports.reconcilePaymentLinks = onSchedule({
+  region: "us-central1",
+  schedule: "every 15 minutes",
+  timeZone: "Etc/UTC",
+  maxInstances: 1,
+  secrets: ["STRIPE_SECRET_KEY"]
+}, async () => {
+  if (!stripe) {
+    console.warn('Stripe not configured; skipping reconciliation');
+    return;
+  }
+
+  // Check the most recent pending/failed links to keep load low
+  const snapshot = await db
+    .collection('paymentLinks')
+    .where('paymentStatus', 'in', ['pending', 'failed'])
+    .limit(30)
+    .get();
+
+  if (snapshot.empty) return;
+
+  for (const doc of snapshot.docs) {
+    const data = doc.data();
+    const stripeLinkId = (doc.id && doc.id.startsWith('plink_')) ? doc.id : data.stripeLinkId;
+    if (!stripeLinkId) continue;
+
+    try {
+      // Grab the latest Checkout Session for this payment link
+      const { data: sessions } = await stripe.checkout.sessions.list({
+        payment_link: stripeLinkId,
+        limit: 1
+      });
+
+      if (!sessions || sessions.length === 0) continue;
+      const session = sessions[0];
+      const paymentStatus = session.payment_status === 'paid' ? 'paid'
+        : session.payment_status === 'unpaid' ? 'pending'
+        : session.payment_status;
+
+      const update = {
+        paymentStatus,
+        lastStripeSessionId: session.id,
+        lastStripePaymentIntent: session.payment_intent || null,
+        paidAt: paymentStatus === 'paid'
+          ? admin.firestore.Timestamp.fromMillis(session.created * 1000)
+          : admin.firestore.FieldValue.delete()
+      };
+
+      await doc.ref.set(update, { merge: true });
+
+      // If paid, deactivate the link to enforce single-use
+      if (paymentStatus === 'paid') {
+        try {
+          await stripe.paymentLinks.update(stripeLinkId, { active: false });
+        } catch (err) {
+          console.error('Reconcile failed to deactivate payment link', stripeLinkId, err);
+        }
+      }
+    } catch (err) {
+      console.error('Reconcile check failed for', stripeLinkId, err?.message || err);
+    }
   }
 });
 
