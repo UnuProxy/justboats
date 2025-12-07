@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Navigate, Route, Routes, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from 'react-error-boundary';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Sidebar from './components/Sidebar';
@@ -11,6 +11,7 @@ import FirestoreTest from "./FirestoreTest";
 import Login from './components/Login';
 import ClientDirectory from './components/ClientDirectory';
 import PaymentTracking from './components/PaymentTracking';
+import PaymentLinkGenerator from './components/PaymentLinkGenerator';
 import ExpenseOverview from './components/ExpenseOverview';
 import BoatManagement from './components/BoatManagement';
 import AddBoat from './components/AddBoat';
@@ -32,15 +33,11 @@ import ExpenseTracker from './components/ExpenseTracker';
 import CateringExpensesTracker from './components/CateringExpensesTracker';
 import CollaboratorManagement from './components/CollaboratorManagement';
 import DataInsights from './components/DataInsights';
-import { Clock } from 'lucide-react';
 import RemindersBoard from './components/RemindersBoard';
 import GlobalSearch from './components/search/GlobalSearch';
-import CEOCommandMenu from './components/CEOCommandMenu';
 import BoatPerformanceAnalytics from './components/BoatPerformanceAnalytics';
 import PartnerPerformanceReports from './components/PartnerPerformanceReports';
 import DataBackup from './components/DataBackup';
-import OpsCommandWorkspace from './components/OpsCommandWorkspace';
-import CrewFieldApp from './components/CrewFieldApp';
 import { canRoleAccessPath } from './config/accessControl';
 const Splash = ({ onFinish }) => {
     useEffect(() => {
@@ -145,14 +142,6 @@ const ProtectedRoute = ({ children, adminOnly = false, requiredPermission }) => 
 };
 
 function ProtectedLayout({ children }) {
-    const navigate = useNavigate();
-    const today = new Date();
-    const formattedDate = today.toLocaleDateString('en-GB', {
-        weekday: 'long',
-        month: 'short',
-        day: 'numeric'
-    });
-
     return (
         <div className="relative min-h-screen text-slate-900">
             <Sidebar />
@@ -161,31 +150,10 @@ function ProtectedLayout({ children }) {
                 style={{ marginLeft: 'var(--sidebar-offset, 0px)' }}
             >
                 <header className="sticky top-0 z-30 border-b bg-white/85 backdrop-blur-md" style={{ borderColor: 'var(--border)' }}>
-                    <div className="flex flex-col gap-4 px-6 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-10">
-                        <div className="flex items-center gap-4">
-                            <button
-                                onClick={() => navigate('/')}
-                                className="group flex items-center gap-3 rounded-xl border bg-white/90 px-3.5 py-2.5 shadow-sm transition hover:-translate-y-0.5"
-                                style={{ borderColor: 'var(--border)' }}
-                            >
-                                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-light)] text-[var(--accent)]">
-                                    <Clock className="h-4 w-4" />
-                                </span>
-                                <div className="text-left leading-tight">
-                                    <span className="block text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">Nautiq Operations</span>
-                                </div>
-                            </button>
-                        </div>
-                        <div className="flex flex-col gap-2 lg:w-[30rem] lg:flex-row lg:items-center lg:justify-end">
+                    <div className="flex items-center justify-end gap-3 px-6 py-2 lg:px-10">
+                        <div className="flex items-center gap-2">
                             <GlobalSearch />
-                            <div className="flex items-center gap-3">
-                                <CEOCommandMenu />
-                                <span className="hidden items-center gap-2 rounded-full border bg-white/90 px-3.5 py-2 text-xs font-medium text-[var(--text-secondary)] sm:inline-flex shadow-sm" style={{ borderColor: 'var(--border)' }}>
-                                    <Clock className="h-4 w-4 text-[var(--text-tertiary)]" />
-                                    {formattedDate}
-                                </span>
-                                <NotificationsCenter />
-                            </div>
+                            <NotificationsCenter />
                         </div>
                     </div>
                 </header>
@@ -250,28 +218,6 @@ function App() {
                                 }
                             />
 
-                            {/* Ops Workspace */}
-                            <Route
-                                path="/ops-command"
-                                element={
-                                    <ProtectedRoute requiredPermission="staff">
-                                        <ProtectedLayout>
-                                            <OpsCommandWorkspace />
-                                        </ProtectedLayout>
-                                    </ProtectedRoute>
-                                }
-                            />
-                            <Route
-                                path="/crew-app"
-                                element={
-                                    <ProtectedRoute requiredPermission={['staff', 'driver']}>
-                                        <ProtectedLayout>
-                                            <CrewFieldApp />
-                                        </ProtectedLayout>
-                                    </ProtectedRoute>
-                                }
-                            />
-
                             
                             {/* San Antonio Tours */}
                             <Route
@@ -287,6 +233,16 @@ function App() {
                             
 
                             {/* Financial Routes */}
+                            <Route
+                                path="/payment-links"
+                                element={
+                                    <ProtectedRoute requiredPermission="staff">
+                                        <ProtectedLayout>
+                                            <PaymentLinkGenerator />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
                             <Route
                                 path="/payment-tracking"
                                 element={

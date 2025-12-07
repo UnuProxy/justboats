@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Menu, X, Calendar, PlusCircle, Users, BarChart3,
-  User, CreditCard, Euro, Ship, MessageSquare, Settings,
+  User, CreditCard, Euro, Ship, MessageSquare, Settings, Link as LinkIcon,
   ChevronRight, Utensils, Package, ShoppingCart, FileText, LineChart,
   QrCode, MapPin, DollarSign, Search, Clock, LogOut, TrendingUp,
-  CheckSquare, ChevronsLeft, ChevronsRight, Database, LayoutDashboard,
-  Smartphone, Activity
+  CheckSquare, ChevronsLeft, ChevronsRight, Database
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -72,7 +71,7 @@ const NavGroup = React.memo(function NavGroup({ group, expanded, onToggle, pathn
   const hasActive = allowed.some(i => i && pathname === i.path);
   if (collapsed) {
     return (
-      <div className="mb-3 flex flex-col gap-1">
+      <div className="mb-3.5 flex flex-col gap-1.5">
         {allowed.map(item => {
           if (!item?.path) return null;
           const active = pathname === item.path;
@@ -91,7 +90,7 @@ const NavGroup = React.memo(function NavGroup({ group, expanded, onToggle, pathn
   }
 
   return (
-    <div className="mb-3">
+    <div className="mb-4">
       <button
         onClick={() => onToggle(group.id)}
         className={cx(
@@ -194,7 +193,6 @@ const Sidebar = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearch = useDebouncedValue(searchTerm, 120);
   const searchRef = useRef(null);
-  const [currentTime, setCurrentTime] = useState(new Date());
 
   const updateSidebarOffset = useCallback((mobileState) => {
     if (!isBrowser) return;
@@ -225,11 +223,6 @@ const Sidebar = () => {
     return () => window.removeEventListener('resize', syncLayout);
   }, [isBrowser, updateSidebarOffset]);
 
-  // live clock
-  useEffect(() => {
-    const t = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     updateSidebarOffset(isMobile);
@@ -257,26 +250,18 @@ const Sidebar = () => {
         ]
       },
       {
-        id: 'ops-command',
-        title: 'Ops Command',
-        icon: Activity,
-        items: [
-          { name: 'Command center', icon: LayoutDashboard, path: '/ops-command', allowed: roleCanSee('/ops-command', true) },
-          { name: 'Crew field app', icon: Smartphone, path: '/crew-app', allowed: roleCanSee('/crew-app', true) },
-        ]
-      },
-      {
         id: 'financial',
         title: 'Finance',
-      icon: Euro,
-      items: [
-        { name: 'Payments', icon: CreditCard, path: '/payment-tracking', allowed: admin || isEmployeeUser },
-        { name: 'Invoices', icon: FileText, path: '/invoice-generator', allowed: admin },
-        { name: 'Expenses', icon: Euro, path: '/expenses', allowed: admin },
-        { name: 'Expense tracker', icon: LineChart, path: '/expense-tracker', allowed: admin },
-        { name: 'Analytics', icon: BarChart3, path: '/financial-dashboard', allowed: admin },
-      ]
-    },
+        icon: Euro,
+        items: [
+          { name: 'Payment links', icon: LinkIcon, path: '/payment-links', allowed: roleCanSee('/payment-links', true) },
+          { name: 'Payments', icon: CreditCard, path: '/payment-tracking', allowed: admin || isEmployeeUser },
+          { name: 'Invoices', icon: FileText, path: '/invoice-generator', allowed: admin },
+          { name: 'Expenses', icon: Euro, path: '/expenses', allowed: admin },
+          { name: 'Expense tracker', icon: LineChart, path: '/expense-tracker', allowed: admin },
+          { name: 'Analytics', icon: BarChart3, path: '/financial-dashboard', allowed: admin },
+        ]
+      },
       {
         id: 'intelligence',
         title: 'Intelligence',
@@ -421,12 +406,15 @@ const Sidebar = () => {
 
       <aside
         className={cx(
-          'fixed top-0 left-0 z-40 h-full border-r bg-[var(--sidebar-bg)] shadow-[0_20px_40px_-30px_rgba(31,33,37,0.55)] transition-transform duration-300',
+          'fixed top-0 left-0 z-40 h-full border-r bg-[var(--sidebar-bg)] shadow-[0_26px_60px_-40px_rgba(31,33,37,0.65)] transition-transform duration-300',
           sidebarWidth,
           isOpen ? 'translate-x-0' : '-translate-x-full',
           'lg:translate-x-0'
         )}
-        style={{ borderColor: 'var(--border)' }}
+        style={{
+          borderColor: 'var(--border)',
+          background: 'linear-gradient(180deg, rgba(230, 238, 249, 0.96) 0%, rgba(223, 240, 244, 0.98) 100%)'
+        }}
       >
         <div className="relative flex h-full flex-col">
           <div className={cx('border-b px-4 pb-4 pt-5', isCollapsed ? 'items-center justify-center' : '')} style={{ borderColor: 'var(--border)' }}>
@@ -437,8 +425,7 @@ const Sidebar = () => {
                 </div>
                 {!isCollapsed && (
                   <div className="leading-tight">
-                    <h1 className="text-base font-semibold text-[var(--text-primary)]">Nautiq</h1>
-                    <p className="text-xs text-[var(--text-tertiary)]">Operations Command</p>
+                    <h1 className="text-base font-semibold text-[var(--text-primary)]">Nautiq Ibiza</h1>
                   </div>
                 )}
               </div>
@@ -466,22 +453,6 @@ const Sidebar = () => {
 
             {!isCollapsed && (
               <>
-                <div className="mt-4 flex items-center justify-between rounded-xl border bg-white/95 px-3 py-2.5" style={{ borderColor: 'var(--border)' }}>
-                  <div className="flex items-center gap-2.5">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent-light)] text-[var(--accent-hover)] text-sm font-semibold">
-                      {(user?.email?.[0] || 'N').toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="truncate text-[15px] font-medium text-[var(--text-primary)]">
-                        {user?.email?.split('@')[0] || 'Team member'}
-                      </p>
-                      <span className="text-xs text-[var(--text-tertiary)]">
-                        {isAdminUser ? 'Administrator' : (userRole || 'Staff')}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="mt-4">
                   <div className="relative">
                     <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-system-gray-400" />
@@ -508,7 +479,7 @@ const Sidebar = () => {
             )}
           </div>
 
-          <nav className={cx('flex-1 overflow-y-auto py-5', isCollapsed ? 'px-2' : 'px-4')}>
+          <nav className={cx('flex-1 overflow-y-auto py-6', isCollapsed ? 'px-3' : 'px-5 space-y-1')}>
             {baseGroups.map(g => (
               <NavGroup
                 key={g.id}
@@ -522,23 +493,27 @@ const Sidebar = () => {
             ))}
           </nav>
 
-          <div className="border-t px-4 py-4" style={{ borderColor: 'var(--border)' }}>
+          <div className="border-t px-3 py-3" style={{ borderColor: 'var(--border)' }}>
             {!isCollapsed && (
-              <div className="mb-3 flex items-center justify-between text-xs text-[var(--text-tertiary)]">
-                <span>{currentTime.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' })}</span>
-                <span className="text-[var(--border)]">•</span>
-                <span>Ibiza crew</span>
+              <div className="mb-2 flex items-center gap-2 rounded-lg border bg-white/90 px-2.5 py-2" style={{ borderColor: 'var(--border)' }}>
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent-light)] text-[var(--accent-hover)] text-[11px] font-semibold">
+                  {(user?.email?.[0] || 'N').toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0 leading-tight">
+                  <p className="truncate text-[13px] font-semibold text-[var(--text-primary)]">{user?.email?.split('@')[0] || 'Team member'}</p>
+                  <span className="text-[10px] text-[var(--text-tertiary)]">{isAdminUser ? 'Administrator' : (userRole || 'Staff')}</span>
+                </div>
               </div>
             )}
             <button
               onClick={handleLogout}
               className={cx(
-                'items-center justify-center gap-2 rounded-lg border text-[15px] font-medium transition-colors bg-white hover:bg-system-gray-50',
-                isCollapsed ? 'flex h-10 w-10 mx-auto' : 'flex w-full px-3 py-2.5'
+                'items-center justify-center gap-1.5 rounded-lg border text-[13px] font-medium transition-colors bg-white hover:bg-system-gray-50',
+                isCollapsed ? 'flex h-9 w-9 mx-auto' : 'flex w-full px-3 py-2'
               )}
               style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
             >
-              <LogOut size={18} />
+              <LogOut size={16} />
               {!isCollapsed && <span>Sign out</span>}
             </button>
           </div>

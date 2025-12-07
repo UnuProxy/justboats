@@ -5,6 +5,7 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 const axios = require('axios');
 const { getMessaging } = require('firebase-admin/messaging');
+const Stripe = require('stripe');
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -77,7 +78,8 @@ const SENDGRID_MULTI_BOAT_TEMPLATE_ID = process.env.SENDGRID_MULTI_BOAT_TEMPLATE
 const ALLOWED_ORIGINS = [
   'https://justboats.vercel.app',
   'https://justenjoyibizaboats.com',
-  'http://localhost:3000'
+  'http://localhost:3000',
+  'http://localhost:3001'
 ];
 const ADMIN_EMAIL = 'unujulian@gmail.com';
 const SENDGRID_PAYMENT_REMINDER_TEMPLATE_ID = process.env.SENDGRID_PAYMENT_REMINDER_TEMPLATE_ID || null;
@@ -87,6 +89,11 @@ const PAYMENT_REMINDER_MIN_HOURS_BETWEEN_EMAILS = 22;
 const OUTSTANDING_PAYMENT_STATUSES = ['No Payment', 'Partial', 'Pending', 'Deposit', 'Outstanding'];
 const BRAND_FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL || 'info@nautiqibiza.com';
 const CATERING_MENU_URL = 'https://nautiqibiza.com/catering';
+
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+const stripe = stripeSecretKey ? new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' }) : null;
+const DEFAULT_SUCCESS_URL = process.env.SUCCESS_REDIRECT_URL || 'https://nautiqibiza.com/thanks';
 // Simplified API key handling using Firebase Secrets
 function getApiKey() {
   const apiKey = process.env.SENDGRID_API_KEY;
@@ -94,6 +101,95 @@ function getApiKey() {
     throw new Error('SendGrid API key not configured in environment variables');
   }
   return apiKey;
+}
+
+function handleCors(req, res) {
+  const origin = req.headers.origin;
+  const isAllowedOrigin = !origin || ALLOWED_ORIGINS.includes(origin);
+
+  if (isAllowedOrigin && origin) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Vary', 'Origin');
+  }
+
+  res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Max-Age', '3600');
+
+  if (!isAllowedOrigin && origin) {
+    res.status(403).json({ error: 'Origin not allowed' });
+    return true;
+  }
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return true;
+  }
+
+  return false;
+}
+
+function mapHttpsErrorToStatus(error) {
+  if (error instanceof HttpsError) {
+    const statusMap = {
+      'invalid-argument': 400,
+      'failed-precondition': 400,
+      'permission-denied': 403,
+      'unauthenticated': 401,
+      'not-found': 404,
+      'resource-exhausted': 429,
+      'unavailable': 503,
+      'deadline-exceeded': 504
+    };
+    return statusMap[error.code] || 500;
+  }
+  return 500;
+}
+
+async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}) {
+  if (!stripeLinkId) return;
+
+  try {
+    const snapshot = await db
+      .collection('paymentLinks')
+      .where('stripeLinkId', '==', stripeLinkId)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      console.warn('Payment link not found for Stripe ID', stripeLinkId);
+      return;
+    }
+
+    const docSnap = snapshot.docs[0];
+    const ref = docSnap.ref;
+    const existing = docSnap.data() || {};
+
+    if (existing.paymentStatus === 'paid' && paymentStatus === 'paid') {
+      return;
+    }
+
+    const updateData = {
+      paymentStatus,
+      lastStripeSessionId: session.id || null,
+      lastStripePaymentIntent: session.payment_intent || null,
+      paidAt: paymentStatus === 'paid' && session.created
+        ? admin.firestore.Timestamp.fromMillis(session.created * 1000)
+        : admin.firestore.FieldValue.delete()
+    };
+
+    await ref.set(updateData, { merge: true });
+
+    if (paymentStatus === 'paid' && stripe) {
+      try {
+        await stripe.paymentLinks.update(stripeLinkId, { active: false });
+      } catch (err) {
+        console.error('Failed to deactivate payment link after payment', err);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to update payment link status', error);
+  }
 }
 
 // Email sending function
@@ -151,6 +247,216 @@ async function sendPlainEmail(to, subject, text) {
 
   return { success: true };
 }
+
+async function createStripePaymentLinkInternal(data, authContext) {
+  const {
+    amount,
+    currency = 'eur',
+    description,
+    customerName,
+    customerEmail,
+    bookingId,
+    successUrl,
+    notes
+  } = data || {};
+
+  const numericAmount = Number(amount);
+  if (!numericAmount || Number.isNaN(numericAmount) || numericAmount <= 0) {
+    throw new HttpsError('invalid-argument', 'A valid amount is required to create a payment link.');
+  }
+  const amountInCents = Math.round(numericAmount * 100);
+
+  const stripeSecret = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecret) {
+    throw new HttpsError('failed-precondition', 'Stripe secret key is not configured.');
+  }
+
+  const linkDescription = (description || `Payment for ${customerName || 'Nautiq Ibiza client'}`).trim().slice(0, 180);
+  const formData = new URLSearchParams();
+  formData.append('line_items[0][price_data][currency]', currency.toLowerCase());
+  formData.append('line_items[0][price_data][product_data][name]', linkDescription);
+  formData.append('line_items[0][price_data][unit_amount]', amountInCents.toString());
+  formData.append('line_items[0][quantity]', '1');
+  formData.append('customer_creation', 'always');
+  formData.append('allow_promotion_codes', 'false');
+
+  if (authContext?.uid) {
+    formData.append('metadata[createdBy]', authContext.uid);
+  }
+  formData.append('metadata[source]', 'nautiq-app');
+
+  if (bookingId) formData.append('metadata[bookingId]', String(bookingId));
+  if (customerName) formData.append('metadata[customerName]', customerName);
+  if (customerEmail) formData.append('metadata[customerEmail]', customerEmail);
+  if (notes) formData.append('metadata[notes]', notes);
+  formData.append('after_completion[type]', 'redirect');
+  formData.append('after_completion[redirect][url]', successUrl || DEFAULT_SUCCESS_URL);
+
+  const response = await axios.post(
+    'https://api.stripe.com/v1/payment_links',
+    formData.toString(),
+    {
+      headers: {
+        'Authorization': `Bearer ${stripeSecret}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    }
+  );
+
+  const link = response.data;
+
+  await db.collection('paymentLinks').add({
+    amount: numericAmount,
+    currency: currency.toLowerCase(),
+    description: linkDescription,
+    bookingId: bookingId || null,
+    customerName: customerName || null,
+    customerEmail: customerEmail || null,
+    stripeLinkId: link.id,
+    url: link.url,
+    status: link.active ? 'active' : 'inactive',
+    paymentStatus: 'pending',
+    createdBy: authContext?.uid || null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    paidAt: null,
+    notes: notes || null
+  });
+
+  return {
+    success: true,
+    url: link.url,
+    id: link.id,
+    amount: numericAmount,
+    currency: currency.toLowerCase(),
+    expiresAt: link.expires_at || null
+  };
+}
+
+// Create a Stripe Payment Link (admin + staff only) - callable
+exports.createStripePaymentLink = onCall({
+  region: "us-central1",
+  cors: ALLOWED_ORIGINS,
+  secrets: ["STRIPE_SECRET_KEY"],
+  maxInstances: 10
+}, async (request) => {
+  try {
+    const authContext = await assertCallableAuthorization(request, ['admin', 'staff']);
+    return await createStripePaymentLinkInternal(request.data || {}, authContext);
+  } catch (error) {
+    console.error('createStripePaymentLink error:', error.response?.data || error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    const message = error.response?.data?.error?.message || error.message || 'Failed to create payment link';
+    throw new HttpsError('internal', message);
+  }
+});
+
+// HTTP version for non-Firebase clients (handles CORS preflight)
+exports.createStripePaymentLinkHttp = onRequest({
+  region: "us-central1",
+  cors: false,
+  secrets: ["STRIPE_SECRET_KEY"],
+  maxInstances: 10
+}, async (req, res) => {
+  if (handleCors(req, res)) {
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method Not Allowed' });
+    return;
+  }
+
+  const authContext = await authenticateHttpRequest(req, res, ['admin', 'staff']);
+  if (!authContext) {
+    return;
+  }
+
+  try {
+    const result = await createStripePaymentLinkInternal(req.body || {}, authContext);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('createStripePaymentLinkHttp error:', error.response?.data || error);
+    const status = mapHttpsErrorToStatus(error);
+    const message = error.response?.data?.error?.message || error.message || 'Failed to create payment link';
+    res.status(status).json({ error: message });
+  }
+});
+
+// Stripe webhook to update payment link payment status
+exports.stripeWebhook = onRequest({
+  region: "us-central1",
+  cors: false,
+  maxInstances: 10,
+  secrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]
+}, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+
+  if (!stripe || !stripeWebhookSecret) {
+    res.status(500).send('Stripe not configured');
+    return;
+  }
+
+  const signature = req.headers['stripe-signature'];
+  if (!signature) {
+    res.status(400).send('Missing Stripe signature');
+    return;
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.rawBody, signature, stripeWebhookSecret);
+  } catch (err) {
+    console.error('Stripe webhook signature verification failed:', err.message);
+    res.status(400).send(`Webhook Error: ${err.message}`);
+    return;
+  }
+
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed':
+      case 'checkout.session.async_payment_succeeded': {
+        const session = event.data.object;
+        if (session.payment_link) {
+          await updatePaymentLinkStatus(session.payment_link, 'paid', session);
+        }
+        break;
+      }
+      case 'checkout.session.async_payment_failed': {
+        const session = event.data.object;
+        if (session.payment_link) {
+          await updatePaymentLinkStatus(session.payment_link, 'failed', session);
+        }
+        break;
+      }
+      case 'payment_intent.succeeded': {
+        const intent = event.data.object;
+        if (intent.payment_link) {
+          await updatePaymentLinkStatus(intent.payment_link, 'paid', intent);
+        }
+        break;
+      }
+      case 'payment_intent.payment_failed': {
+        const intent = event.data.object;
+        if (intent.payment_link) {
+          await updatePaymentLinkStatus(intent.payment_link, 'failed', intent);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
+    res.status(200).send({ received: true });
+  } catch (error) {
+    console.error('Stripe webhook handler failed:', error);
+    res.status(500).send('Webhook handler error');
+  }
+});
 
 async function sendSmsNotification(to, body) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -482,7 +788,7 @@ function formatReminderMessage(reminder) {
     reminder?.location ? `Location / link: ${reminder.location}` : null,
     reminder?.relatedClient ? `Client: ${reminder.relatedClient}` : null,
     reminder?.relatedBoat ? `Boat: ${reminder.relatedBoat}` : null,
-    reminder?.notes ? '',
+    reminder?.notes ? '' : null,
     reminder?.notes || null,
     '',
     '— Nautiq reminders'
@@ -525,9 +831,13 @@ exports.sendBookingConfirmation = onCall({
 // HTTP Endpoint - Updated for multi-boat support
 exports.sendBookingConfirmationHttp = onRequest({
   region: "us-central1",
-  cors: ALLOWED_ORIGINS,
+  cors: false,
   secrets: ["SENDGRID_API_KEY"]
 }, async (req, res) => {
+  if (handleCors(req, res)) {
+    return;
+  }
+
   try {
     if (req.method !== 'POST') {
       res.status(405).send('Method Not Allowed');
@@ -1040,9 +1350,13 @@ exports.testEmail = onCall({
 
 exports.trackAndRedirect = onRequest({
   region: 'us-central1',
-  cors: ALLOWED_ORIGINS,
+  cors: false,
   maxInstances: 10
 }, async (req, res) => {
+  if (handleCors(req, res)) {
+    return;
+  }
+
   try {
     // Accept parameters from QR code
     const locationId = req.query.locationId || 'DEFAULT';

@@ -15,8 +15,7 @@ const STAFF_ALLOWED_PATTERNS = [
   '/add-product',             // Add product workflow
   '/edit-product/:id',        // Edit product workflow
   '/pricing-manager',         // Catering pricing controls
-  '/ops-command',             // Staff ops command center
-  '/crew-app'                 // Crew mobile field app
+  '/payment-links'            // Generate Stripe payment links
 ];
 
 const EMPLOYEE_ALLOWED_PATTERNS = [

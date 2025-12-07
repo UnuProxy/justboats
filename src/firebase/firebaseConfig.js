@@ -25,11 +25,12 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 
 
-const functions = getFunctions(app);
-functions.region = "us-central1";
+// Specify region explicitly so callable functions resolve to the correct endpoint
+const functions = getFunctions(app, 'us-central1');
 
-// Connect to functions emulator when running locally
-if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
+// Connect to Functions emulator only when explicitly enabled
+const useFunctionsEmulator = process.env.REACT_APP_USE_FIREBASE_EMULATOR === 'true';
+if (useFunctionsEmulator) {
   console.log('Connecting to Firebase Functions Emulator...');
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 }
