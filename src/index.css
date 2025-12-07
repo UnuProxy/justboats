@@ -7,7 +7,7 @@
   --background: #f5f7fb;
   --background-secondary: #e7f1f3;
   --surface: #ffffff;
-  --sidebar-bg: #f0f5f6;
+  --sidebar-bg: #e6eef9;
   --border: #d4e2e7;
   --shadow-soft: 0 18px 50px -36px rgba(16, 34, 48, 0.3);
   --shadow-card: 0 24px 65px -45px rgba(11, 33, 53, 0.45);
@@ -59,7 +59,7 @@
   }
 
   ::selection {
-    background: rgba(195, 106, 63, 0.2);
+    background: rgba(31, 122, 140, 0.12);
     color: var(--text-primary);
   }
 

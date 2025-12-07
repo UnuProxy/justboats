@@ -1,6 +1,7 @@
 {
   "projects": {
-    "default": "crm-boats"
+    "default": "crm-boats",
+    "crmboats": "crm-boats"
   },
   "targets": {},
   "etags": {}
