@@ -3,7 +3,9 @@
     "origin": [
       "http://localhost:3000",
       "https://justboats.vercel.app",
-      "http://localhost:3001"
+      "http://localhost:3001",
+      "https://nautiqibiza-booking.com",
+      "https://www.nautiqibiza-booking.com"
     ],
     "method": ["GET"],
     "maxAgeSeconds": 3600

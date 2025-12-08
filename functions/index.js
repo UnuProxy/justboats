@@ -78,6 +78,8 @@ const SENDGRID_MULTI_BOAT_TEMPLATE_ID = process.env.SENDGRID_MULTI_BOAT_TEMPLATE
 const ALLOWED_ORIGINS = [
   'https://justboats.vercel.app',
   'https://justenjoyibizaboats.com',
+  'https://nautiqibiza-booking.com',
+  'https://www.nautiqibiza-booking.com',
   'http://localhost:3000',
   'http://localhost:3001'
 ];
