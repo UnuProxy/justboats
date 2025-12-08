@@ -411,6 +411,82 @@ exports.createStripePaymentLinkHttp = onRequest({
   }
 });
 
+// Refund a paid Stripe Payment Link (admin + staff)
+exports.refundPaymentLinkHttp = onRequest({
+  region: "us-central1",
+  cors: false,
+  secrets: ["STRIPE_SECRET_KEY"],
+  maxInstances: 10
+}, async (req, res) => {
+  if (handleCors(req, res)) {
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method Not Allowed' });
+    return;
+  }
+
+  if (!stripe) {
+    res.status(500).json({ error: 'Stripe not configured' });
+    return;
+  }
+
+  const authContext = await authenticateHttpRequest(req, res, ['admin', 'staff']);
+  if (!authContext) {
+    return;
+  }
+
+  const { paymentLinkId } = req.body || {};
+  if (!paymentLinkId) {
+    res.status(400).json({ error: 'paymentLinkId is required' });
+    return;
+  }
+
+  try {
+    const ref = db.collection('paymentLinks').doc(paymentLinkId);
+    const doc = await ref.get();
+    if (!doc.exists) {
+      res.status(404).json({ error: 'Payment link not found' });
+      return;
+    }
+
+    const data = doc.data() || {};
+    const paymentIntentId = data.lastStripePaymentIntent || null;
+
+    if (!paymentIntentId) {
+      res.status(400).json({ error: 'No payment intent recorded for this link yet.' });
+      return;
+    }
+
+    if (data.paymentStatus !== 'paid') {
+      res.status(400).json({ error: 'Only paid links can be refunded.' });
+      return;
+    }
+
+    const refund = await stripe.refunds.create({
+      payment_intent: paymentIntentId,
+      reason: 'requested_by_customer'
+    });
+
+    await ref.set({
+      refundId: refund.id,
+      refundStatus: refund.status,
+      refundedAt: refund.created
+        ? admin.firestore.Timestamp.fromMillis(refund.created * 1000)
+        : admin.firestore.FieldValue.serverTimestamp(),
+      paymentStatus: refund.status === 'succeeded' ? 'refunded' : data.paymentStatus
+    }, { merge: true });
+
+    res.status(200).json({ success: true, refundId: refund.id, status: refund.status });
+  } catch (error) {
+    console.error('refundPaymentLinkHttp error:', error.response?.data || error);
+    const status = mapHttpsErrorToStatus(error);
+    const message = error.response?.data?.error?.message || error.message || 'Failed to refund payment';
+    res.status(status).json({ error: message });
+  }
+});
+
 // Stripe webhook to update payment link payment status
 exports.stripeWebhook = onRequest({
   region: "us-central1",

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { auth, db } from '../firebase/firebaseConfig';
 import {
   collection,
@@ -13,6 +13,7 @@ import {
   CreditCard,
   Link as LinkIcon,
   Loader2,
+  RotateCcw,
   Send,
   Shield
 } from 'lucide-react';
@@ -33,6 +34,10 @@ const defaultPaymentLinkEndpoint = process.env.REACT_APP_FIREBASE_PROJECT_ID
   : 'https://us-central1-crm-boats.cloudfunctions.net/createStripePaymentLinkHttp';
 
 const paymentLinkEndpoint = process.env.REACT_APP_PAYMENT_LINK_ENDPOINT || defaultPaymentLinkEndpoint;
+const defaultRefundLinkEndpoint = process.env.REACT_APP_FIREBASE_PROJECT_ID
+  ? `https://us-central1-${process.env.REACT_APP_FIREBASE_PROJECT_ID}.cloudfunctions.net/refundPaymentLinkHttp`
+  : 'https://us-central1-crm-boats.cloudfunctions.net/refundPaymentLinkHttp';
+const refundPaymentLinkEndpoint = process.env.REACT_APP_REFUND_PAYMENT_LINK_ENDPOINT || defaultRefundLinkEndpoint;
 
 const formatAmount = (value, currency) => {
   const amount = Number(value) || 0;
@@ -50,6 +55,10 @@ const PaymentLinkGenerator = () => {
   const [copied, setCopied] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [filters, setFilters] = useState({ term: '', from: '', to: '' });
+  const [filteredHistory, setFilteredHistory] = useState([]);
+  const [refundLoadingId, setRefundLoadingId] = useState(null);
+  const [refundError, setRefundError] = useState(null);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -160,12 +169,87 @@ const PaymentLinkGenerator = () => {
     return unsubscribe;
   }, []);
 
+  const applyFilters = useCallback(() => {
+    const { term, from, to } = filters;
+    const normalizedTerm = term.trim().toLowerCase();
+
+    const startDate = from ? new Date(from) : null;
+    if (startDate) startDate.setHours(0, 0, 0, 0);
+    const endDate = to ? new Date(to) : null;
+    if (endDate) endDate.setHours(23, 59, 59, 999);
+
+    const next = history.filter((item) => {
+      const created = item.createdAt ? new Date(item.createdAt) : null;
+
+      if (startDate && (!created || created < startDate)) return false;
+      if (endDate && (!created || created > endDate)) return false;
+
+      if (normalizedTerm) {
+        const haystack = [
+          item.customerName,
+          item.customerEmail,
+          item.bookingId,
+          item.description
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(normalizedTerm)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    setFilteredHistory(next);
+  }, [filters, history]);
+
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
+
+  const clearFilters = () => {
+    setFilters({ term: '', from: '', to: '' });
+    setFilteredHistory(history);
+  };
+
+  const handleRefund = async (item) => {
+    if (!item?.id) return;
+    setRefundError(null);
+    setRefundLoadingId(item.id);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error('Please sign in again to refund.');
+      }
+      const response = await fetch(refundPaymentLinkEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ paymentLinkId: item.id })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || 'Refund failed. Please try again.');
+      }
+      // Snapshot listener will refresh status; nothing else required here
+    } catch (err) {
+      const message = err?.message || 'Refund failed. Please try again.';
+      setRefundError(message);
+    } finally {
+      setRefundLoadingId(null);
+    }
+  };
+
   const statusBadge = (label, tone = 'default') => {
     const tones = {
       default: 'bg-slate-100 text-slate-700 border-slate-200',
       success: 'bg-emerald-50 text-emerald-700 border-emerald-100',
       warning: 'bg-amber-50 text-amber-700 border-amber-100',
-      danger: 'bg-red-50 text-red-700 border-red-100'
+      danger: 'bg-red-50 text-red-700 border-red-100',
+      info: 'bg-sky-50 text-sky-700 border-sky-100'
     };
     return (
       <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${tones[tone] || tones.default}`}>
@@ -407,8 +491,60 @@ const PaymentLinkGenerator = () => {
               <p className="text-sm text-[var(--text-secondary)]">Last 50 generated links with payment status.</p>
             </div>
           </div>
-          <div className="text-xs text-[var(--text-tertiary)]">
-            Auto-refreshes as new links are created.
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3 text-xs text-[var(--text-tertiary)]">
+            <span>Auto-refreshes as new links are created.</span>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-xl border bg-white px-3 py-3 text-sm" style={{ borderColor: 'var(--border)' }}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4 md:items-end">
+            <div className="md:col-span-2">
+              <label className="text-[var(--text-secondary)] text-xs font-semibold uppercase tracking-[0.2em]">Search</label>
+              <input
+                type="text"
+                name="term"
+                value={filters.term}
+                onChange={(e) => setFilters((prev) => ({ ...prev, term: e.target.value }))}
+                placeholder="Client name, email, booking, description"
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm text-[var(--text-primary)]"
+                style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
+              />
+            </div>
+            <div>
+              <label className="text-[var(--text-secondary)] text-xs font-semibold uppercase tracking-[0.2em]">From</label>
+              <input
+                type="date"
+                name="from"
+                value={filters.from}
+                onChange={(e) => setFilters((prev) => ({ ...prev, from: e.target.value }))}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm text-[var(--text-primary)]"
+                style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
+              />
+            </div>
+            <div>
+              <label className="text-[var(--text-secondary)] text-xs font-semibold uppercase tracking-[0.2em]">To</label>
+              <input
+                type="date"
+                name="to"
+                value={filters.to}
+                onChange={(e) => setFilters((prev) => ({ ...prev, to: e.target.value }))}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm text-[var(--text-primary)]"
+                style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={applyFilters} className="app-button app-button--primary">
+              Search
+            </button>
+            <button type="button" onClick={clearFilters} className="app-button--secondary">
+              Clear
+            </button>
+            {refundError && (
+              <span className="text-xs text-red-600">
+                {refundError}
+              </span>
+            )}
           </div>
         </div>
 
@@ -423,28 +559,31 @@ const PaymentLinkGenerator = () => {
                 <th className="py-2 pr-3 font-medium">Link status</th>
                 <th className="py-2 pr-3 font-medium">Payment</th>
                 <th className="py-2 pr-3 font-medium">Link</th>
+                <th className="py-2 pr-3 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y" style={{ borderColor: 'var(--border)' }}>
               {historyLoading ? (
                 <tr>
-                  <td className="py-4 text-[var(--text-secondary)]" colSpan={7}>
+                  <td className="py-4 text-[var(--text-secondary)]" colSpan={8}>
                     Loading payment links…
                   </td>
                 </tr>
-              ) : history.length === 0 ? (
+              ) : filteredHistory.length === 0 ? (
                 <tr>
-                  <td className="py-4 text-[var(--text-secondary)]" colSpan={7}>
-                    No payment links yet.
+                  <td className="py-4 text-[var(--text-secondary)]" colSpan={8}>
+                    No payment links match these filters.
                   </td>
                 </tr>
               ) : (
-                history.map((item) => {
+                filteredHistory.map((item) => {
                   const paymentTone = item.paymentStatus === 'paid'
                     ? 'success'
                     : item.paymentStatus === 'failed'
                       ? 'danger'
-                      : 'warning';
+                      : item.paymentStatus === 'refunded'
+                        ? 'info'
+                        : 'warning';
 
                   return (
                     <tr key={item.id} className="align-top">
@@ -475,6 +614,11 @@ const PaymentLinkGenerator = () => {
                               Paid {item.paidAt.toLocaleString()}
                             </span>
                           )}
+                          {item.refundStatus && (
+                            <span className="text-xs text-[var(--text-tertiary)]">
+                              Refund {item.refundStatus}{item.refundedAt ? ` · ${item.refundedAt.toLocaleString()}` : ''}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="py-3 pr-3">
@@ -490,6 +634,23 @@ const PaymentLinkGenerator = () => {
                         ) : (
                           '—'
                         )}
+                      </td>
+                      <td className="py-3 pr-3">
+                        <div className="flex flex-col gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleRefund(item)}
+                            disabled={item.paymentStatus !== 'paid' || refundLoadingId === item.id}
+                            className="app-button--secondary w-full justify-center disabled:opacity-50"
+                          >
+                            {refundLoadingId === item.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RotateCcw className="h-4 w-4" />
+                            )}
+                            Refund
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
