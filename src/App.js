@@ -107,7 +107,6 @@ const ProtectedRoute = ({ children, adminOnly = false, requiredPermission }) => 
     if (requiresAdmin && !isAdmin()) {
         return <Navigate to="/bookings" replace />;
     }
-
     if (requiredPermission) {
         const permissions = Array.isArray(requiredPermission)
             ? requiredPermission
