@@ -7,6 +7,7 @@ const STAFF_ALLOWED_PATTERNS = [
   '/add-boat',                // Add new boat
   '/edit-boat/:id',           // Edit boat details
   '/available-boats',         // Availability lookup
+  '/boat-brochure-builder',   // Fleet PDF brochure generator
   '/reminders',               // Task board
   '/collaborator-management', // Collaborator coordination
   '/catering-orders',         // Catering orders board
