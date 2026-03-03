@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Menu, X, Calendar, PlusCircle, Users, BarChart3,
-  User, CreditCard, Euro, Ship, MessageSquare, Settings, Link as LinkIcon,
+  User, CreditCard, Euro, Ship, Settings, Link as LinkIcon,
   ChevronRight, Utensils, Package, ShoppingCart, FileText, LineChart,
   QrCode, MapPin, DollarSign, Search, Clock, LogOut, TrendingUp,
   CheckSquare, ChevronsLeft, ChevronsRight, Database
@@ -300,7 +300,6 @@ const Sidebar = () => {
         icon: Users,
         items: [
           { name: 'Directory', icon: Users, path: '/clients', allowed: admin },
-          { name: 'Leads', icon: MessageSquare, path: '/inquiries', allowed: admin },
         ]
       },
       {

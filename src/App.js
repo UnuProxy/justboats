@@ -22,6 +22,7 @@ import ProductManagement from './components/ProductManagement';
 import AddEditProduct from './components/AddEditProduct';
 import CateringOrders from './components/CateringOrders';
 import BoatFinder from './components/BoatFinder';
+import BoatBrochureBuilder from './components/BoatBrochureBuilder';
 import LeadManagement from './components/LeadManagement';
 import NotificationsCenter from './components/notifications/NotificationsCenter';
 import InvoiceGenerator from './components/InvoiceGenerator';
@@ -362,6 +363,16 @@ function App() {
                                     <ProtectedRoute>
                                         <ProtectedLayout>
                                             <BoatFinder />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/boat-brochure-builder"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <BoatBrochureBuilder />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }

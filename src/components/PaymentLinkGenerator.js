@@ -38,6 +38,10 @@ const defaultRefundLinkEndpoint = process.env.REACT_APP_FIREBASE_PROJECT_ID
   ? `https://us-central1-${process.env.REACT_APP_FIREBASE_PROJECT_ID}.cloudfunctions.net/refundPaymentLinkHttp`
   : 'https://us-central1-crm-boats.cloudfunctions.net/refundPaymentLinkHttp';
 const refundPaymentLinkEndpoint = process.env.REACT_APP_REFUND_PAYMENT_LINK_ENDPOINT || defaultRefundLinkEndpoint;
+const defaultRefreshLinkEndpoint = process.env.REACT_APP_FIREBASE_PROJECT_ID
+  ? `https://us-central1-${process.env.REACT_APP_FIREBASE_PROJECT_ID}.cloudfunctions.net/refreshPaymentLinkStatusHttp`
+  : 'https://us-central1-crm-boats.cloudfunctions.net/refreshPaymentLinkStatusHttp';
+const refreshPaymentLinkEndpoint = process.env.REACT_APP_REFRESH_PAYMENT_LINK_ENDPOINT || defaultRefreshLinkEndpoint;
 
 const formatAmount = (value, currency) => {
   const amount = Number(value) || 0;
@@ -53,12 +57,23 @@ const PaymentLinkGenerator = () => {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(() => {
+    try {
+      const saved = localStorage.getItem('paymentLinks.showCreateForm');
+      return saved ? saved === 'true' : false;
+    } catch (err) {
+      return false;
+    }
+  });
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [filters, setFilters] = useState({ term: '', from: '', to: '' });
   const [filteredHistory, setFilteredHistory] = useState([]);
   const [refundLoadingId, setRefundLoadingId] = useState(null);
   const [refundError, setRefundError] = useState(null);
+  const [refreshLoadingId, setRefreshLoadingId] = useState(null);
+  const [refreshError, setRefreshError] = useState(null);
+  const [refreshInfo, setRefreshInfo] = useState(null);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -112,6 +127,7 @@ const PaymentLinkGenerator = () => {
         throw new Error('Stripe did not return a payment link. Please verify the Stripe key in Firebase.');
       }
       setResult(data);
+      setShowCreateForm(false);
     } catch (err) {
       const message = err?.message || 'Unable to create a payment link right now.';
       setError(message);
@@ -138,6 +154,14 @@ const PaymentLinkGenerator = () => {
   const quickDescriptions = ['Deposit', 'Remaining balance', 'Fuel surcharge', 'Extra hours'];
 
   useEffect(() => {
+    try {
+      localStorage.setItem('paymentLinks.showCreateForm', String(showCreateForm));
+    } catch (err) {
+      // Ignore localStorage failures (private mode / blocked).
+    }
+  }, [showCreateForm]);
+
+  useEffect(() => {
     const linksQuery = query(
       collection(db, 'paymentLinks'),
       orderBy('createdAt', 'desc'),
@@ -153,7 +177,9 @@ const PaymentLinkGenerator = () => {
             id: doc.id,
             ...data,
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : null,
-            paidAt: data.paidAt?.toDate ? data.paidAt.toDate() : null
+            paidAt: data.paidAt?.toDate ? data.paidAt.toDate() : null,
+            refundedAt: data.refundedAt?.toDate ? data.refundedAt.toDate() : null,
+            stripeLastCheckedAt: data.stripeLastCheckedAt?.toDate ? data.stripeLastCheckedAt.toDate() : null
           };
         });
         setHistory(items);
@@ -243,6 +269,45 @@ const PaymentLinkGenerator = () => {
     }
   };
 
+  const handleRefresh = async (item) => {
+    if (!item?.id) return;
+    setRefreshError(null);
+    setRefreshInfo(null);
+    setRefreshLoadingId(item.id);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error('Please sign in again to refresh.');
+      }
+      const response = await fetch(refreshPaymentLinkEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ paymentLinkId: item.id })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || 'Refresh failed. Please try again.');
+      }
+      setRefreshInfo({
+        id: item.id,
+        paymentStatus: data?.paymentStatus || 'pending',
+        sessionsFound: typeof data?.sessionsFound === 'number' ? data.sessionsFound : null
+      });
+      if (data?.paymentStatus === 'pending' && data?.sessionsFound === 0) {
+        setRefreshError('Stripe reports no Checkout Sessions for this link yet. If Stripe shows it as paid, the app is likely using a different Stripe account/key.');
+      }
+      // Snapshot listener will refresh status; nothing else required here
+    } catch (err) {
+      const message = err?.message || 'Refresh failed. Please try again.';
+      setRefreshError(message);
+    } finally {
+      setRefreshLoadingId(null);
+    }
+  };
+
   const statusBadge = (label, tone = 'default') => {
     const tones = {
       default: 'bg-slate-100 text-slate-700 border-slate-200',
@@ -258,169 +323,190 @@ const PaymentLinkGenerator = () => {
     );
   };
 
+  const shortId = (value) => {
+    if (!value || typeof value !== 'string') return '';
+    if (value.length <= 16) return value;
+    return `${value.slice(0, 8)}…${value.slice(-6)}`;
+  };
+
+  const copyText = async (value) => {
+    if (!value || !navigator?.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch (err) {
+      setRefreshError('Could not copy to clipboard. Please copy it manually.');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-3xl font-semibold text-[var(--text-primary)]">Payment link</h1>
-          <p className="text-[var(--text-secondary)]">
-            Create a one-off Stripe link to share with a client.
-          </p>
         </div>
-        <div className="flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 shadow-sm ring-1" style={{ borderColor: 'var(--border)' }}>
-          <Shield className="h-4 w-4 text-[var(--text-tertiary)]" />
-          <span className="text-sm text-[var(--text-tertiary)]">Secure via Firebase</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowCreateForm((prev) => !prev)}
+            className={showCreateForm ? "app-button--secondary" : "app-button"}
+          >
+            <CreditCard className="h-4 w-4" />
+            {showCreateForm ? 'Hide' : 'New payment link'}
+          </button>
         </div>
       </header>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <div className="lg:col-span-2 app-card p-6 space-y-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-light)] text-[var(--accent)]">
-              <CreditCard size={18} />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Link details</h2>
-              <p className="text-sm text-[var(--text-secondary)]">Amount and optional client info.</p>
-            </div>
-          </div>
-
-          <form className="space-y-4" onSubmit={handleSubmit}>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Amount</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  name="amount"
-                  value={form.amount}
-                  onChange={handleChange}
-                  className="app-input"
-                  placeholder="250.00"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Currency</label>
-                <select
-                  name="currency"
-                  value={form.currency}
-                  className="app-input bg-gray-50 text-[var(--text-secondary)]"
-                  disabled
-                >
-                  <option value="eur">EUR (€)</option>
-                </select>
-                <p className="mt-1 text-xs text-[var(--text-tertiary)]">Payments are processed in euros.</p>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Description</label>
-              <input
-                type="text"
-                name="description"
-                value={form.description}
-                onChange={handleChange}
-                className="app-input"
-                placeholder="Deposit for Luna charter"
-              />
-              <div className="mt-2 flex flex-wrap gap-2">
-                {quickDescriptions.map((label) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => setForm((prev) => ({ ...prev, description: label }))}
-                    className="rounded-full border px-3 py-1 text-xs text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition"
-                    style={{ borderColor: 'var(--border)' }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Client name (optional)</label>
-                <input
-                  type="text"
-                  name="customerName"
-                  value={form.customerName}
-                  onChange={handleChange}
-                  className="app-input"
-                  placeholder="Alex Johnson"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Client email (optional)</label>
-                <input
-                  type="email"
-                  name="customerEmail"
-                  value={form.customerEmail}
-                  onChange={handleChange}
-                  className="app-input"
-                  placeholder="client@email.com"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Booking ID (optional)</label>
-                <input
-                  type="text"
-                  name="bookingId"
-                  value={form.bookingId}
-                  onChange={handleChange}
-                  className="app-input"
-                  placeholder="Booking ref to track in Stripe"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Success redirect (optional)</label>
-                <input
-                  type="url"
-                  name="successUrl"
-                  value={form.successUrl}
-                  onChange={handleChange}
-                  className="app-input"
-                  placeholder="https://nautiqibiza.com/thanks"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Internal notes (metadata)</label>
-              <textarea
-                name="notes"
-                value={form.notes}
-                onChange={handleChange}
-                rows={3}
-                className="app-input"
-                placeholder="Add context for finance or ops..."
-              />
-            </div>
-
-            {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-
+        {showCreateForm ? (
+          <div className="lg:col-span-2 app-card p-6 space-y-6">
             <div className="flex items-center gap-3">
-              <button type="submit" className="app-button" disabled={loading}>
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                {loading ? 'Creating link…' : 'Generate payment link'}
-              </button>
-              <div className="text-sm text-[var(--text-secondary)]">
-                {form.amount ? formatAmount(form.amount, form.currency) : 'Enter an amount'}
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-light)] text-[var(--accent)]">
+                <CreditCard size={18} />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-[var(--text-primary)]">Link details</h2>
+                <p className="text-sm text-[var(--text-secondary)]">Amount and optional client info.</p>
               </div>
             </div>
-          </form>
-        </div>
 
-        <div className="app-card p-6 space-y-4">
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Amount</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    name="amount"
+                    value={form.amount}
+                    onChange={handleChange}
+                    className="app-input"
+                    placeholder="250.00"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Currency</label>
+                  <select
+                    name="currency"
+                    value={form.currency}
+                    className="app-input bg-gray-50 text-[var(--text-secondary)]"
+                    disabled
+                  >
+                    <option value="eur">EUR (€)</option>
+                  </select>
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">Payments are processed in euros.</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Description</label>
+                <input
+                  type="text"
+                  name="description"
+                  value={form.description}
+                  onChange={handleChange}
+                  className="app-input"
+                  placeholder="Deposit for Luna charter"
+                />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {quickDescriptions.map((label) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, description: label }))}
+                      className="rounded-full border px-3 py-1 text-xs text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition"
+                      style={{ borderColor: 'var(--border)' }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Client name (optional)</label>
+                  <input
+                    type="text"
+                    name="customerName"
+                    value={form.customerName}
+                    onChange={handleChange}
+                    className="app-input"
+                    placeholder="Alex Johnson"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Client email (optional)</label>
+                  <input
+                    type="email"
+                    name="customerEmail"
+                    value={form.customerEmail}
+                    onChange={handleChange}
+                    className="app-input"
+                    placeholder="client@email.com"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Booking ID (optional)</label>
+                  <input
+                    type="text"
+                    name="bookingId"
+                    value={form.bookingId}
+                    onChange={handleChange}
+                    className="app-input"
+                    placeholder="Booking ref to track in Stripe"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Success redirect (optional)</label>
+                  <input
+                    type="url"
+                    name="successUrl"
+                    value={form.successUrl}
+                    onChange={handleChange}
+                    className="app-input"
+                    placeholder="https://nautiqibiza.com/thanks"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Internal notes (metadata)</label>
+                <textarea
+                  name="notes"
+                  value={form.notes}
+                  onChange={handleChange}
+                  rows={3}
+                  className="app-input"
+                  placeholder="Add context for finance or ops..."
+                />
+              </div>
+
+              {error && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {error}
+                </div>
+              )}
+
+              <div className="flex items-center gap-3">
+                <button type="submit" className="app-button" disabled={loading}>
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  {loading ? 'Creating link…' : 'Generate payment link'}
+                </button>
+                <div className="text-sm text-[var(--text-secondary)]">
+                  {form.amount ? formatAmount(form.amount, form.currency) : 'Enter an amount'}
+                </div>
+              </div>
+            </form>
+          </div>
+        ) : null}
+
+        {(showCreateForm || result) ? (
+          <div className="app-card p-6 space-y-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
               <LinkIcon size={18} />
@@ -466,18 +552,19 @@ const PaymentLinkGenerator = () => {
             </div>
           )}
 
-          <div className="rounded-xl border bg-white px-3 py-3 text-sm space-y-2" style={{ borderColor: 'var(--border)' }}>
-            <div className="flex items-center gap-2 font-semibold text-[var(--text-primary)]">
-              <Shield size={14} />
-              Quick notes
-            </div>
-            <ul className="list-disc space-y-1 pl-4 text-[var(--text-secondary)]">
-              <li>Each link is one-off and carries your metadata.</li>
-              <li>Redirect URL is optional.</li>
-              <li>Use a test key in the emulator.</li>
-            </ul>
+          {result ? (
+            <details className="rounded-xl border bg-white px-3 py-3 text-sm" style={{ borderColor: 'var(--border)' }}>
+              <summary className="cursor-pointer select-none font-semibold text-[var(--text-primary)]">
+                Notes
+              </summary>
+              <div className="mt-2 space-y-2 text-[var(--text-secondary)]">
+                <div>Each link is one-off and carries your metadata.</div>
+                <div>Redirect URL is optional.</div>
+              </div>
+            </details>
+          ) : null}
           </div>
-        </div>
+        ) : null}
       </div>
 
       <div className="app-card p-6 space-y-4">
@@ -545,6 +632,17 @@ const PaymentLinkGenerator = () => {
                 {refundError}
               </span>
             )}
+            {refreshError && (
+              <span className="text-xs text-red-600">
+                {refreshError}
+              </span>
+            )}
+            {refreshInfo && (
+              <span className="text-xs text-[var(--text-tertiary)]">
+                Refreshed {shortId(refreshInfo.id)} → {refreshInfo.paymentStatus}
+                {typeof refreshInfo.sessionsFound === 'number' ? ` (sessions ${refreshInfo.sessionsFound})` : ''}
+              </span>
+            )}
           </div>
         </div>
 
@@ -595,6 +693,18 @@ const PaymentLinkGenerator = () => {
                           {formatAmount(item.amount || 0, item.currency || 'eur')}
                         </div>
                         <div className="text-[var(--text-tertiary)] text-xs">{item.description || '—'}</div>
+                        <div className="mt-1 flex items-center gap-2 text-[var(--text-tertiary)] text-xs">
+                          <span className="font-mono">{shortId(item.id)}</span>
+                          <button
+                            type="button"
+                            onClick={() => copyText(item.id)}
+                            className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 hover:bg-slate-50"
+                            style={{ borderColor: 'var(--border)' }}
+                          >
+                            <Copy className="h-3 w-3" />
+                            Copy ID
+                          </button>
+                        </div>
                       </td>
                       <td className="py-3 pr-3">
                         <div className="text-[var(--text-primary)]">{item.customerName || '—'}</div>
@@ -619,6 +729,12 @@ const PaymentLinkGenerator = () => {
                               Refund {item.refundStatus}{item.refundedAt ? ` · ${item.refundedAt.toLocaleString()}` : ''}
                             </span>
                           )}
+                          {item.paymentStatus !== 'paid' && item.stripeLastCheckedAt && (
+                            <span className="text-xs text-[var(--text-tertiary)]">
+                              Checked {item.stripeLastCheckedAt.toLocaleString()}
+                              {typeof item.stripeLastSessionsFound === 'number' ? ` · sessions ${item.stripeLastSessionsFound}` : ''}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="py-3 pr-3">
@@ -637,6 +753,19 @@ const PaymentLinkGenerator = () => {
                       </td>
                       <td className="py-3 pr-3">
                         <div className="flex flex-col gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleRefresh(item)}
+                            disabled={refreshLoadingId === item.id}
+                            className="app-button--secondary w-full justify-center disabled:opacity-50"
+                          >
+                            {refreshLoadingId === item.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Shield className="h-4 w-4" />
+                            )}
+                            Refresh
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleRefund(item)}

@@ -3,7 +3,6 @@ import {
   collection,
   query,
   getDocs,
-  orderBy,
   doc,
   updateDoc,
   deleteDoc,
@@ -34,22 +33,15 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   User,
-  Bug
+  MapPin,
 } from 'lucide-react';
 import _ from 'lodash';
+import * as XLSX from 'xlsx';
 import { sendClientWelcomeEmail } from '../services/emailService';
 
 // ===================== CONFIG =====================
-// Use the legacy client.bookings[] field for linking? (dangerous if it contains stale/wrong IDs)
-const USE_CLIENT_BOOKINGS_ARRAY = true; // TEMPORARILY ENABLE THIS
-// If true, we only match bookings by email/phone when that value is UNIQUE across all clients
-const REQUIRE_UNIQUE_FOR_CONTACT_MATCH = true;
 // Optionally include "contractClients" collection in the list
 const INCLUDE_CONTRACT_CLIENTS = false;
-
-// ===================== STRICT LINKING =====================
-// Only use the most reliable linking method for now
-const USE_STRICT_LINKING = false; // DISABLE STRICT MODE FOR NOW
 
 // ===================== UTILITIES =====================
 const modalClasses = {
@@ -153,9 +145,12 @@ const EditClientModal = ({ client, onClose, onUpdate }) => {
     phone: client.phone || '',
     passportNumber: client.passportNumber || '',
     dob: client.dob || '',
+    address: client.address || '',
     notes: client.notes || '',
     clientType: client.clientType || 'Direct',
     source: client.source || 'Manual Entry',
+    hotelName: client.hotelName || '',
+    collaboratorName: client.collaboratorName || '',
   });
   const [loading, setLoading] = useState(false);
 
@@ -196,24 +191,32 @@ const EditClientModal = ({ client, onClose, onUpdate }) => {
         <div className={modalClasses.content}>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Name</label>
+              <label className="block text-sm font-medium text-gray-700">Name *</label>
               <input type="text" name="name" value={formData.name} onChange={handleChange} className="mt-1 w-full p-2 border rounded" required />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Email</label>
-              <input type="email" name="email" value={formData.email} onChange={handleChange} className="mt-1 w-full p-2 border rounded" />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Email</label>
+                <input type="email" name="email" value={formData.email} onChange={handleChange} className="mt-1 w-full p-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Phone</label>
+                <input type="tel" name="phone" value={formData.phone} onChange={handleChange} className="mt-1 w-full p-2 border rounded" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Passport Number</label>
+                <input type="text" name="passportNumber" value={formData.passportNumber} onChange={handleChange} className="mt-1 w-full p-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Date of Birth</label>
+                <input type="date" name="dob" value={formData.dob} onChange={handleChange} className="mt-1 w-full p-2 border rounded" />
+              </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Phone</label>
-              <input type="tel" name="phone" value={formData.phone} onChange={handleChange} className="mt-1 w-full p-2 border rounded" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Passport Number</label>
-              <input type="text" name="passportNumber" value={formData.passportNumber} onChange={handleChange} className="mt-1 w-full p-2 border rounded" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Date of Birth</label>
-              <input type="date" name="dob" value={formData.dob} onChange={handleChange} className="mt-1 w-full p-2 border rounded" />
+              <label className="block text-sm font-medium text-gray-700">Address</label>
+              <input type="text" name="address" value={formData.address} onChange={handleChange} className="mt-1 w-full p-2 border rounded" placeholder="Full address" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Client Type</label>
@@ -223,6 +226,30 @@ const EditClientModal = ({ client, onClose, onUpdate }) => {
                 <option value="Collaborator">Collaborator</option>
               </select>
             </div>
+            {formData.clientType === 'Hotel' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Hotel Name</label>
+                <input type="text" name="hotelName" value={formData.hotelName} onChange={handleChange} className="mt-1 w-full p-2 border rounded" placeholder="Which hotel referred this client?" />
+              </div>
+            )}
+            {formData.clientType === 'Collaborator' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Collaborator Name</label>
+                <input type="text" name="collaboratorName" value={formData.collaboratorName} onChange={handleChange} className="mt-1 w-full p-2 border rounded" placeholder="Which collaborator referred this client?" />
+              </div>
+            )}
+            {formData.clientType === 'Direct' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Source</label>
+                <select name="source" value={formData.source} onChange={handleChange} className="mt-1 w-full p-2 border rounded">
+                  <option value="Website">Website</option>
+                  <option value="WhatsApp">WhatsApp</option>
+                  <option value="Referral">Referral</option>
+                  <option value="Social Media">Social Media</option>
+                  <option value="Manual Entry">Manual Entry</option>
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700">Notes</label>
               <textarea name="notes" value={formData.notes} onChange={handleChange} className="mt-1 w-full p-2 border rounded" rows="3" placeholder="Enter client preferences, likes, dislikes, and any special notes..." />
@@ -364,6 +391,7 @@ const ClientDirectory = () => {
   // Data state
   const [clients, setClients] = useState([]);
   const [filteredClients, setFilteredClients] = useState([]);
+  const [orphanedBookings, setOrphanedBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // UI state
@@ -383,7 +411,7 @@ const ClientDirectory = () => {
   const [advancedFilters, setAdvancedFilters] = useState({ bookingsMin: '', bookingsMax: '', spentMin: '', spentMax: '', dateFrom: '', dateTo: '' });
   const [clientsPerPage, setClientsPerPage] = useState(50); // now adjustable
   const [currentPage, setCurrentPage] = useState(1);
-  const [debugLinks, setDebugLinks] = useState(false);
+  const [showOrphanedBookings, setShowOrphanedBookings] = useState(false);
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
@@ -440,13 +468,19 @@ const ClientDirectory = () => {
       const collections = [{ name: 'clients' }];
       if (INCLUDE_CONTRACT_CLIENTS) collections.push({ name: 'contractClients' });
 
-      // Load clients (and optionally contractClients)
+      // Load ALL clients without orderBy to ensure no clients are excluded
+      // (orderBy can exclude documents missing the sort field)
       const clientSnaps = await Promise.all(
-        collections.map((c) =>
-          getDocs(query(collection(db, c.name), orderBy('lastUpdated', 'desc'))).catch(() => getDocs(collection(db, c.name)))
-        )
+        collections.map((c) => getDocs(collection(db, c.name)))
       );
       const allClientDocs = clientSnaps.flatMap((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      
+      console.log(`✅ Loaded ${allClientDocs.length} total clients from Firestore`);
+      
+      // Log some sample client IDs for verification
+      if (allClientDocs.length > 0) {
+        console.log('Sample client IDs:', allClientDocs.slice(0, 5).map(c => c.id));
+      }
 
       // Enrich with canonical contact values
       const clientsCanon = allClientDocs.map((c) => ({
@@ -454,22 +488,6 @@ const ClientDirectory = () => {
         _emailCanon: canonicalEmail(c.email),
         _phoneCanon: normPhone(c.phone),
       }));
-
-      // Build uniqueness indexes over the *clients*
-      const emailIndex = new Map();
-      const phoneIndex = new Map();
-      const pushIdx = (map, key, id) => {
-        if (!key || isPlaceholder(key)) return;
-        const arr = map.get(key) || [];
-        arr.push(id);
-        map.set(key, arr);
-      };
-      clientsCanon.forEach((c) => {
-        pushIdx(emailIndex, c._emailCanon, c.id);
-        pushIdx(phoneIndex, c._phoneCanon, c.id);
-      });
-      const uniqueEmail = new Set([...emailIndex.entries()].filter(([, ids]) => ids.length === 1).map(([k]) => k));
-      const uniquePhone = new Set([...phoneIndex.entries()].filter(([, ids]) => ids.length === 1).map(([k]) => k));
 
       // Load all bookings once
       const bookingsSnap = await getDocs(collection(db, 'bookings'));
@@ -487,71 +505,25 @@ const ClientDirectory = () => {
       });
 
       // Debug logging
-      console.log('Total bookings loaded:', bookings.length);
-      console.log('Sample booking structure:', bookings[0]);
-      console.log('Booking fields with client info:', bookings.slice(0, 3).map(b => ({
-        id: b.id,
-        clientId: b.clientId,
-        clientRef: b.clientRef,
-        client: b.client,
-        clientEmail: b.clientEmail,
-        email: b.email,
-        contact: b.contact,
-        _clientIdCandidate: b._clientIdCandidate,
-        _emailCanon: b._emailCanon
-      })));
+      console.log(`✅ Loaded ${bookings.length} total bookings from Firestore`);
+      
+      // Count bookings with valid clientId
+      const bookingsWithClientId = bookings.filter(b => b._clientIdCandidate).length;
+      const bookingsWithoutClientId = bookings.length - bookingsWithClientId;
+      console.log(`📊 Bookings with clientId: ${bookingsWithClientId}, without: ${bookingsWithoutClientId}`);
 
-      // Groupings for fast joins
+      // Group bookings by clientId for fast lookup
       const bookingsByClientId = groupByKey(bookings, (b) => b._clientIdCandidate);
-      const bookingsByEmail = groupByKey(bookings, (b) => b._emailCanon);
-      const bookingsByPhone = groupByKey(bookings, (b) => b._phoneCanon);
-      const bookingById = new Map(bookings.map((b) => [b.id, b]));
 
-      // Build final clients with robust linking
+      // Build final clients with STRICT linking (clientId only)
       const clientsData = clientsCanon.map((c) => {
-        let bookingsForThisClient = [];
-        let viaId = [];
-        let viaArray = [];
-        let viaEmail = [];
-        let viaPhone = [];
-        
-        // Always calculate these for debug info
-        const canUseEmail = c._emailCanon && !isPlaceholder(c._emailCanon) && (!REQUIRE_UNIQUE_FOR_CONTACT_MATCH || uniqueEmail.has(c._emailCanon));
-        const canUsePhone = c._phoneCanon && !isPlaceholder(c._phoneCanon) && (!REQUIRE_UNIQUE_FOR_CONTACT_MATCH || uniquePhone.has(c._phoneCanon));
-        
-        if (USE_STRICT_LINKING) {
-          // Only use direct ID matching for now to avoid incorrect links
-          viaId = bookingsByClientId[c.id] || [];
-          bookingsForThisClient = viaId;
-        } else {
-          // Original complex matching logic
-          viaId = bookingsByClientId[c.id] || [];
-          viaArray = USE_CLIENT_BOOKINGS_ARRAY && Array.isArray(c.bookings)
-            ? c.bookings.map((bid) => bookingById.get(bid)).filter(Boolean)
-            : [];
-          viaEmail = canUseEmail ? bookingsByEmail[c._emailCanon] || [] : [];
-          viaPhone = canUsePhone ? bookingsByPhone[c._phoneCanon] || [] : [];
-
-          bookingsForThisClient = _.uniqBy([...viaId, ...viaArray, ...viaEmail, ...viaPhone], 'id');
-        }
-        
-        // Debug logging for specific problematic clients
-        if (c.name === 'Isabella Maria' || c.name === 'Yacht share') {
-          console.log(`\n=== DEBUG: ${c.name} (${c.id}) ===`);
-          console.log('Client email:', c.email, '-> canonical:', c._emailCanon);
-          console.log('Client phone:', c.phone, '-> canonical:', c._phoneCanon);
-          console.log('Client bookings array:', c.bookings);
-          console.log('Via ID matches:', viaId.length, viaId.map(b => b.id));
-          console.log('Via Array matches:', viaArray.length, viaArray.map(b => b.id));
-          console.log('Via Email matches:', viaEmail.length, viaEmail.map(b => b.id));
-          console.log('Via Phone matches:', viaPhone.length, viaPhone.map(b => b.id));
-          console.log('Final bookings:', bookingsForThisClient.length, bookingsForThisClient.map(b => b.id));
-        }
+        // STRICT: Only use direct clientId matching to avoid incorrect associations
+        const bookingsForThisClient = bookingsByClientId[c.id] || [];
 
         const createdAt = toIso(c.createdAt) || new Date().toISOString();
         const lastUpdated = toIso(c.lastUpdated) || createdAt;
 
-        const totalSpent = bookingsForThisClient.reduce((sum, b) => sum + toNumber(b.pricing?.finalPrice ?? b.finalPrice ?? 0), 0);
+        const totalSpent = bookingsForThisClient.reduce((sum, b) => sum + toNumber(b.pricing?.agreedPrice ?? b.pricing?.finalPrice ?? b.finalPrice ?? 0), 0);
 
         return {
           id: c.id,
@@ -560,27 +532,42 @@ const ClientDirectory = () => {
           phone: c.phone || '',
           passportNumber: c.passportNumber || '',
           dob: c.dob || '',
+          address: c.address || '',
           notes: c.notes || '',
           source: c.source || 'Manual Entry',
           clientType: c.clientType || 'Direct',
+          hotelName: c.hotelName || '',
+          collaboratorName: c.collaboratorName || '',
           createdAt,
           lastUpdated,
           bookings: bookingsForThisClient,
           totalBookings: bookingsForThisClient.length,
           totalSpent,
-          _linkHints: {
-            byId: viaId.length,
-            byArray: viaArray.length,
-            byEmail: viaEmail.length,
-            byPhone: viaPhone.length,
-            uniqueEmail: uniqueEmail.has(c._emailCanon),
-            uniquePhone: uniquePhone.has(c._phoneCanon),
-            strictMode: USE_STRICT_LINKING,
-          },
+          // Keep canonical values for potential linking tools
+          _emailCanon: c._emailCanon,
+          _phoneCanon: c._phoneCanon,
         };
       });
+      
+      // Find orphaned bookings (bookings without a valid clientId linked to any client)
+      const clientIdSet = new Set(clientsCanon.map(c => c.id));
+      const orphanedBookings = bookings.filter(b => !b._clientIdCandidate || !clientIdSet.has(b._clientIdCandidate));
+      
+      // Summary stats
+      const clientsWithBookings = clientsData.filter(c => c.totalBookings > 0).length;
+      const clientsWithoutBookings = clientsData.filter(c => c.totalBookings === 0).length;
+      const linkedBookings = bookings.length - orphanedBookings.length;
+      
+      console.log(`📊 SUMMARY:`);
+      console.log(`   - Total clients: ${clientsData.length}`);
+      console.log(`   - Clients with bookings: ${clientsWithBookings}`);
+      console.log(`   - Clients without bookings: ${clientsWithoutBookings}`);
+      console.log(`   - Total bookings: ${bookings.length}`);
+      console.log(`   - Linked bookings: ${linkedBookings}`);
+      console.log(`   - Orphaned bookings: ${orphanedBookings.length}`);
 
       setClients(clientsData);
+      setOrphanedBookings(orphanedBookings);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -612,20 +599,45 @@ const ClientDirectory = () => {
     else setSelectedClients(paginatedClients.map((c) => c.id));
   };
 
-  const exportToCSV = () => {
+  const exportClientsToExcel = (clientsToExport, suffix = 'clients') => {
+    if (!clientsToExport.length) {
+      alert('No clients to export.');
+      return;
+    }
+
+    const rows = clientsToExport.map((c) => ({
+      ClientID: c.id,
+      Name: c.name || '',
+      Email: c.email || '',
+      Phone: c.phone || '',
+      ClientType: c.clientType || '',
+      Source: c.source || '',
+      HotelName: c.hotelName || '',
+      CollaboratorName: c.collaboratorName || '',
+      PassportNumber: c.passportNumber || '',
+      DateOfBirth: c.dob || '',
+      Address: c.address || '',
+      TotalBookings: c.totalBookings || 0,
+      TotalSpentEUR: toNumber(c.totalSpent),
+      CreatedAt: toIso(c.createdAt) || '',
+      LastUpdated: toIso(c.lastUpdated) || '',
+      Notes: c.notes || '',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Clients');
+    XLSX.writeFile(wb, `${suffix}_export_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const exportAllClientsToExcel = () => {
+    exportClientsToExcel(clients, 'all_clients');
+  };
+
+  const exportSelectedClientsToExcel = () => {
     if (!selectedClients.length) return;
-    const clientsToExport = selectedClients.length ? clients.filter((c) => selectedClients.includes(c.id)) : filteredClients;
-    const headers = ['Name', 'Email', 'Phone', 'Client Type', 'Total Bookings', 'Total Spent', 'Last Updated', 'Notes'];
-    const csvData = clientsToExport.map((c) => [c.name, c.email, c.phone, c.clientType, c.totalBookings, c.totalSpent, formatDate(c.lastUpdated), (c.notes || '').replace(/,/g, ';')]);
-    const csvContent = [headers.join(','), ...csvData.map((row) => row.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `clients_export_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const clientsToExport = clients.filter((c) => selectedClients.includes(c.id));
+    exportClientsToExcel(clientsToExport, 'selected_clients');
   };
 
   const batchDeleteClients = async () => {
@@ -660,8 +672,9 @@ const ClientDirectory = () => {
     const directClients = clients.filter((c) => c.clientType === 'Direct').length;
     const hotelClients = clients.filter((c) => c.clientType === 'Hotel').length;
     const collaboratorClients = clients.filter((c) => c.clientType === 'Collaborator').length;
-    return { totalClients, totalBookings, totalSpent, avgSpent, directClients, hotelClients, collaboratorClients };
-  }, [clients]);
+    const orphanedCount = orphanedBookings.length;
+    return { totalClients, totalBookings, totalSpent, avgSpent, directClients, hotelClients, collaboratorClients, orphanedCount };
+  }, [clients, orphanedBookings]);
 
   // ===================== RENDER =====================
   const renderMobileSearch = () => (
@@ -712,15 +725,6 @@ const ClientDirectory = () => {
     );
   };
 
-  const LinkBadges = ({ hints }) => (
-    <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-gray-600">
-      {hints.strictMode && <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">STRICT</span>}
-      <span className={`px-1.5 py-0.5 rounded bg-gray-100`}>id:{hints.byId}</span>
-      <span className={`px-1.5 py-0.5 rounded bg-gray-100`}>arr:{hints.byArray}</span>
-      <span className={`px-1.5 py-0.5 rounded ${hints.uniqueEmail ? 'bg-green-100' : 'bg-gray-100'}`}>email:{hints.byEmail}</span>
-      <span className={`px-1.5 py-0.5 rounded ${hints.uniquePhone ? 'bg-green-100' : 'bg-gray-100'}`}>phone:{hints.byPhone}</span>
-    </div>
-  );
 
   const renderClientCard = (client) => {
     const isSelected = selectedClients.includes(client.id);
@@ -780,7 +784,6 @@ const ClientDirectory = () => {
                   </span>
                 )}
               </div>
-              {debugLinks && <LinkBadges hints={client._linkHints} />}
             </div>
 
             <div className="flex items-start gap-2">
@@ -809,20 +812,32 @@ const ClientDirectory = () => {
 
           <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
             <div className="flex items-start gap-2 break-words">
-              <Mail size={16} className="mt-0.5 text-slate-400" />
-              <span className="break-all">{client.email || 'No email stored'}</span>
+              <Mail size={16} className="mt-0.5 flex-shrink-0 text-slate-400" />
+              <span className="break-all">{client.email || <span className="text-slate-400 italic">No email</span>}</span>
             </div>
             <div className="flex items-start gap-2">
-              <Phone size={16} className="mt-0.5 text-slate-400" />
-              <span>{client.phone || 'No phone stored'}</span>
+              <Phone size={16} className="mt-0.5 flex-shrink-0 text-slate-400" />
+              <span>{client.phone || <span className="text-slate-400 italic">No phone</span>}</span>
+            </div>
+            {client.address && (
+              <div className="flex items-start gap-2 sm:col-span-2">
+                <MapPin size={16} className="mt-0.5 flex-shrink-0 text-slate-400" />
+                <span>{client.address}</span>
+              </div>
+            )}
+            <div className="flex items-start gap-2">
+              <Calendar size={16} className="mt-0.5 flex-shrink-0 text-slate-400" />
+              <span>{client.dob ? formatDate(client.dob) : <span className="text-slate-400 italic">No DOB</span>}</span>
             </div>
             <div className="flex items-start gap-2">
-              <Calendar size={16} className="mt-0.5 text-slate-400" />
-              <span>{client.dob ? `Date of birth: ${formatDate(client.dob)}` : 'Add date of birth'}</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <User size={16} className="mt-0.5 text-slate-400" />
-              <span>{client.clientType === 'Collaborator' && client.collaboratorName ? client.collaboratorName : client.source || 'Source not recorded'}</span>
+              <User size={16} className="mt-0.5 flex-shrink-0 text-slate-400" />
+              <span>
+                {client.clientType === 'Hotel' && client.hotelName 
+                  ? `Via ${client.hotelName}`
+                  : client.clientType === 'Collaborator' && client.collaboratorName 
+                    ? `Via ${client.collaboratorName}` 
+                    : client.source || <span className="text-slate-400 italic">Source unknown</span>}
+              </span>
             </div>
           </div>
 
@@ -864,7 +879,6 @@ const ClientDirectory = () => {
       <td className="p-3">
         <div className="font-medium">{client.name}</div>
         <div className="text-sm text-gray-500">{client.email}</div>
-        {debugLinks && <LinkBadges hints={client._linkHints} />}
       </td>
       <td className="p-3">{client.phone || '--'}</td>
       <td className="p-3">
@@ -897,15 +911,25 @@ const ClientDirectory = () => {
           <div className="text-2xl font-semibold">{stats.totalClients}</div>
           <User size={24} className="text-blue-500" />
         </div>
-        <div className="mt-1 text-xs text-gray-500">Direct: {stats.directClients} • Hotel: {stats.hotelClients} • Collaborator: {stats.collaboratorClients}</div>
+        <div className="mt-1 text-xs text-gray-500">
+          <span className="text-emerald-600">Direct: {stats.directClients}</span> • 
+          <span className="text-blue-600"> Hotel: {stats.hotelClients}</span> • 
+          <span className="text-purple-600"> Collab: {stats.collaboratorClients}</span>
+        </div>
       </div>
       <div className="bg-white p-4 rounded-lg shadow">
-        <h3 className="text-sm font-medium text-gray-500">Total Bookings</h3>
+        <h3 className="text-sm font-medium text-gray-500">Linked Bookings</h3>
         <div className="mt-1 flex items-center justify-between">
           <div className="text-2xl font-semibold">{stats.totalBookings}</div>
           <Book size={24} className="text-green-500" />
         </div>
-        <div className="mt-1 text-xs text-gray-500">Avg {(stats.totalBookings / stats.totalClients || 0).toFixed(2)} bookings per client</div>
+        <div className="mt-1 text-xs text-gray-500">
+          {stats.orphanedCount > 0 ? (
+            <span className="text-amber-600">⚠ {stats.orphanedCount} orphaned</span>
+          ) : (
+            <span className="text-green-600">✓ All bookings linked</span>
+          )}
+        </div>
       </div>
       <div className="bg-white p-4 rounded-lg shadow">
         <h3 className="text-sm font-medium text-gray-500">Total Revenue</h3>
@@ -921,7 +945,7 @@ const ClientDirectory = () => {
           <div className="text-2xl font-semibold">{filteredClients.length}</div>
           <Filter size={24} className="text-amber-500" />
         </div>
-        <div className="mt-1 text-xs text-gray-500">{filteredClients.length === clients.length ? 'No filters applied' : 'Based on current filters'}</div>
+        <div className="mt-1 text-xs text-gray-500">{filteredClients.length === clients.length ? 'Showing all clients' : `Filtered from ${clients.length}`}</div>
       </div>
     </div>
   );
@@ -951,13 +975,7 @@ const ClientDirectory = () => {
           </div>
         </div>
       </div>
-      <div className="mt-4 flex justify-between items-center gap-3">
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <Bug size={16} />
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" className="accent-blue-600" checked={debugLinks} onChange={(e) => setDebugLinks(e.target.checked)} /> Show link badges (debug)
-          </label>
-        </div>
+      <div className="mt-4 flex justify-end items-center gap-3">
         <div className="flex items-center gap-2">
           <label className="text-sm text-gray-700">Rows/page</label>
           <select value={clientsPerPage} onChange={(e) => { setClientsPerPage(parseInt(e.target.value, 10)); setCurrentPage(1); }} className="p-1.5 border rounded">
@@ -1019,6 +1037,70 @@ const ClientDirectory = () => {
           {showStats && renderStats()}
         </div>
 
+        {/* Orphaned Bookings Warning */}
+        {orphanedBookings.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-100 rounded-full">
+                  <Calendar size={20} className="text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-amber-800">
+                    {orphanedBookings.length} Orphaned Booking{orphanedBookings.length !== 1 ? 's' : ''}
+                  </h3>
+                  <p className="text-sm text-amber-600">
+                    These bookings are not linked to any client in your directory
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowOrphanedBookings(!showOrphanedBookings)}
+                className="px-4 py-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors text-sm font-medium"
+              >
+                {showOrphanedBookings ? 'Hide' : 'View & Assign'}
+              </button>
+            </div>
+            
+            {showOrphanedBookings && (
+              <div className="mt-4 space-y-2 max-h-80 overflow-y-auto">
+                {orphanedBookings.map((booking) => (
+                  <div key={booking.id} className="bg-white p-3 rounded-lg border border-amber-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">
+                        {booking.bookingDetails?.boatName || booking.boatName || 'Unknown Boat'}
+                      </div>
+                      <div className="text-sm text-gray-600 flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                        <span>{formatDate(booking.bookingDetails?.date || booking.bookingDate)}</span>
+                        {(booking.clientEmail || booking.contact?.email || booking.email) && (
+                          <span className="flex items-center gap-1">
+                            <Mail size={12} />
+                            {booking.clientEmail || booking.contact?.email || booking.email}
+                          </span>
+                        )}
+                        {(booking.clientPhone || booking.contact?.phone || booking.phone) && (
+                          <span className="flex items-center gap-1">
+                            <Phone size={12} />
+                            {booking.clientPhone || booking.contact?.phone || booking.phone}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-700">
+                        €{toNumber(booking.pricing?.finalPrice || booking.finalPrice)}
+                      </span>
+                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded font-mono">
+                        {booking.id.slice(0, 8)}...
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Filter & Actions */}
         <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-lg shadow-sm border">
           <div className="flex flex-wrap items-center gap-3 overflow-x-auto">
@@ -1034,12 +1116,6 @@ const ClientDirectory = () => {
                 <Filter size={16} className="mr-2" />
                 {showAdvancedFilters ? 'Hide Filters' : 'Advanced Filters'}
               </button>
-            </div>
-            <div className="min-w-max hidden sm:flex items-center gap-2 text-sm text-gray-600">
-              <Bug size={16} />
-              <label className="inline-flex items-center gap-2">
-                <input type="checkbox" className="accent-blue-600" checked={debugLinks} onChange={(e) => setDebugLinks(e.target.checked)} /> Show link badges
-              </label>
             </div>
           </div>
 
@@ -1057,10 +1133,17 @@ const ClientDirectory = () => {
               </select>
             </div>
             <button onClick={toggleSelectionMode} className={`px-3 py-1.5 border rounded-lg ${isSelectionMode ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-50'}`}>{isSelectionMode ? 'Cancel Selection' : 'Select Clients'}</button>
+            <button
+              onClick={exportAllClientsToExcel}
+              disabled={!clients.length}
+              className={`px-3 py-1.5 border rounded-lg ${clients.length ? 'text-green-700 border-green-200 bg-green-50 hover:bg-green-100' : 'opacity-50 cursor-not-allowed'}`}
+            >
+              <Download size={16} className="inline-block mr-1" /> Export All
+            </button>
             {isSelectionMode && (
               <>
                 <button onClick={toggleSelectAll} className="px-3 py-1.5 border rounded-lg hover:bg-gray-50">{selectedClients.length === paginatedClients.length ? 'Deselect All' : 'Select All'}</button>
-                <button onClick={exportToCSV} disabled={!selectedClients.length} className={`px-3 py-1.5 border rounded-lg ${selectedClients.length ? 'text-green-700 border-green-200 bg-green-50 hover:bg-green-100' : 'opacity-50 cursor-not-allowed'}`}>
+                <button onClick={exportSelectedClientsToExcel} disabled={!selectedClients.length} className={`px-3 py-1.5 border rounded-lg ${selectedClients.length ? 'text-green-700 border-green-200 bg-green-50 hover:bg-green-100' : 'opacity-50 cursor-not-allowed'}`}>
                   <Download size={16} className="inline-block mr-1" /> Export
                 </button>
                 <button onClick={batchDeleteClients} disabled={!selectedClients.length} className={`px-3 py-1.5 border rounded-lg ${selectedClients.length ? 'text-red-700 border-red-200 bg-red-50 hover:bg-red-100' : 'opacity-50 cursor-not-allowed'}`}>
@@ -1151,7 +1234,7 @@ const ClientDirectory = () => {
           <div className="flex justify-between items-center">
             <div className="text-sm font-medium">{selectedClients.length} selected</div>
             <div className="flex space-x-2">
-              <button onClick={exportToCSV} className="px-3 py-1.5 bg-green-100 text-green-700 rounded">
+              <button onClick={exportSelectedClientsToExcel} className="px-3 py-1.5 bg-green-100 text-green-700 rounded">
                 <Download size={16} className="inline-block" />
               </button>
               <button onClick={batchDeleteClients} className="px-3 py-1.5 bg-red-100 text-red-700 rounded">
