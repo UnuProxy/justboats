@@ -1,9 +1,2 @@
 User-agent: *
-Disallow: /
-
-# Optional explicit block for major crawlers
-User-agent: Googlebot
-Disallow: /
-
-User-agent: Bingbot
-Disallow: /
+Allow: /

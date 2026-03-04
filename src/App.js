@@ -133,7 +133,8 @@ const ProtectedRoute = ({ children, adminOnly = false, requiredPermission }) => 
         }
     }
 
-    const effectiveRole = isAdmin() ? 'admin' : (userRole || 'staff');
+    const normalizedRole = String(userRole || '').trim().toLowerCase();
+    const effectiveRole = isAdmin() ? 'admin' : (normalizedRole || 'staff');
     if (effectiveRole !== 'admin' && !canRoleAccessPath(effectiveRole, location.pathname)) {
         return <Navigate to="/bookings" replace />;
     }

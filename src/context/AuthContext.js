@@ -127,10 +127,11 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const isAdmin = () => userRole === 'admin';
-  const isStaff = () => userRole === 'staff';
-  const isEmployee = () => userRole === 'employee';
-  const isDriver = () => userRole === 'driver';
+  const normalizedRole = String(userRole || '').trim().toLowerCase();
+  const isAdmin = () => normalizedRole === 'admin';
+  const isStaff = () => normalizedRole === 'staff';
+  const isEmployee = () => normalizedRole === 'employee';
+  const isDriver = () => normalizedRole === 'driver';
 
   return (
     <AuthContext.Provider value={{

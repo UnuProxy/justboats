@@ -181,8 +181,9 @@ const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, userRole, logout } = useAuth();
-  const isAdminUser = userRole === 'admin';
-  const isEmployeeUser = userRole === 'employee';
+  const normalizedRole = String(userRole || '').trim().toLowerCase();
+  const isAdminUser = normalizedRole === 'admin';
+  const isEmployeeUser = normalizedRole === 'employee';
 
   const initialIsMobile = isBrowser ? window.innerWidth <= 1024 : false;
   const initialCollapsed = isBrowser ? window.innerWidth >= 1440 : false;

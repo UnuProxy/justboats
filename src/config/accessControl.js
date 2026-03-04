@@ -16,7 +16,8 @@ const STAFF_ALLOWED_PATTERNS = [
   '/add-product',             // Add product workflow
   '/edit-product/:id',        // Edit product workflow
   '/pricing-manager',         // Catering pricing controls
-  '/payment-links'            // Generate Stripe payment links
+  '/payment-links',           // Generate Stripe payment links
+  '/invoice-generator'        // Invoice PDF generator
 ];
 
 const EMPLOYEE_ALLOWED_PATTERNS = [
@@ -24,6 +25,7 @@ const EMPLOYEE_ALLOWED_PATTERNS = [
   '/bookings',
   '/bookings/:id',
   '/boats',
+  '/boat-brochure-builder',
   '/add-boat',
   '/edit-boat/:id'
 ];
@@ -33,6 +35,8 @@ const DRIVER_ALLOWED_PATTERNS = [
   '/bookings/:id',
   '/crew-app'
 ];
+
+const normalizeRole = (role = '') => String(role || '').trim().toLowerCase();
 
 const normalizePath = (pathname = '/') => {
   if (!pathname) return '/';
@@ -69,9 +73,10 @@ const driverRouteRegexps = DRIVER_ALLOWED_PATTERNS.map((pattern) => ({
 }));
 
 export const canRoleAccessPath = (role = '', pathname = '/') => {
+  const normalizedRole = normalizeRole(role);
   const normalized = normalizePath(pathname);
 
-  switch (role) {
+  switch (normalizedRole) {
     case 'admin':
       return true;
     case 'staff':
