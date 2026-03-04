@@ -264,9 +264,16 @@ const LeadManagement = () => {
         }));
         
         // Sort reminders by date
-        remindersData.sort((a, b) => 
-          a.reminderDate.toDate().getTime() - b.reminderDate.toDate().getTime()
-        );
+        remindersData.sort((a, b) => {
+          const aDate = toSafeDate(a.reminderDate);
+          const bDate = toSafeDate(b.reminderDate);
+          
+          if (!aDate && !bDate) return 0;
+          if (!aDate) return 1;
+          if (!bDate) return -1;
+          
+          return aDate.getTime() - bDate.getTime();
+        });
         
         setReminders(remindersData);
       } catch (error) {
@@ -496,9 +503,16 @@ const LeadManagement = () => {
           createdAt: { toDate: () => new Date() },
           userId: localStorage.getItem('currentUserId') || 'system'
         }
-      ].sort((a, b) => 
-        a.reminderDate.toDate().getTime() - b.reminderDate.toDate().getTime()
-      ));
+      ].sort((a, b) => {
+        const aDate = toSafeDate(a.reminderDate);
+        const bDate = toSafeDate(b.reminderDate);
+        
+        if (!aDate && !bDate) return 0;
+        if (!aDate) return 1;
+        if (!bDate) return -1;
+        
+        return aDate.getTime() - bDate.getTime();
+      }));
       
       // Add a note
       const lead = leads.find(l => l.id === newReminder.leadId);
@@ -652,6 +666,21 @@ const LeadManagement = () => {
     }
   };
 
+  // Safely convert Firestore timestamps or raw values to JS Date
+  const toSafeDate = (value) => {
+    if (!value) return null;
+    
+    try {
+      if (typeof value.toDate === 'function') return value.toDate();
+      
+      const date = new Date(value);
+      return isNaN(date.getTime()) ? null : date;
+    } catch (error) {
+      console.error('Error converting to date:', error);
+      return null;
+    }
+  };
+
   // Get boat details - checks both boatName and yachtName
   const getBoatDetails = (boatName) => {
     if (!boatName) return null;
@@ -706,7 +735,10 @@ const LeadManagement = () => {
   const upcomingReminders = useMemo(() => {
     const now = new Date();
     return reminders
-      .filter(reminder => !reminder.completed && reminder.reminderDate.toDate() > now)
+      .filter(reminder => {
+        const reminderDate = toSafeDate(reminder.reminderDate);
+        return reminderDate && !reminder.completed && reminderDate > now;
+      })
       .slice(0, 5);
   }, [reminders]);
 
@@ -716,20 +748,19 @@ const LeadManagement = () => {
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
     
-    return reminders.filter(reminder => 
-      !reminder.completed && 
-      reminder.reminderDate.toDate() >= todayStart &&
-      reminder.reminderDate.toDate() < todayEnd
-    );
+    return reminders.filter(reminder => {
+      const reminderDate = toSafeDate(reminder.reminderDate);
+      return reminderDate && !reminder.completed && reminderDate >= todayStart && reminderDate < todayEnd;
+    });
   }, [reminders]);
 
   // Overdue reminders
   const overdueReminders = useMemo(() => {
     const now = new Date();
-    return reminders.filter(reminder => 
-      !reminder.completed && 
-      reminder.reminderDate.toDate() < now
-    );
+    return reminders.filter(reminder => {
+      const reminderDate = toSafeDate(reminder.reminderDate);
+      return reminderDate && !reminder.completed && reminderDate < now;
+    });
   }, [reminders]);
 
   // Get status counts
@@ -924,7 +955,8 @@ const LeadManagement = () => {
 
   // Reminder component
   const ReminderItem = ({ reminder, lead, onComplete, onDelete }) => {
-    const isPast = reminder.reminderDate.toDate() < new Date();
+    const reminderDate = toSafeDate(reminder.reminderDate);
+    const isPast = reminderDate ? reminderDate < new Date() : false;
     
     return (
       <div className={`p-3 mb-2 rounded-lg border ${
@@ -2081,5 +2113,3 @@ const LeadManagement = () => {
 };
 
 export default LeadManagement;
-
-

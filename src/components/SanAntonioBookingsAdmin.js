@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Ship, Calendar, Clock, Users, Euro, Check, X, ChevronRight, Search, PlusCircle, Percent, Edit, Trash2, Anchor } from 'lucide-react';
+import { Ship, Calendar, Clock, Users, Euro, Check, X, ChevronRight, Search, PlusCircle, Percent, Edit, Trash2, Anchor, Download } from 'lucide-react';
 import { collection, addDoc, getDocs, query, where, doc, updateDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
+import * as XLSX from 'xlsx';
 
 const SanAntonioBookingsAdmin = () => {
   const [bookings, setBookings] = useState([]);
@@ -940,6 +941,43 @@ const SanAntonioBookingsAdmin = () => {
     booking.source?.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     getBoatName(booking).toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const downloadBookingsExcel = () => {
+    if (!bookings.length) {
+      alert('No San Antonio bookings to export.');
+      return;
+    }
+
+    const rows = bookings.map((booking) => ({
+      BookingID: booking.id,
+      Date: booking.date || booking.bookingDate || '',
+      ClientName: booking.clientName || booking.clientDetails?.name || '',
+      ClientPhone: booking.clientDetails?.phone || '',
+      ClientEmail: booking.clientDetails?.email || '',
+      Boat: getBoatName(booking),
+      TourType: booking.tourType || '',
+      TourTime: booking.tourTime || '',
+      StartTime: booking.bookingDetails?.startTime || '',
+      EndTime: booking.bookingDetails?.endTime || '',
+      Passengers: booking.bookingDetails?.passengers || 0,
+      SourceType: booking.source?.type || '',
+      SourceName: booking.source?.partnerName || '',
+      CommissionRate: booking.source?.commission?.rate || '',
+      CommissionAmountEUR: booking.source?.commission?.amount || '',
+      TotalPriceEUR: booking.pricing?.agreedPrice || booking.price || 0,
+      PaymentStatus: booking.payments?.status || booking.pricing?.paymentStatus || '',
+      DepositAmountEUR: booking.payments?.deposit?.amount || '',
+      DepositReceived: booking.payments?.deposit?.received ? 'Yes' : 'No',
+      RemainingAmountEUR: booking.payments?.remaining?.amount || '',
+      RemainingReceived: booking.payments?.remaining?.received ? 'Yes' : 'No',
+      Notes: booking.notes || ''
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'San Antonio Tours');
+    XLSX.writeFile(workbook, `san_antonio_tours_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
   
   // Format date for display
   const formatDate = (dateString) => {
@@ -968,6 +1006,18 @@ const SanAntonioBookingsAdmin = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+          <button
+            onClick={downloadBookingsExcel}
+            disabled={!bookings.length}
+            className={`flex items-center justify-center gap-1 px-4 py-2 rounded-lg w-full sm:w-auto ${
+              bookings.length
+                ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            <Download size={16} />
+            Download
+          </button>
           <button
             onClick={() => showForm ? setShowForm(false) : handleAddNew()}
             className="flex items-center justify-center gap-1 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 w-full sm:w-auto"

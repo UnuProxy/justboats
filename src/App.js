@@ -22,6 +22,7 @@ import ProductManagement from './components/ProductManagement';
 import AddEditProduct from './components/AddEditProduct';
 import CateringOrders from './components/CateringOrders';
 import BoatFinder from './components/BoatFinder';
+import BoatBrochureBuilder from './components/BoatBrochureBuilder';
 import LeadManagement from './components/LeadManagement';
 import NotificationsCenter from './components/notifications/NotificationsCenter';
 import InvoiceGenerator from './components/InvoiceGenerator';
@@ -107,7 +108,6 @@ const ProtectedRoute = ({ children, adminOnly = false, requiredPermission }) => 
     if (requiresAdmin && !isAdmin()) {
         return <Navigate to="/bookings" replace />;
     }
-
     if (requiredPermission) {
         const permissions = Array.isArray(requiredPermission)
             ? requiredPermission
@@ -133,7 +133,8 @@ const ProtectedRoute = ({ children, adminOnly = false, requiredPermission }) => 
         }
     }
 
-    const effectiveRole = isAdmin() ? 'admin' : (userRole || 'staff');
+    const normalizedRole = String(userRole || '').trim().toLowerCase();
+    const effectiveRole = isAdmin() ? 'admin' : (normalizedRole || 'staff');
     if (effectiveRole !== 'admin' && !canRoleAccessPath(effectiveRole, location.pathname)) {
         return <Navigate to="/bookings" replace />;
     }
@@ -363,6 +364,16 @@ function App() {
                                     <ProtectedRoute>
                                         <ProtectedLayout>
                                             <BoatFinder />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/boat-brochure-builder"
+                                element={
+                                    <ProtectedRoute>
+                                        <ProtectedLayout>
+                                            <BoatBrochureBuilder />
                                         </ProtectedLayout>
                                     </ProtectedRoute>
                                 }

@@ -179,6 +179,7 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
 
     const updateData = {
       paymentStatus,
+      status: paymentStatus === 'paid' ? 'inactive' : existing.status || 'active',
       lastStripeSessionId: session.id || null,
       lastStripePaymentIntent: session.payment_intent || null,
       paidAt: paymentStatus === 'paid' && session.created
@@ -198,6 +199,29 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
   } catch (error) {
     console.error('Failed to update payment link status', error);
   }
+}
+
+async function fetchLatestStripePaymentStatusForLink(stripeLinkId) {
+  if (!stripe || !stripeLinkId) {
+    throw new Error('Stripe not configured');
+  }
+
+  const { data: sessions } = await stripe.checkout.sessions.list({
+    payment_link: stripeLinkId,
+    limit: 1
+  });
+
+  const sessionsFound = Array.isArray(sessions) ? sessions.length : 0;
+  if (!sessionsFound) {
+    return { paymentStatus: 'pending', session: null, sessionsFound: 0 };
+  }
+
+  const session = sessions[0];
+  const paymentStatus = session.payment_status === 'paid' ? 'paid'
+    : session.payment_status === 'unpaid' ? 'pending'
+    : session.payment_status;
+
+  return { paymentStatus, session, sessionsFound };
 }
 
 // Email sending function
@@ -342,6 +366,16 @@ async function createStripePaymentLinkInternal(data, authContext) {
           bookingId: bookingId || '',
           customerEmail: customerEmail || '',
           customerName: customerName || ''
+        },
+        // Best-effort: also stamp metadata onto the PaymentIntent so `payment_intent.*`
+        // events can be correlated even if Checkout Session lookup fails.
+        payment_intent_data: {
+          metadata: {
+            firestoreId: link.id,
+            bookingId: bookingId || '',
+            customerEmail: customerEmail || '',
+            customerName: customerName || ''
+          }
         }
       });
     } catch (err) {
@@ -475,7 +509,8 @@ exports.refundPaymentLinkHttp = onRequest({
       refundedAt: refund.created
         ? admin.firestore.Timestamp.fromMillis(refund.created * 1000)
         : admin.firestore.FieldValue.serverTimestamp(),
-      paymentStatus: refund.status === 'succeeded' ? 'refunded' : data.paymentStatus
+      paymentStatus: refund.status === 'succeeded' ? 'refunded' : data.paymentStatus,
+      status: refund.status === 'succeeded' ? 'inactive' : data.status
     }, { merge: true });
 
     res.status(200).json({ success: true, refundId: refund.id, status: refund.status });
@@ -483,6 +518,110 @@ exports.refundPaymentLinkHttp = onRequest({
     console.error('refundPaymentLinkHttp error:', error.response?.data || error);
     const status = mapHttpsErrorToStatus(error);
     const message = error.response?.data?.error?.message || error.message || 'Failed to refund payment';
+    res.status(status).json({ error: message });
+  }
+});
+
+// Manually refresh a payment link status from Stripe (admin + staff)
+exports.refreshPaymentLinkStatusHttp = onRequest({
+  region: "us-central1",
+  cors: false,
+  secrets: ["STRIPE_SECRET_KEY"],
+  maxInstances: 10
+}, async (req, res) => {
+  if (handleCors(req, res)) {
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method Not Allowed' });
+    return;
+  }
+
+  if (!stripe) {
+    res.status(500).json({ error: 'Stripe not configured' });
+    return;
+  }
+
+  const authContext = await authenticateHttpRequest(req, res, ['admin', 'staff']);
+  if (!authContext) {
+    return;
+  }
+
+  const { paymentLinkId } = req.body || {};
+  if (!paymentLinkId) {
+    res.status(400).json({ error: 'paymentLinkId is required' });
+    return;
+  }
+
+  try {
+    const ref = db.collection('paymentLinks').doc(paymentLinkId);
+    const docSnap = await ref.get();
+    if (!docSnap.exists) {
+      res.status(404).json({ error: 'Payment link not found' });
+      return;
+    }
+
+    const data = docSnap.data() || {};
+    const stripeLinkId = (paymentLinkId && paymentLinkId.startsWith('plink_'))
+      ? paymentLinkId
+      : data.stripeLinkId;
+
+    if (!stripeLinkId) {
+      res.status(400).json({ error: 'Payment link is missing stripeLinkId' });
+      return;
+    }
+
+    const { paymentStatus, session, sessionsFound } = await fetchLatestStripePaymentStatusForLink(stripeLinkId);
+
+    // Persist a debug trail so "stuck pending" can be diagnosed from Firestore alone.
+    await ref.set({
+      stripeLastCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+      stripeLastSessionsFound: sessionsFound,
+      stripeLastCheckResult: session ? 'ok' : 'no_sessions'
+    }, { merge: true });
+
+    if (!session) {
+      res.status(200).json({
+        success: true,
+        paymentStatus: 'pending',
+        stripeLinkId,
+        sessionsFound: 0
+      });
+      return;
+    }
+
+    const update = {
+      paymentStatus,
+      status: paymentStatus === 'paid' ? 'inactive' : data.status || 'active',
+      lastStripeSessionId: session?.id || null,
+      lastStripePaymentIntent: session?.payment_intent || null,
+      paidAt: paymentStatus === 'paid' && session?.created
+        ? admin.firestore.Timestamp.fromMillis(session.created * 1000)
+        : admin.firestore.FieldValue.delete()
+    };
+
+    await ref.set(update, { merge: true });
+
+    if (paymentStatus === 'paid') {
+      try {
+        await stripe.paymentLinks.update(stripeLinkId, { active: false });
+      } catch (err) {
+        console.error('Refresh failed to deactivate payment link', stripeLinkId, err);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      paymentStatus,
+      stripeLinkId,
+      sessionsFound,
+      lastStripeSessionId: update.lastStripeSessionId
+    });
+  } catch (error) {
+    console.error('refreshPaymentLinkStatusHttp error:', error.response?.data || error);
+    const status = mapHttpsErrorToStatus(error);
+    const message = error.response?.data?.error?.message || error.message || 'Failed to refresh payment status';
     res.status(status).json({ error: message });
   }
 });
@@ -592,19 +731,12 @@ exports.reconcilePaymentLinks = onSchedule({
 
     try {
       // Grab the latest Checkout Session for this payment link
-      const { data: sessions } = await stripe.checkout.sessions.list({
-        payment_link: stripeLinkId,
-        limit: 1
-      });
-
-      if (!sessions || sessions.length === 0) continue;
-      const session = sessions[0];
-      const paymentStatus = session.payment_status === 'paid' ? 'paid'
-        : session.payment_status === 'unpaid' ? 'pending'
-        : session.payment_status;
+      const { paymentStatus, session } = await fetchLatestStripePaymentStatusForLink(stripeLinkId);
+      if (!session) continue;
 
       const update = {
         paymentStatus,
+        status: paymentStatus === 'paid' ? 'inactive' : data.status || 'active',
         lastStripeSessionId: session.id,
         lastStripePaymentIntent: session.payment_intent || null,
         paidAt: paymentStatus === 'paid'
@@ -1326,11 +1458,19 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
   secrets: ["SENDGRID_API_KEY"],
   region: "us-central1"
 }, async (event) => {
+  const bookingRef = event?.data?.ref;
+  /** @type {import('firebase-admin').firestore.DocumentReference[]} */
+  let relatedBookingRefs = bookingRef ? [bookingRef] : [];
   try {
     const booking = event.data.data();
     
     if (!booking?.clientDetails?.email) {
       console.error('Invalid booking data');
+      return null;
+    }
+
+    if (booking.emailSent) {
+      console.log('Booking confirmation already marked as sent; skipping');
       return null;
     }
 
@@ -1353,10 +1493,12 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
       
       if (existingEmail.exists) {
         console.log(`Email already sent for multi-boat group ${groupId}`);
-        await event.data.ref.update({
+        await bookingRef.update({
           emailSent: true,
           emailSentInGroup: true,
           emailSentTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+          emailStatus: 'sent',
+          emailProvider: existingEmail.data()?.provider || null
         });
         return null;
       }
@@ -1373,7 +1515,18 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
         return null;
       }
       
+      relatedBookingRefs = groupBookingsSnapshot.docs.map((docSnap) => docSnap.ref);
       const boatBookings = groupBookingsSnapshot.docs.map(doc => doc.data());
+
+      // Mark all boats as queued/sending early (best-effort), so the UI can
+      // reflect that an email send is in progress even if sending fails.
+      await Promise.all(
+        groupBookingsSnapshot.docs.map((docSnap) => docSnap.ref.set({
+          emailStatus: 'sending',
+          emailLastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+          emailError: admin.firestore.FieldValue.delete()
+        }, { merge: true }))
+      );
       
       // Build multi-boat email data
       const emailPayload = {
@@ -1409,6 +1562,9 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
           emailSent: true,
           emailSentInGroup: true,
           emailSentTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+          emailStatus: 'sent',
+          emailProvider: result.provider,
+          emailError: admin.firestore.FieldValue.delete()
         });
       }
     } else {
@@ -1427,14 +1583,39 @@ exports.processNewBookingNotification = onDocumentCreated('bookings/{bookingId}'
       };
 
       const dynamicData = formatMultiBoatEmailData(emailPayload);
-      await sendBookingConfirmationEmail(emailPayload.clientEmail, dynamicData);
-      await event.data.ref.update({
+
+      if (bookingRef) {
+        await bookingRef.set({
+          emailStatus: 'sending',
+          emailLastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+          emailError: admin.firestore.FieldValue.delete()
+        }, { merge: true });
+      }
+
+      const result = await sendBookingConfirmationEmail(emailPayload.clientEmail, dynamicData);
+
+      await bookingRef?.update({
         emailSent: true,
         emailSentTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+        emailStatus: 'sent',
+        emailProvider: result.provider,
+        emailError: admin.firestore.FieldValue.delete()
       });
     }
   } catch (error) {
     console.error('Booking Trigger Error:', error);
+
+    try {
+      await Promise.all(
+        (relatedBookingRefs.length ? relatedBookingRefs : bookingRef ? [bookingRef] : []).map((ref) => ref.set({
+          emailStatus: 'failed',
+          emailLastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+          emailError: error?.message || String(error)
+        }, { merge: true }))
+      );
+    } catch (statusError) {
+      console.error('Failed to persist email failure status:', statusError);
+    }
   }
   return null;
 });

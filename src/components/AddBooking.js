@@ -7,127 +7,9 @@ import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import ClientPaymentForm from './ClientPaymentForm';
 import { createBookingNotification, createPaymentNotification, createClientUpdateNotification, createTransferNotification } from '../utils/notification-utils';
 import { increment } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../firebase/firebaseConfig';
 import MultiBoatBooking from './MultiBoatBooking';
 import { useNavigate } from "react-router-dom";
 import { sendClientWelcomeEmail } from '../services/emailService';
-
-// Updated email function that supports both single and multi-boat bookings
-const sendBookingConfirmationEmail = async (bookingData, isMultiBoat = false, allBoats = []) => {
-  try {
-    console.log('Starting email send process with data:', {
-      client: bookingData.clientDetails?.name,
-      email: bookingData.clientDetails?.email,
-      isMultiBoat: isMultiBoat,
-      boatCount: isMultiBoat ? allBoats.length : 1
-    });
-    
-    // Prepare email payload based on booking type
-    let emailPayload;
-    
-    if (isMultiBoat) {
-      // Multi-boat booking payload
-      emailPayload = {
-        clientName: bookingData.clientDetails?.name || '',
-        clientEmail: bookingData.clientDetails?.email || '',
-        multiBoat: true,
-        boats: allBoats.map(boat => ({
-          boatName: boat.boatName || '',
-          date: boat.date || '',
-          startTime: boat.startTime || '',
-          endTime: boat.endTime || '',
-          passengers: boat.passengers?.toString() || '',
-          pricing: {
-            agreedPrice: boat.pricing?.agreedPrice?.toString() || '0'
-          }
-        }))
-      };
-    } else {
-      // Single boat booking payload
-      emailPayload = {
-        clientName: bookingData.clientDetails?.name || '',
-        clientEmail: bookingData.clientDetails?.email || '',
-        bookingDetails: {
-          boatName: bookingData.bookingDetails?.boatName || '',
-          date: bookingData.bookingDetails?.date || '',
-          startTime: bookingData.bookingDetails?.startTime || '',
-          endTime: bookingData.bookingDetails?.endTime || '',
-          passengers: bookingData.bookingDetails?.passengers?.toString() || '',
-          price: bookingData.pricing?.agreedPrice?.toString() || '0'
-        }
-      };
-    }
-
-    // Validate required fields before sending
-    if (!emailPayload.clientName || !emailPayload.clientEmail) {
-      console.error('Missing required fields:', { 
-        name: emailPayload.clientName, 
-        email: emailPayload.clientEmail 
-      });
-      return false;
-    }
-
-    // Try to use the callable function first
-    try {
-      console.log('Attempting to send email using callable function');
-      const sendEmail = httpsCallable(functions, 'sendBookingConfirmation');
-      const result = await sendEmail(emailPayload);
-      console.log('Email sent successfully via callable function:', result.data);
-      return true;
-    } catch (callableError) {
-      console.error('Error sending email via callable function:', callableError);
-      
-      // Try HTTP fallback if callable fails
-      try {
-        console.log('Falling back to HTTP function for email');
-        const authInstance = getAuth();
-        const currentUser = authInstance.currentUser;
-        const idToken = currentUser ? await currentUser.getIdToken() : null;
-
-        if (!idToken) {
-          throw new Error('No authenticated user token available for secure fallback request.');
-        }
-
-        const response = await fetch('https://sendbookingconfirmationhttp-xwscel2gqa-uc.a.run.app', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Origin': window.location.origin,
-            'Authorization': `Bearer ${idToken}`
-          },
-          body: JSON.stringify(emailPayload)
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(`HTTP function failed with status ${response.status}: ${JSON.stringify(errorData)}`);
-        }
-        
-        console.log('Email sent successfully via HTTP function');
-        return true;
-      } catch (httpError) {
-        console.error('HTTP function failed:', httpError);
-        console.log('All email sending methods failed');
-        
-        // Store this failed email for later retry if needed
-        try {
-          sessionStorage.setItem('failedEmail', JSON.stringify({
-            timestamp: new Date().toISOString(),
-            payload: emailPayload
-          }));
-        } catch (storageError) {
-          console.error('Could not store failed email details:', storageError);
-        }
-        
-        return false;
-      }
-    }
-  } catch (error) {
-    console.error('Unexpected error in sendBookingConfirmationEmail:', error);
-    return false;
-  }
-};
 
 const SnapshotTile = ({ icon: Icon, label, value, accent = "text-slate-600" }) => (
   <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
@@ -1575,30 +1457,9 @@ if (multiBoatMode) {
       });
     }
   }
-  
-  // Send a single email for all boats
-  const boatsForEmail = boats.map(boat => ({
-    boatName: boat.boatName,
-    date: boat.date,
-    startTime: boat.startTime,
-    endTime: boat.endTime,
-    passengers: boat.passengers,
-    pricing: {
-      agreedPrice: boat.pricing.agreedPrice
-    }
-  }));
-  
-  // Send one comprehensive email for all boats
-  await sendBookingConfirmationEmail(
-    {
-      clientDetails: {
-        name: formData.clientDetails.name,
-        email: formData.clientDetails.email
-      }
-    }, 
-    true, // isMultiBoat = true
-    boatsForEmail
-  );
+
+  // Booking confirmation emails are sent server-side via the Firestore
+  // trigger `processNewBookingNotification` in `functions/index.js`.
   
   // Create a single transfer notification if needed
   if (formData.transfer.required) {
@@ -1615,7 +1476,7 @@ if (multiBoatMode) {
     );
   }
   
-  alert(`Successfully created ${bookingIds.length} bookings for ${formData.clientDetails.name}`);
+  alert(`Successfully created ${bookingIds.length} bookings for ${formData.clientDetails.name}. The booking confirmation email will be sent automatically.`);
 
         } else {
             // Original single boat booking flow
@@ -1686,7 +1547,8 @@ if (multiBoatMode) {
 
             // Create booking document
             const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
-            await sendBookingConfirmationEmail(bookingData);
+            // Booking confirmation emails are sent server-side via the Firestore
+            // trigger `processNewBookingNotification` in `functions/index.js`.
             
             // Add booking notification
             await createBookingNotification(
@@ -1752,7 +1614,7 @@ if (multiBoatMode) {
                 });
             }
 
-            alert("Booking saved successfully");
+            alert("Booking saved successfully. The booking confirmation email will be sent automatically.");
         }
 
         if (invoicePrefills.length) {
