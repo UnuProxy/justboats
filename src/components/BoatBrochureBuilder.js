@@ -76,7 +76,15 @@ const DEFAULT_PARTNERS = [
   { id: 'pardo', name: 'Pardo Yachts', logo: null },
 ];
 
-const MONTHS = ['May', 'June', 'July', 'Aug', 'Sept', 'Oct'];
+const PRICING_PERIODS = [
+  { key: 'may', inputLabel: 'May', brochureLabel: 'May' },
+  { key: 'juneEarly', inputLabel: 'Jun 1-14', brochureLabel: '1-14 Jun' },
+  { key: 'peakSeason', inputLabel: '15 Jun - 20 Aug', brochureLabel: '15 Jun - 20 Aug' },
+  { key: 'augustLate', inputLabel: 'Aug 21-31', brochureLabel: '21-31 Aug' },
+  { key: 'sept', inputLabel: 'Sept', brochureLabel: 'Sept.' },
+  { key: 'oct', inputLabel: 'Oct', brochureLabel: 'Oct.' },
+];
+const LEGACY_MONTHS = ['May', 'June', 'July', 'Aug', 'Sept', 'Oct'];
 const DEFAULT_INCLUDED_ITEMS = ['Captain', 'Soft drinks', 'Ice', 'Snorkel gear', 'Towels'];
 const DEFAULT_NOT_INCLUDED_ITEMS = ['Fuel', 'Seabob', 'Overnight stay', 'Transfer service'];
 const DEFAULT_AMENITIES = ['Bedroom Cabin', 'Bathroom', 'Wi-Fi', 'Bluetooth Audio', 'Sunbed', 'Fridge', 'Deck Shower', 'Swim Ladder'];
@@ -91,6 +99,26 @@ const hexToRgba = (hex, alpha = 1) => {
   const b = parseInt(normalized.slice(5, 7), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
+
+const firstDefinedValue = (...values) => values.find((value) => value !== undefined && value !== null && value !== '');
+
+const normalizePricing = (pricing = {}) => ({
+  may: firstDefinedValue(pricing.may, pricing.May, ''),
+  juneEarly: firstDefinedValue(pricing.juneEarly, pricing.June, ''),
+  peakSeason: firstDefinedValue(pricing.peakSeason, pricing.July, pricing.June, pricing.Aug, ''),
+  augustLate: firstDefinedValue(pricing.augustLate, pricing.Aug, ''),
+  sept: firstDefinedValue(pricing.sept, pricing.Sept, ''),
+  oct: firstDefinedValue(pricing.oct, pricing.Oct, ''),
+});
+
+const normalizeMonthlyPricing = (pricing = {}) => ({
+  May: firstDefinedValue(pricing.May, ''),
+  June: firstDefinedValue(pricing.June, ''),
+  July: firstDefinedValue(pricing.July, ''),
+  Aug: firstDefinedValue(pricing.Aug, ''),
+  Sept: firstDefinedValue(pricing.Sept, ''),
+  Oct: firstDefinedValue(pricing.Oct, ''),
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COMPONENTS
@@ -215,27 +243,59 @@ const ImageUploader = ({ images, onImagesChange, maxImages = 12 }) => {
   );
 };
 
-const PricingTable = ({ pricing, onPricingChange }) => {
+const PricingTable = ({ pricing, onPricingChange, monthlyPricing, onMonthlyPricingChange }) => {
+  const normalizedPricing = normalizePricing(pricing);
+  const normalizedMonthlyPricing = normalizeMonthlyPricing(monthlyPricing);
+
   const updatePrice = (month, value) => {
-    onPricingChange({ ...pricing, [month]: value });
+    onPricingChange({ ...normalizedPricing, [month]: value });
+  };
+
+  const updateMonthlyPrice = (month, value) => {
+    onMonthlyPricingChange({ ...normalizedMonthlyPricing, [month]: value });
   };
 
   return (
-    <div className="space-y-3">
-      <label className="text-sm font-semibold text-slate-700">Monthly Pricing (€)</label>
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-        {MONTHS.map((month) => (
-          <div key={month} className="space-y-1">
-            <label className="text-xs font-medium text-slate-500 block text-center">{month}</label>
-            <input
-              type="number"
-              value={pricing[month] || ''}
-              onChange={(e) => updatePrice(month, e.target.value)}
-              placeholder="0"
-              className="w-full px-2 py-2 text-center text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
-            />
-          </div>
-        ))}
+    <div className="space-y-5">
+      <div className="space-y-3">
+        <label className="text-sm font-semibold text-slate-700">Seasonal Pricing (€)</label>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+          {PRICING_PERIODS.map((period) => (
+            <div key={period.key} className="space-y-1">
+              <label className="text-xs font-medium text-slate-500 block text-center min-h-[32px]">
+                {period.inputLabel}
+              </label>
+              <input
+                type="number"
+                value={normalizedPricing[period.key] || ''}
+                onChange={(e) => updatePrice(period.key, e.target.value)}
+                placeholder="0"
+                className="w-full px-2 py-2 text-center text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+        <div>
+          <label className="text-sm font-semibold text-slate-700">Original Monthly Template (€)</label>
+          <p className="text-xs text-slate-500 mt-1">Kept underneath for reference if you need the old month-by-month pricing too.</p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+          {LEGACY_MONTHS.map((month) => (
+            <div key={month} className="space-y-1">
+              <label className="text-xs font-medium text-slate-500 block text-center">{month}</label>
+              <input
+                type="number"
+                value={normalizedMonthlyPricing[month] || ''}
+                onChange={(e) => updateMonthlyPrice(month, e.target.value)}
+                placeholder="0"
+                className="w-full px-2 py-2 text-center text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all bg-white"
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -571,7 +631,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
         </p>
       </div>
 
-      {/* Monthly Pricing Row */}
+      {/* Seasonal Pricing Row */}
       <div
         style={{
           position: 'absolute',
@@ -584,29 +644,42 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
           padding: '0 100px',
         }}
       >
-        {MONTHS.map((month) => (
-          <div key={month} style={{ textAlign: 'center' }}>
+        {PRICING_PERIODS.map((period) => (
+          <div key={period.key} style={{ textAlign: 'center', maxWidth: '140px' }}>
             <div
               style={{
-                fontSize: '24px',
+                fontSize: period.brochureSubLabel ? '21px' : '22px',
                 fontWeight: 400,
                 color: hexToRgba(primaryText, 0.82),
-                marginBottom: '8px',
+                marginBottom: period.brochureSubLabel ? '4px' : '8px',
                 letterSpacing: '0.2px',
               }}
             >
-              {month === 'Aug' ? 'Aug.' : month === 'Sept' ? 'Sept.' : month === 'Oct' ? 'Oct.' : month}
+              {period.brochureLabel}
             </div>
+            {period.brochureSubLabel && (
+              <div
+                style={{
+                  fontSize: '14px',
+                  fontWeight: 400,
+                  color: hexToRgba(primaryText, 0.7),
+                  marginBottom: '8px',
+                  letterSpacing: '0.2px',
+                }}
+              >
+                {period.brochureSubLabel}
+              </div>
+            )}
             <div
               style={{
-                fontSize: '34px',
+                fontSize: '32px',
                 fontWeight: 500,
                 color: primaryText,
                 letterSpacing: '0.2px',
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {data.pricing[month] || '—'}€
+              {normalizePricing(data.pricing)[period.key] || '—'}€
             </div>
           </div>
         ))}
@@ -1253,7 +1326,8 @@ const BoatBrochureBuilder = () => {
     notIncludedItems: [...DEFAULT_NOT_INCLUDED_ITEMS],
     amenities: [...DEFAULT_AMENITIES],
     images: [],
-    pricing: {},
+    pricing: normalizePricing(),
+    monthlyPricing: normalizeMonthlyPricing(),
   });
 
   const [selectedTemplate, setSelectedTemplate] = useState('luxury');
@@ -1338,7 +1412,8 @@ const BoatBrochureBuilder = () => {
       notIncludedItems: template.notIncludedItems || [...DEFAULT_NOT_INCLUDED_ITEMS],
       amenities: template.amenities || [...DEFAULT_AMENITIES],
       images: [],
-      pricing: template.pricing || {},
+      pricing: normalizePricing(template.pricing),
+      monthlyPricing: normalizeMonthlyPricing(template.monthlyPricing || template.pricing),
     });
     setSelectedTemplate(template.template || 'luxury');
     setFooterType(template.footerType || 'restaurants');
@@ -1580,6 +1655,8 @@ const BoatBrochureBuilder = () => {
                 <PricingTable
                   pricing={formData.pricing}
                   onPricingChange={(p) => updateFormData('pricing', p)}
+                  monthlyPricing={formData.monthlyPricing}
+                  onMonthlyPricingChange={(p) => updateFormData('monthlyPricing', p)}
                 />
               </div>
             )}

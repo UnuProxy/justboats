@@ -36,6 +36,11 @@ const DRIVER_ALLOWED_PATTERNS = [
   '/crew-app'
 ];
 
+const BROCHURE_ALLOWED_PATTERNS = [
+  '/boats',
+  '/boat-brochure-builder'
+];
+
 const normalizeRole = (role = '') => String(role || '').trim().toLowerCase();
 
 const normalizePath = (pathname = '/') => {
@@ -72,6 +77,11 @@ const driverRouteRegexps = DRIVER_ALLOWED_PATTERNS.map((pattern) => ({
   regex: toRegex(pattern)
 }));
 
+const brochureRouteRegexps = BROCHURE_ALLOWED_PATTERNS.map((pattern) => ({
+  pattern,
+  regex: toRegex(pattern)
+}));
+
 export const canRoleAccessPath = (role = '', pathname = '/') => {
   const normalizedRole = normalizeRole(role);
   const normalized = normalizePath(pathname);
@@ -85,11 +95,25 @@ export const canRoleAccessPath = (role = '', pathname = '/') => {
       return employeeRouteRegexps.some(({ regex }) => regex.test(normalized));
     case 'driver':
       return driverRouteRegexps.some(({ regex }) => regex.test(normalized));
+    case 'brochure':
+      return brochureRouteRegexps.some(({ regex }) => regex.test(normalized));
     default:
       return false;
+  }
+};
+
+export const getDefaultRouteForRole = (role = '') => {
+  switch (normalizeRole(role)) {
+    case 'admin':
+      return '/user-management';
+    case 'brochure':
+      return '/boats';
+    default:
+      return '/bookings';
   }
 };
 
 export const staffAllowedPatterns = [...STAFF_ALLOWED_PATTERNS];
 export const employeeAllowedPatterns = [...EMPLOYEE_ALLOWED_PATTERNS];
 export const driverAllowedPatterns = [...DRIVER_ALLOWED_PATTERNS];
+export const brochureAllowedPatterns = [...BROCHURE_ALLOWED_PATTERNS];

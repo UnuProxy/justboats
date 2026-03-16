@@ -132,6 +132,7 @@ export function AuthProvider({ children }) {
   const isStaff = () => normalizedRole === 'staff';
   const isEmployee = () => normalizedRole === 'employee';
   const isDriver = () => normalizedRole === 'driver';
+  const isBrochure = () => normalizedRole === 'brochure';
 
   return (
     <AuthContext.Provider value={{
@@ -143,6 +144,7 @@ export function AuthProvider({ children }) {
       isStaff,
       isEmployee,
       isDriver,
+      isBrochure,
       loading,
       authError,
       setAuthError

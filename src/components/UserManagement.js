@@ -82,6 +82,8 @@ const roleBadgeClass = (role) => {
       return 'bg-blue-100 text-blue-800';
     case 'driver':
       return 'bg-amber-100 text-amber-800';
+    case 'brochure':
+      return 'bg-cyan-100 text-cyan-800';
     default:
       return 'bg-green-100 text-green-800';
   }
@@ -427,6 +429,7 @@ const UserManagement = () => {
                   <option value="staff">Staff</option>
                   <option value="employee">Employee</option>
                   <option value="driver">Driver</option>
+                  <option value="brochure">Brochure access</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>

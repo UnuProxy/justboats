@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PenSquare, Trash2, Download, Eye, EyeOff } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { ref, getDownloadURL } from 'firebase/storage';
+import { useAuth } from '../context/AuthContext';
 
 const PDF_COLORS = {
     navy: [4, 34, 57],
@@ -144,6 +145,7 @@ const getImageFormat = (dataUrl = '') =>
     dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG';
 
 const BoatManagement = () => {
+    const { userRole } = useAuth();
     const [boats, setBoats] = useState([]);
     const [loading, setLoading] = useState(true);
     const [pdfLoading, setPdfLoading] = useState({});
@@ -156,6 +158,8 @@ const BoatManagement = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    const normalizedRole = String(userRole || '').trim().toLowerCase();
+    const canManageFleet = normalizedRole !== 'brochure';
 
     const fetchBoats = async () => {
         try {
@@ -178,6 +182,7 @@ const BoatManagement = () => {
     };
 
     const handleBulkVisibilityConfirm = async () => {
+        if (!canManageFleet) return;
         setBulkUpdating(true);
         try {
             const boatsRef = collection(db, 'boats');
@@ -240,12 +245,13 @@ const BoatManagement = () => {
     }, [boats, searchTerm]);
 
     const requestDeleteBoat = (boat) => {
+        if (!canManageFleet) return;
         setBoatToDelete(boat);
         setDeleteLoading(false);
     };
 
     const confirmDeleteBoat = async () => {
-        if (!boatToDelete) return;
+        if (!boatToDelete || !canManageFleet) return;
 
         setDeleteLoading(true);
         try {
@@ -261,10 +267,12 @@ const BoatManagement = () => {
     };
 
     const handleEdit = (boatId) => {
+        if (!canManageFleet) return;
         navigate(`/edit-boat/${boatId}`);
     };
 
     const handleToggleVisibility = async (boatId, currentVisibility) => {
+        if (!canManageFleet) return;
         try {
             // Update visibility in Firestore
             const boatRef = doc(db, 'boats', boatId);
@@ -638,24 +646,28 @@ const BoatManagement = () => {
                     </p>
                     <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Boat Management</h1>
                     <p className="text-sm text-[var(--text-secondary)]">
-                        Curate the Nautiq fleet and publish availability in one workspace.
+                        {canManageFleet
+                            ? 'Curate the Nautiq fleet and publish availability in one workspace.'
+                            : 'Browse the fleet and download PDF brochures with read-only access.'}
                     </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                    <button
-                        onClick={() => setBulkModalOpen(true)}
-                        className="app-button--secondary text-sm"
-                        disabled={bulkUpdating || !boats.length}
-                    >
-                        {bulkUpdating ? 'Updating…' : 'Make all visible'}
-                    </button>
-                    <button
-                        onClick={() => navigate('/add-boat')}
-                        className="app-button text-sm"
-                    >
-                        Add new boat
-                    </button>
-                </div>
+                {canManageFleet && (
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={() => setBulkModalOpen(true)}
+                            className="app-button--secondary text-sm"
+                            disabled={bulkUpdating || !boats.length}
+                        >
+                            {bulkUpdating ? 'Updating…' : 'Make all visible'}
+                        </button>
+                        <button
+                            onClick={() => navigate('/add-boat')}
+                            className="app-button text-sm"
+                        >
+                            Add new boat
+                        </button>
+                    </div>
+                )}
             </div>
 
             <div className="app-card flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -691,23 +703,27 @@ const BoatManagement = () => {
                                 </div>
                             )}
                             <div className="absolute top-4 right-4 flex gap-2">
-                                <button
-                                    onClick={() => handleToggleVisibility(boat.id, boat.visible)}
-                                    className="icon-button"
-                                    title={boat.visible ? 'Hide from website' : 'Show on website'}
-                                >
-                                    {boat.visible ? (
-                                        <Eye size={18} className="text-[var(--success)]" />
-                                    ) : (
-                                        <EyeOff size={18} className="text-[var(--text-secondary)]" />
-                                    )}
-                                </button>
-                                <button onClick={() => handleEdit(boat.id)} className="icon-button" title="Edit boat">
-                                    <PenSquare size={18} className="text-[var(--accent)]" />
-                                </button>
-                                <button onClick={() => requestDeleteBoat(boat)} className="icon-button" title="Delete boat">
-                                    <Trash2 size={18} className="text-[var(--danger)]" />
-                                </button>
+                                {canManageFleet && (
+                                    <>
+                                        <button
+                                            onClick={() => handleToggleVisibility(boat.id, boat.visible)}
+                                            className="icon-button"
+                                            title={boat.visible ? 'Hide from website' : 'Show on website'}
+                                        >
+                                            {boat.visible ? (
+                                                <Eye size={18} className="text-[var(--success)]" />
+                                            ) : (
+                                                <EyeOff size={18} className="text-[var(--text-secondary)]" />
+                                            )}
+                                        </button>
+                                        <button onClick={() => handleEdit(boat.id)} className="icon-button" title="Edit boat">
+                                            <PenSquare size={18} className="text-[var(--accent)]" />
+                                        </button>
+                                        <button onClick={() => requestDeleteBoat(boat)} className="icon-button" title="Delete boat">
+                                            <Trash2 size={18} className="text-[var(--danger)]" />
+                                        </button>
+                                    </>
+                                )}
                                 <button
                                     onClick={() => handleGeneratePdf(boat.id)}
                                     disabled={pdfLoading[boat.id]}
