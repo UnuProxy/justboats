@@ -29,6 +29,7 @@ import InvoiceGenerator from './components/InvoiceGenerator';
 import SanAntonioBookingsAdmin from './components/SanAntonioBookingsAdmin';
 import PlaceQRManager from './components/PlaceQRManager';
 import FinancialDashboard from './components/FinancialDashboard';
+import PaymentSuccessPage from './components/PaymentSuccessPage';
 
 import ExpenseTracker from './components/ExpenseTracker';
 import CateringExpensesTracker from './components/CateringExpensesTracker';
@@ -182,6 +183,7 @@ function App() {
                     <Router>
                         <Routes>
                             <Route path="/login" element={<Login />} />
+                            <Route path="/thanks" element={<PaymentSuccessPage />} />
                             
                             {/* Dashboard */}
                             <Route

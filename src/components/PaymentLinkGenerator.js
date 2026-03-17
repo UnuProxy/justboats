@@ -25,8 +25,15 @@ const initialForm = {
   customerName: '',
   customerEmail: '',
   bookingId: '',
-  successUrl: 'https://nautiqibiza.com/thanks',
+  successUrl: '',
   notes: ''
+};
+
+const getDefaultSuccessUrl = () => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/thanks`;
+  }
+  return 'https://nautiqibiza.com/thanks';
 };
 
 const defaultPaymentLinkEndpoint = process.env.REACT_APP_FIREBASE_PROJECT_ID
@@ -52,7 +59,10 @@ const formatAmount = (value, currency) => {
 };
 
 const PaymentLinkGenerator = () => {
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(() => ({
+    ...initialForm,
+    successUrl: getDefaultSuccessUrl()
+  }));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
@@ -469,7 +479,7 @@ const PaymentLinkGenerator = () => {
                     value={form.successUrl}
                     onChange={handleChange}
                     className="app-input"
-                    placeholder="https://nautiqibiza.com/thanks"
+                    placeholder={getDefaultSuccessUrl()}
                   />
                 </div>
               </div>
