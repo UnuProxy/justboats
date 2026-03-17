@@ -15,7 +15,7 @@ const adminEmails = process.env.REACT_APP_ADMIN_EMAILS
   ? process.env.REACT_APP_ADMIN_EMAILS.split(',').map(email => email.trim())
   : ['julian.pirvu@gmail.com']; // Default admin email
 
-const ALLOWED_ROLES = ['admin', 'staff', 'employee', 'driver'];
+const ALLOWED_ROLES = ['admin', 'staff', 'employee', 'driver', 'brochure'];
 
 /**
  * Adds or updates a user in the 'approvedUsers' collection.

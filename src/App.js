@@ -29,6 +29,7 @@ import InvoiceGenerator from './components/InvoiceGenerator';
 import SanAntonioBookingsAdmin from './components/SanAntonioBookingsAdmin';
 import PlaceQRManager from './components/PlaceQRManager';
 import FinancialDashboard from './components/FinancialDashboard';
+import PaymentSuccessPage from './components/PaymentSuccessPage';
 
 import ExpenseTracker from './components/ExpenseTracker';
 import CateringExpensesTracker from './components/CateringExpensesTracker';
@@ -39,7 +40,7 @@ import GlobalSearch from './components/search/GlobalSearch';
 import BoatPerformanceAnalytics from './components/BoatPerformanceAnalytics';
 import PartnerPerformanceReports from './components/PartnerPerformanceReports';
 import DataBackup from './components/DataBackup';
-import { canRoleAccessPath } from './config/accessControl';
+import { canRoleAccessPath, getDefaultRouteForRole } from './config/accessControl';
 const Splash = ({ onFinish }) => {
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -89,8 +90,9 @@ function ErrorFallback({ error }) {
 }
 
 const ProtectedRoute = ({ children, adminOnly = false, requiredPermission }) => {
-    const { user, loading, userRole, isAdmin, isStaff, isEmployee, isDriver } = useAuth();
+    const { user, loading, userRole, isAdmin, isStaff, isEmployee, isDriver, isBrochure } = useAuth();
     const location = useLocation();
+    const redirectPath = getDefaultRouteForRole(userRole);
 
     if (loading) {
         return (
@@ -106,7 +108,7 @@ const ProtectedRoute = ({ children, adminOnly = false, requiredPermission }) => 
 
     const requiresAdmin = adminOnly || requiredPermission === 'admin';
     if (requiresAdmin && !isAdmin()) {
-        return <Navigate to="/bookings" replace />;
+        return <Navigate to={redirectPath} replace />;
     }
     if (requiredPermission) {
         const permissions = Array.isArray(requiredPermission)
@@ -123,20 +125,22 @@ const ProtectedRoute = ({ children, adminOnly = false, requiredPermission }) => 
                     return isAdmin() || isEmployee?.();
                 case 'driver':
                     return isAdmin() || isDriver?.();
+                case 'brochure':
+                    return isAdmin() || isBrochure?.();
                 default:
                     return false;
             }
         });
 
         if (!hasPermission) {
-            return <Navigate to="/bookings" replace />;
+            return <Navigate to={redirectPath} replace />;
         }
     }
 
     const normalizedRole = String(userRole || '').trim().toLowerCase();
     const effectiveRole = isAdmin() ? 'admin' : (normalizedRole || 'staff');
     if (effectiveRole !== 'admin' && !canRoleAccessPath(effectiveRole, location.pathname)) {
-        return <Navigate to="/bookings" replace />;
+        return <Navigate to={redirectPath} replace />;
     }
 
     return children;
@@ -179,6 +183,7 @@ function App() {
                     <Router>
                         <Routes>
                             <Route path="/login" element={<Login />} />
+                            <Route path="/thanks" element={<PaymentSuccessPage />} />
                             
                             {/* Dashboard */}
                             <Route

@@ -7,7 +7,7 @@ import {
   Ship, Upload, Download, Trash2, Eye, Image as ImageIcon,
   Calendar, ChevronDown,
   Palette, FileText, Copy, Check, Sparkles, RefreshCw, Save,
-  Building2, Utensils
+  Building2, Utensils, GripVertical
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -76,10 +76,20 @@ const DEFAULT_PARTNERS = [
   { id: 'pardo', name: 'Pardo Yachts', logo: null },
 ];
 
-const MONTHS = ['May', 'June', 'July', 'Aug', 'Sept', 'Oct'];
+const PRICING_PERIODS = [
+  { key: 'may', inputLabel: 'May', brochureLabel: 'May' },
+  { key: 'juneEarly', inputLabel: 'Jun 1-14', brochureLabel: '1-14 Jun' },
+  { key: 'peakSeason', inputLabel: '15 Jun - 20 Aug', brochureLabel: '15 Jun - 20 Aug' },
+  { key: 'augustLate', inputLabel: 'Aug 21-31', brochureLabel: '21-31 Aug' },
+  { key: 'sept', inputLabel: 'Sept', brochureLabel: 'Sept.' },
+  { key: 'oct', inputLabel: 'Oct', brochureLabel: 'Oct.' },
+];
+const LEGACY_MONTHS = ['May', 'June', 'July', 'Aug', 'Sept', 'Oct'];
 const DEFAULT_INCLUDED_ITEMS = ['Captain', 'Soft drinks', 'Ice', 'Snorkel gear', 'Towels'];
 const DEFAULT_NOT_INCLUDED_ITEMS = ['Fuel', 'Seabob', 'Overnight stay', 'Transfer service'];
 const DEFAULT_AMENITIES = ['Bedroom Cabin', 'Bathroom', 'Wi-Fi', 'Bluetooth Audio', 'Sunbed', 'Fridge', 'Deck Shower', 'Swim Ladder'];
+const EXTRA_GALLERY_PAGE_SIZE = 6;
+const MAX_BROCHURE_IMAGES = 10;
 
 const hexToRgba = (hex, alpha = 1) => {
   if (!hex || typeof hex !== 'string' || !hex.startsWith('#')) return `rgba(255,255,255,${alpha})`;
@@ -92,12 +102,46 @@ const hexToRgba = (hex, alpha = 1) => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
+const firstDefinedValue = (...values) => values.find((value) => value !== undefined && value !== null && value !== '');
+
+const normalizePricing = (pricing = {}) => ({
+  may: firstDefinedValue(pricing.may, pricing.May, ''),
+  juneEarly: firstDefinedValue(pricing.juneEarly, pricing.June, ''),
+  peakSeason: firstDefinedValue(pricing.peakSeason, pricing.July, pricing.June, pricing.Aug, ''),
+  augustLate: firstDefinedValue(pricing.augustLate, pricing.Aug, ''),
+  sept: firstDefinedValue(pricing.sept, pricing.Sept, ''),
+  oct: firstDefinedValue(pricing.oct, pricing.Oct, ''),
+});
+
+const normalizeMonthlyPricing = (pricing = {}) => ({
+  May: firstDefinedValue(pricing.May, ''),
+  June: firstDefinedValue(pricing.June, ''),
+  July: firstDefinedValue(pricing.July, ''),
+  Aug: firstDefinedValue(pricing.Aug, ''),
+  Sept: firstDefinedValue(pricing.Sept, ''),
+  Oct: firstDefinedValue(pricing.Oct, ''),
+});
+
+const chunkImages = (images, size) => {
+  const chunks = [];
+  for (let index = 0; index < images.length; index += size) {
+    chunks.push(images.slice(index, index + size));
+  }
+  return chunks;
+};
+
+const getBrochureAmenities = (data) => (
+  ((data.amenities && data.amenities.length ? data.amenities : DEFAULT_AMENITIES))
+    .map((item) => (item === 'Bedroom Cabin' ? `Bedroom Cabin (${Math.max(1, Number(data.bedroomCount) || 1)})` : item))
+);
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // COMPONENTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const ImageUploader = ({ images, onImagesChange, maxImages = 12 }) => {
+const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES }) => {
   const fileInputRef = useRef(null);
+  const [draggedImageId, setDraggedImageId] = useState(null);
 
   const handleFileChange = async (e) => {
     const files = Array.from(e.target.files);
@@ -138,8 +182,43 @@ const ImageUploader = ({ images, onImagesChange, maxImages = 12 }) => {
     onImagesChange([img, ...rest]);
   };
 
+  const moveImage = (sourceId, targetId) => {
+    if (sourceId === targetId) return;
+    const sourceIndex = images.findIndex((img) => img.id === sourceId);
+    const targetIndex = images.findIndex((img) => img.id === targetId);
+    if (sourceIndex === -1 || targetIndex === -1) return;
+
+    const nextImages = [...images];
+    const [movedImage] = nextImages.splice(sourceIndex, 1);
+    nextImages.splice(targetIndex, 0, movedImage);
+    onImagesChange(nextImages);
+  };
+
+  const handleDragStart = (event, imageId) => {
+    setDraggedImageId(imageId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', imageId);
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (event, targetId) => {
+    event.preventDefault();
+    const sourceId = draggedImageId || event.dataTransfer.getData('text/plain');
+    if (!sourceId) return;
+    moveImage(sourceId, targetId);
+    setDraggedImageId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedImageId(null);
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
         <label className="text-sm font-semibold text-slate-700">
           Boat Images ({images.length}/{maxImages})
@@ -147,7 +226,7 @@ const ImageUploader = ({ images, onImagesChange, maxImages = 12 }) => {
         {images.length < maxImages && (
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-cyan-500 to-teal-500 text-white text-sm font-medium rounded-lg hover:from-cyan-600 hover:to-teal-600 transition-all shadow-sm"
+            className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700"
           >
             <Upload size={14} />
             Add Image
@@ -167,45 +246,50 @@ const ImageUploader = ({ images, onImagesChange, maxImages = 12 }) => {
       {images.length === 0 ? (
         <div
           onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:border-cyan-400 hover:bg-cyan-50/50 transition-all group"
+          className="cursor-pointer rounded-2xl border-2 border-dashed border-slate-300 p-8 text-center transition-all hover:border-cyan-400 hover:bg-cyan-50/50"
         >
-          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-cyan-100 to-teal-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-cyan-100 to-teal-100">
             <ImageIcon size={28} className="text-cyan-600" />
           </div>
           <p className="text-slate-600 font-medium">Click to upload boat images</p>
           <p className="text-slate-400 text-sm mt-1">PNG, JPG up to 10MB • First image is the hero</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           {images.map((img, idx) => (
             <div
               key={img.id}
-              className={`relative group rounded-xl overflow-hidden aspect-[4/3] border-2 transition-all ${
-                idx === 0 ? 'border-cyan-500 ring-2 ring-cyan-200' : 'border-slate-200'
+              draggable
+              onDragStart={(event) => handleDragStart(event, img.id)}
+              onDragOver={handleDragOver}
+              onDrop={(event) => handleDrop(event, img.id)}
+              onDragEnd={handleDragEnd}
+              className={`relative overflow-hidden rounded-lg border bg-white transition ${
+                draggedImageId === img.id ? 'border-cyan-400 opacity-60' : 'border-slate-200'
               }`}
             >
-              <img src={img.src} alt={img.name} className="w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="absolute bottom-0 left-0 right-0 p-2 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
-                {idx !== 0 && (
+              <img src={img.src} alt={img.name} className="h-24 w-full object-cover" />
+              <div className="space-y-1 px-2 py-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <GripVertical size={14} className="text-slate-400" />
+                    <button
+                      type="button"
+                      onClick={() => setMainImage(img.id)}
+                      className="text-[11px] font-semibold text-cyan-700 hover:text-cyan-800"
+                    >
+                      {idx === 0 ? 'HERO' : 'Set Main'}
+                    </button>
+                  </div>
                   <button
-                    onClick={() => setMainImage(img.id)}
-                    className="px-2 py-1 bg-white/90 text-slate-700 text-xs font-medium rounded-md hover:bg-white"
+                    type="button"
+                    onClick={() => removeImage(img.id)}
+                    className="text-slate-500 hover:text-red-600"
                   >
-                    Set Main
+                    <Trash2 size={14} />
                   </button>
-                )}
-                {idx === 0 && (
-                  <span className="px-2 py-1 bg-cyan-500 text-white text-xs font-bold rounded-md">
-                    HERO
-                  </span>
-                )}
-                <button
-                  onClick={() => removeImage(img.id)}
-                  className="p-1.5 bg-red-500 text-white rounded-md hover:bg-red-600"
-                >
-                  <Trash2 size={12} />
-                </button>
+                </div>
+                <p className="text-[11px] text-slate-400">Drag to reorder</p>
               </div>
             </div>
           ))}
@@ -215,27 +299,59 @@ const ImageUploader = ({ images, onImagesChange, maxImages = 12 }) => {
   );
 };
 
-const PricingTable = ({ pricing, onPricingChange }) => {
+const PricingTable = ({ pricing, onPricingChange, monthlyPricing, onMonthlyPricingChange }) => {
+  const normalizedPricing = normalizePricing(pricing);
+  const normalizedMonthlyPricing = normalizeMonthlyPricing(monthlyPricing);
+
   const updatePrice = (month, value) => {
-    onPricingChange({ ...pricing, [month]: value });
+    onPricingChange({ ...normalizedPricing, [month]: value });
+  };
+
+  const updateMonthlyPrice = (month, value) => {
+    onMonthlyPricingChange({ ...normalizedMonthlyPricing, [month]: value });
   };
 
   return (
-    <div className="space-y-3">
-      <label className="text-sm font-semibold text-slate-700">Monthly Pricing (€)</label>
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-        {MONTHS.map((month) => (
-          <div key={month} className="space-y-1">
-            <label className="text-xs font-medium text-slate-500 block text-center">{month}</label>
-            <input
-              type="number"
-              value={pricing[month] || ''}
-              onChange={(e) => updatePrice(month, e.target.value)}
-              placeholder="0"
-              className="w-full px-2 py-2 text-center text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
-            />
-          </div>
-        ))}
+    <div className="space-y-5">
+      <div className="space-y-3">
+        <label className="text-sm font-semibold text-slate-700">Seasonal Pricing (€)</label>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+          {PRICING_PERIODS.map((period) => (
+            <div key={period.key} className="space-y-1">
+              <label className="text-xs font-medium text-slate-500 block text-center min-h-[32px]">
+                {period.inputLabel}
+              </label>
+              <input
+                type="number"
+                value={normalizedPricing[period.key] || ''}
+                onChange={(e) => updatePrice(period.key, e.target.value)}
+                placeholder="0"
+                className="w-full px-2 py-2 text-center text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+        <div>
+          <label className="text-sm font-semibold text-slate-700">Original Monthly Template (€)</label>
+          <p className="text-xs text-slate-500 mt-1">Kept underneath for reference if you need the old month-by-month pricing too.</p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+          {LEGACY_MONTHS.map((month) => (
+            <div key={month} className="space-y-1">
+              <label className="text-xs font-medium text-slate-500 block text-center">{month}</label>
+              <input
+                type="number"
+                value={normalizedMonthlyPricing[month] || ''}
+                onChange={(e) => updateMonthlyPrice(month, e.target.value)}
+                placeholder="0"
+                className="w-full px-2 py-2 text-center text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all bg-white"
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -449,21 +565,21 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
       <div
         style={{
           position: 'absolute',
-          top: '40px',
+          top: '34px',
           left: '40px',
           zIndex: 10,
+          maxWidth: '760px',
         }}
       >
         <h1
           style={{
-            fontSize: '64px',
-            fontWeight: 600,
+            fontSize: '36px',
+            fontWeight: 500,
             color: primaryText,
             letterSpacing: '0.4px',
+            lineHeight: 1.08,
             margin: 0,
-            textTransform: 'uppercase',
-            textShadow: '0 4px 20px rgba(0,0,0,0.5)',
-            fontStyle: 'normal',
+            textShadow: '0 2px 14px rgba(0,0,0,0.28)',
           }}
         >
           {data.boatName || 'BOAT NAME'}
@@ -571,7 +687,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
         </p>
       </div>
 
-      {/* Monthly Pricing Row */}
+      {/* Seasonal Pricing Row */}
       <div
         style={{
           position: 'absolute',
@@ -584,29 +700,42 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
           padding: '0 100px',
         }}
       >
-        {MONTHS.map((month) => (
-          <div key={month} style={{ textAlign: 'center' }}>
+        {PRICING_PERIODS.map((period) => (
+          <div key={period.key} style={{ textAlign: 'center', maxWidth: '140px' }}>
             <div
               style={{
-                fontSize: '24px',
+                fontSize: period.brochureSubLabel ? '21px' : '22px',
                 fontWeight: 400,
                 color: hexToRgba(primaryText, 0.82),
-                marginBottom: '8px',
+                marginBottom: period.brochureSubLabel ? '4px' : '8px',
                 letterSpacing: '0.2px',
               }}
             >
-              {month === 'Aug' ? 'Aug.' : month === 'Sept' ? 'Sept.' : month === 'Oct' ? 'Oct.' : month}
+              {period.brochureLabel}
             </div>
+            {period.brochureSubLabel && (
+              <div
+                style={{
+                  fontSize: '14px',
+                  fontWeight: 400,
+                  color: hexToRgba(primaryText, 0.7),
+                  marginBottom: '8px',
+                  letterSpacing: '0.2px',
+                }}
+              >
+                {period.brochureSubLabel}
+              </div>
+            )}
             <div
               style={{
-                fontSize: '34px',
+                fontSize: '32px',
                 fontWeight: 500,
                 color: primaryText,
                 letterSpacing: '0.2px',
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {data.pricing[month] || '—'}€
+              {normalizePricing(data.pricing)[period.key] || '—'}€
             </div>
           </div>
         ))}
@@ -697,120 +826,82 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
   );
 });
 
-const PortBaseSignature = ({ primaryText }) => {
-  const normalizedPrimary = String(primaryText || '').toLowerCase();
-  const useDarkPortWord = normalizedPrimary === '#0f172a' || normalizedPrimary === '#111827' || normalizedPrimary === '#1e293b';
-  const portWordColor = useDarkPortWord ? '#0f2744' : '#e9f1fb';
-
-  return (
-    <>
-      <h3
-        style={{
-          margin: 0,
-          fontSize: '16px',
-          lineHeight: 1,
-          color: primaryText,
-          fontWeight: 600,
-          letterSpacing: '0px',
-          textShadow: '0 3px 8px rgba(0,0,0,0.15)',
-        }}
-      >
-        <span style={{ color: portWordColor }}>Port</span>
-        <span style={{ color: '#27c2f3' }}>Base</span>
-      </h3>
-      <p
-        style={{
-          margin: '4px 0 0',
-          fontSize: '10px',
-          color: hexToRgba(primaryText, 0.88),
-          letterSpacing: '0.1px',
-          fontWeight: 400,
-        }}
-      >
-        The{' '}
-        <span
-          style={{
-            color: '#27c2f3',
-            textDecorationLine: 'underline',
-            textDecorationColor: '#27c2f3',
-            textDecorationThickness: '1px',
-            textUnderlineOffset: '2px',
-            textDecorationSkipInk: 'none',
-          }}
-        >
-          Trusted
-        </span>{' '}
-        Booking Network for Yacht Professionals
-      </p>
-    </>
-  );
-};
+const PortBaseSignature = ({ textColor }) => (
+  <>
+    <h3
+      style={{
+        margin: 0,
+        fontSize: '20px',
+        lineHeight: 1,
+        color: textColor,
+        fontWeight: 600,
+        letterSpacing: '0.2px',
+      }}
+    >
+      <span style={{ color: '#e9f1fb' }}>Port</span>
+      <span style={{ color: '#27c2f3' }}>Base</span>
+    </h3>
+    <p
+      style={{
+        margin: '5px 0 0',
+        fontSize: '10px',
+        color: textColor,
+        opacity: 0.82,
+        fontWeight: 400,
+        letterSpacing: '0.1px',
+      }}
+    >
+      The <span style={{ color: '#27c2f3', textDecoration: 'underline' }}>Trusted</span> Booking Network for Yacht Professionals
+    </p>
+  </>
+);
 
 const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, selectedTemplate }, ref) {
-  const showcaseImage = data.images && data.images.length > 6 ? data.images[6].src : null;
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
-  const bedroomCount = Math.max(1, Number(data.bedroomCount) || 1);
-  const includedItems = (Array.isArray(data.includedItems) && data.includedItems.length ? data.includedItems : DEFAULT_INCLUDED_ITEMS)
-    .filter((item) => item.toLowerCase() !== 'vat 21%')
-    .slice(0, 6);
-  const notIncludedItems = (Array.isArray(data.notIncludedItems) && data.notIncludedItems.length ? data.notIncludedItems : DEFAULT_NOT_INCLUDED_ITEMS)
-    .filter((item) => item.toLowerCase() !== 'docking fees')
-    .slice(0, 6);
-  const amenities = (Array.isArray(data.amenities) && data.amenities.length ? data.amenities : DEFAULT_AMENITIES)
-    .map((item) => (item === 'Bedroom Cabin' ? `Bedroom Cabin (${bedroomCount})` : item))
-    .slice(0, 8);
-  const boxBaseStyle = {
-    width: '14px',
-    height: '14px',
-    borderRadius: '3px',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  };
+  const showcaseImage = data.images && data.images.length > 6 ? data.images[6].src : null;
+  const includedItems = (data.includedItems && data.includedItems.length ? data.includedItems : DEFAULT_INCLUDED_ITEMS).slice(0, 8);
+  const notIncludedItems = (data.notIncludedItems && data.notIncludedItems.length ? data.notIncludedItems : DEFAULT_NOT_INCLUDED_ITEMS).slice(0, 8);
   const checklistRowStyle = {
+    color: primaryText,
+    fontSize: '24px',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    minHeight: '18px',
+    gap: '12px',
+    minHeight: '34px',
+    lineHeight: 1,
   };
   const checklistLabelStyle = {
     display: 'inline-block',
-    lineHeight: '14px',
-    transform: 'translateY(-6px)',
+    lineHeight: '24px',
     margin: 0,
     padding: 0,
   };
-
-  const CheckBoxIcon = () => (
-    <span style={{ ...boxBaseStyle, background: hexToRgba(templateStyle.accentColor, 0.95) }}>
-      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-        <path
-          d="M1.8 5.4L3.9 7.4L8.2 2.9"
-          fill="none"
-          stroke="#ffffff"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </span>
-  );
-
-  const XBoxIcon = () => (
-    <span style={{ ...boxBaseStyle, border: `1px solid ${hexToRgba(primaryText, 0.5)}` }}>
-      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-        <path
-          d="M2.3 2.3L7.7 7.7M7.7 2.3L2.3 7.7"
-          fill="none"
-          stroke={hexToRgba(primaryText, 0.82)}
-          strokeWidth="1.4"
-          strokeLinecap="round"
-        />
-      </svg>
-    </span>
-  );
+  const checkMarkStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    fontSize: '22px',
+    lineHeight: 1,
+    flexShrink: 0,
+  };
+  const xMarkStyle = {
+    ...checkMarkStyle,
+    opacity: 0.9,
+  };
+  const maxChecklistItems = Math.max(includedItems.length, notIncludedItems.length);
+  const showcaseTop = 100;
+  const showcaseGap = 28;
+  const showcaseHeight = maxChecklistItems <= 4
+    ? 700
+    : maxChecklistItems <= 6
+      ? 670
+      : maxChecklistItems <= 8
+        ? 640
+        : 620;
+  const checklistTop = showcaseTop + showcaseHeight + showcaseGap;
 
   return (
     <div
@@ -846,27 +937,10 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
           alignItems: 'center',
         }}
       >
-        <h2
-          style={{
-            margin: 0,
-            color: primaryText,
-            fontWeight: 500,
-            letterSpacing: '1px',
-            fontSize: '26px',
-            textTransform: 'uppercase',
-          }}
-        >
+        <h2 style={{ margin: 0, color: primaryText, fontSize: '26px', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' }}>
           {data.boatName || 'Boat Name'}
         </h2>
-        <p
-          style={{
-            margin: 0,
-            color: hexToRgba(primaryText, 0.72),
-            fontWeight: 400,
-            letterSpacing: '3px',
-            fontSize: '12px',
-          }}
-        >
+        <p style={{ margin: 0, color: hexToRgba(primaryText, 0.72), fontWeight: 400, letterSpacing: '3px', fontSize: '12px' }}>
           GALLERY VIEW
         </p>
       </div>
@@ -874,10 +948,10 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
       <div
         style={{
           position: 'absolute',
-          top: '100px',
+          top: `${showcaseTop}px`,
           left: '56px',
           right: '56px',
-          height: '620px',
+          height: `${showcaseHeight}px`,
           borderRadius: '26px',
           overflow: 'hidden',
           zIndex: 2,
@@ -887,25 +961,16 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
         }}
       >
         {showcaseImage ? (
-          <img
-            src={showcaseImage}
-            alt="Boat detail"
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-            }}
-            crossOrigin="anonymous"
-          />
+          <img src={showcaseImage} alt="Boat detail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} crossOrigin="anonymous" />
         ) : (
           <div
             style={{
               width: '100%',
               height: '100%',
+              background: templateStyle.headerBg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: templateStyle.headerBg,
             }}
           >
             <Ship size={140} color="rgba(255,255,255,0.24)" />
@@ -916,75 +981,34 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
       <div
         style={{
           position: 'absolute',
-          top: '748px',
+          top: `${checklistTop}px`,
           left: '56px',
           right: '56px',
-          height: '322px',
+          bottom: '170px',
           zIndex: 4,
           display: 'grid',
           gridTemplateColumns: '1fr 1fr',
-          gridTemplateRows: 'auto auto',
           gap: '14px',
         }}
       >
-        <div
-          style={{
-            background: hexToRgba(templateStyle.footerBg, 0.52),
-            border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`,
-            borderRadius: '14px',
-            padding: '12px 14px',
-          }}
-        >
-          <p style={{ margin: 0, marginBottom: '8px', color: primaryText, fontSize: '12px', letterSpacing: '1.2px', fontWeight: 600, textTransform: 'uppercase' }}>
-            Included
-          </p>
-          <div style={{ display: 'grid', gap: '6px' }}>
+        <div style={{ border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '22px 24px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <p style={{ margin: 0, marginBottom: '14px', color: primaryText, fontSize: '34px', fontWeight: 700, letterSpacing: '0.6px' }}>Included</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 20px', alignContent: 'start', flex: 1 }}>
             {includedItems.map((item) => (
-              <div key={`in-${item}`} style={{ ...checklistRowStyle, color: hexToRgba(primaryText, 0.9), fontSize: '12px' }}>
-                <CheckBoxIcon />
+              <div key={`in-${item}`} style={checklistRowStyle}>
+                <span style={checkMarkStyle}>✓</span>
                 <span style={checklistLabelStyle}>{item}</span>
               </div>
             ))}
           </div>
         </div>
 
-        <div
-          style={{
-            background: hexToRgba(templateStyle.footerBg, 0.52),
-            border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`,
-            borderRadius: '14px',
-            padding: '12px 14px',
-          }}
-        >
-          <p style={{ margin: 0, marginBottom: '8px', color: primaryText, fontSize: '12px', letterSpacing: '1.2px', fontWeight: 600, textTransform: 'uppercase' }}>
-            Not Included
-          </p>
-          <div style={{ display: 'grid', gap: '6px' }}>
+        <div style={{ border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '22px 24px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <p style={{ margin: 0, marginBottom: '14px', color: primaryText, fontSize: '34px', fontWeight: 700, letterSpacing: '0.6px' }}>Not Included</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 20px', alignContent: 'start', flex: 1 }}>
             {notIncludedItems.map((item) => (
-              <div key={`out-${item}`} style={{ ...checklistRowStyle, color: hexToRgba(primaryText, 0.86), fontSize: '12px' }}>
-                <XBoxIcon />
-                <span style={checklistLabelStyle}>{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div
-          style={{
-            gridColumn: '1 / -1',
-            background: hexToRgba(templateStyle.footerBg, 0.52),
-            border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`,
-            borderRadius: '14px',
-            padding: '12px 14px',
-          }}
-        >
-          <p style={{ margin: 0, marginBottom: '8px', color: primaryText, fontSize: '12px', letterSpacing: '1.2px', fontWeight: 600, textTransform: 'uppercase' }}>
-            Amenities
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '6px 10px' }}>
-            {amenities.map((item) => (
-              <div key={`amenity-${item}`} style={{ ...checklistRowStyle, color: hexToRgba(primaryText, 0.9), fontSize: '12px' }}>
-                <CheckBoxIcon />
+              <div key={`out-${item}`} style={checklistRowStyle}>
+                <span style={xMarkStyle}>×</span>
                 <span style={checklistLabelStyle}>{item}</span>
               </div>
             ))}
@@ -992,42 +1016,32 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
         </div>
       </div>
 
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: '230px',
-          zIndex: 5,
-          background: templateStyle.footerBg,
-          borderTop: `1px solid ${hexToRgba(templateStyle.accentColor, 0.58)}`,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-          padding: '0 60px 10px',
-          textAlign: 'center',
-        }}
-      >
-        <PortBaseSignature primaryText={primaryText} />
-      </div>
     </div>
   );
 });
 
-const BrochurePageThree = React.forwardRef(function BrochurePageThree({ data, selectedTemplate }, ref) {
+const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, amenities, pageIndex, totalPages, selectedTemplate }, ref) {
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
-  const remainingImages = Array.isArray(data.images) ? data.images.slice(7) : [];
-  const columnCount = remainingImages.length <= 1 ? 1 : 2;
-  const galleryRows = Math.max(1, Math.ceil(remainingImages.length / columnCount));
-  const galleryTop = 100;
+  const hasAmenitiesCard = amenities.length > 0;
+  const amenitiesColumns = 3;
+  const amenitiesRows = Math.max(1, Math.ceil(amenities.length / amenitiesColumns));
+  const amenitiesCardHeight = hasAmenitiesCard ? Math.min(420, 92 + amenitiesRows * 36) : 0;
+  const stackGalleryImages = images.length <= 2;
+  const columnCount = stackGalleryImages ? 1 : 2;
+  const galleryRows = Math.max(1, Math.ceil(images.length / columnCount));
+  const galleryTop = hasAmenitiesCard ? 68 + amenitiesCardHeight : 48;
   const galleryBottom = 176;
   const galleryGap = 14;
   const galleryAvailableHeight = 1350 - galleryTop - galleryBottom;
   const computedRowHeight = Math.floor((galleryAvailableHeight - galleryGap * (galleryRows - 1)) / galleryRows);
-  const maxRowHeight = columnCount === 1 ? 520 : 340;
+  const maxRowHeight = galleryRows === 1
+    ? galleryAvailableHeight
+    : galleryRows === 2
+      ? Math.min(galleryAvailableHeight, 560)
+      : columnCount === 1
+        ? 520
+        : 420;
   const minRowHeight = 190;
   const galleryRowHeight = Math.max(minRowHeight, Math.min(computedRowHeight, maxRowHeight));
 
@@ -1053,42 +1067,49 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ data, se
         }}
       />
 
-      <div
-        style={{
-          position: 'absolute',
-          top: '48px',
-          left: '56px',
-          right: '56px',
-          zIndex: 3,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-        }}
-      >
-        <h2
+      {hasAmenitiesCard && (
+        <div
           style={{
-            margin: 0,
-            color: primaryText,
-            fontWeight: 500,
-            letterSpacing: '0.9px',
-            fontSize: '24px',
-            textTransform: 'uppercase',
+            position: 'absolute',
+            top: '48px',
+            left: '56px',
+            right: '56px',
+            height: `${amenitiesCardHeight}px`,
+            zIndex: 2,
+            borderRadius: '24px',
+            border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.5)}`,
+            background: hexToRgba(templateStyle.footerBg, 0.52),
+            boxShadow: '0 18px 48px rgba(0,0,0,0.24)',
+            padding: '24px 28px',
+            overflow: 'hidden',
           }}
         >
-          Extra Gallery
-        </h2>
-        <p
-          style={{
-            margin: 0,
-            color: hexToRgba(primaryText, 0.72),
-            fontWeight: 400,
-            letterSpacing: '1.2px',
-            fontSize: '12px',
-          }}
-        >
-          {remainingImages.length} image{remainingImages.length === 1 ? '' : 's'}
-        </p>
-      </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '18px' }}>
+            <p style={{ margin: 0, color: primaryText, fontWeight: 600, letterSpacing: '0.8px', fontSize: '20px', textTransform: 'uppercase' }}>Amenities</p>
+            <p style={{ margin: 0, color: hexToRgba(primaryText, 0.72), fontSize: '11px', letterSpacing: '1px' }}>
+              {amenities.length} item{amenities.length === 1 ? '' : 's'}
+            </p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px 20px', alignContent: 'start' }}>
+            {amenities.map((item) => (
+              <div
+                key={`amenity-card-${pageIndex}-${item}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '10px',
+                  color: primaryText,
+                  fontSize: '22px',
+                  lineHeight: 1.15,
+                }}
+              >
+                <span style={{ display: 'inline-flex', width: '18px', justifyContent: 'center', flexShrink: 0 }}>✓</span>
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div
         style={{
@@ -1105,9 +1126,9 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ data, se
           alignContent: 'start',
         }}
       >
-        {remainingImages.map((img, idx) => (
+        {images.map((img, idx) => (
           <div
-            key={img.id || `extra-${idx}`}
+            key={img.id || `extra-${pageIndex}-${idx}`}
             style={{
               borderRadius: '18px',
               overflow: 'hidden',
@@ -1116,40 +1137,32 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ data, se
               boxShadow: '0 12px 34px rgba(0,0,0,0.28)',
             }}
           >
-            <img
-              src={img.src}
-              alt={`Gallery image ${idx + 8}`}
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-              }}
-              crossOrigin="anonymous"
-            />
+            <img src={img.src} alt={`Gallery image ${idx + 8}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} crossOrigin="anonymous" />
           </div>
         ))}
       </div>
 
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: '138px',
-          zIndex: 5,
-          background: templateStyle.footerBg,
-          borderTop: `1px solid ${hexToRgba(templateStyle.accentColor, 0.58)}`,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-          padding: '0 40px 10px',
-          textAlign: 'center',
-        }}
-      >
-        <PortBaseSignature primaryText={primaryText} />
-      </div>
+      {pageIndex === totalPages - 1 && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: '138px',
+            zIndex: 5,
+            background: templateStyle.footerBg,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            padding: '0 40px 18px',
+            textAlign: 'center',
+          }}
+        >
+          <PortBaseSignature textColor={primaryText} />
+        </div>
+      )}
     </div>
   );
 });
@@ -1224,7 +1237,7 @@ const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading }) => {
 const BoatBrochureBuilder = () => {
   const pageOneRef = useRef(null);
   const pageTwoRef = useRef(null);
-  const pageThreeRef = useRef(null);
+  const pageThreeRefs = useRef([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState([]);
@@ -1253,15 +1266,27 @@ const BoatBrochureBuilder = () => {
     notIncludedItems: [...DEFAULT_NOT_INCLUDED_ITEMS],
     amenities: [...DEFAULT_AMENITIES],
     images: [],
-    pricing: {},
+    pricing: normalizePricing(),
+    monthlyPricing: normalizeMonthlyPricing(),
   });
 
   const [selectedTemplate, setSelectedTemplate] = useState('luxury');
   const [footerType, setFooterType] = useState('restaurants');
   const [footerItems, setFooterItems] = useState(['cancarlito', 'esmoli', 'chezgerdi', 'tiburon', 'juanyandrea']);
   const hasSecondPage = formData.images && formData.images.length > 6;
-  const hasThirdPage = formData.images && formData.images.length > 7;
-  const totalPages = 1 + (hasSecondPage ? 1 : 0) + (hasThirdPage ? 1 : 0);
+  const brochureAmenities = getBrochureAmenities(formData);
+  const extraGalleryPages = (() => {
+    const remainingImages = formData.images.slice(7);
+    if (!remainingImages.length && !brochureAmenities.length) return [];
+    if (!brochureAmenities.length) {
+      return chunkImages(remainingImages, EXTRA_GALLERY_PAGE_SIZE).map((images) => ({ images, amenities: [] }));
+    }
+
+    const firstPageImages = remainingImages.slice(0, 1);
+    const otherPages = chunkImages(remainingImages.slice(1), EXTRA_GALLERY_PAGE_SIZE).map((images) => ({ images, amenities: [] }));
+    return [{ images: firstPageImages, amenities: brochureAmenities }, ...otherPages];
+  })();
+  const totalPages = 1 + (hasSecondPage ? 1 : 0) + extraGalleryPages.length;
 
   // Load saved templates
   useEffect(() => {
@@ -1338,7 +1363,8 @@ const BoatBrochureBuilder = () => {
       notIncludedItems: template.notIncludedItems || [...DEFAULT_NOT_INCLUDED_ITEMS],
       amenities: template.amenities || [...DEFAULT_AMENITIES],
       images: [],
-      pricing: template.pricing || {},
+      pricing: normalizePricing(template.pricing),
+      monthlyPricing: normalizeMonthlyPricing(template.monthlyPricing || template.pricing),
     });
     setSelectedTemplate(template.template || 'luxury');
     setFooterType(template.footerType || 'restaurants');
@@ -1392,8 +1418,9 @@ const BoatBrochureBuilder = () => {
         pdf.addImage(pageTwoImage, 'JPEG', 0, 0, 285, 357);
       }
 
-      if (hasThirdPage && pageThreeRef.current) {
-        const pageThreeImage = await renderToImageData(pageThreeRef.current);
+      for (const pageThreeRef of pageThreeRefs.current.slice(0, extraGalleryPages.length)) {
+        if (!pageThreeRef) continue;
+        const pageThreeImage = await renderToImageData(pageThreeRef);
         pdf.addPage([285, 357], 'portrait');
         pdf.addImage(pageThreeImage, 'JPEG', 0, 0, 285, 357);
       }
@@ -1580,6 +1607,8 @@ const BoatBrochureBuilder = () => {
                 <PricingTable
                   pricing={formData.pricing}
                   onPricingChange={(p) => updateFormData('pricing', p)}
+                  monthlyPricing={formData.monthlyPricing}
+                  onMonthlyPricingChange={(p) => updateFormData('monthlyPricing', p)}
                 />
               </div>
             )}
@@ -1769,8 +1798,9 @@ const BoatBrochureBuilder = () => {
                     </div>
                   </div>
                 )}
-                {hasThirdPage && (
+                {extraGalleryPages.map((page, index) => (
                   <div
+                    key={`preview-extra-gallery-${index}`}
                     className="mx-auto shadow-2xl rounded-xl overflow-hidden"
                     style={{
                       width: '360px',
@@ -1778,10 +1808,16 @@ const BoatBrochureBuilder = () => {
                     }}
                   >
                     <div style={{ transform: 'scale(0.333)', transformOrigin: 'top left', width: '1080px', height: '1350px' }}>
-                      <BrochurePageThree data={formData} selectedTemplate={selectedTemplate} />
+                      <BrochurePageThree
+                        images={page.images}
+                        amenities={page.amenities}
+                        pageIndex={index}
+                        totalPages={extraGalleryPages.length}
+                        selectedTemplate={selectedTemplate}
+                      />
                     </div>
                   </div>
-                )}
+                ))}
               </div>
               <p className="text-center text-xs text-slate-500 mt-3">
                 Preview at 33% scale • {totalPages} page{totalPages === 1 ? '' : 's'} • Actual size: 1080×1350px each
@@ -1800,7 +1836,19 @@ const BoatBrochureBuilder = () => {
           >
             <BrochurePageOne ref={pageOneRef} data={formData} selectedTemplate={selectedTemplate} />
             {hasSecondPage && <BrochurePageTwo ref={pageTwoRef} data={formData} selectedTemplate={selectedTemplate} />}
-            {hasThirdPage && <BrochurePageThree ref={pageThreeRef} data={formData} selectedTemplate={selectedTemplate} />}
+            {extraGalleryPages.map((page, index) => (
+              <BrochurePageThree
+                key={`extra-gallery-${index}`}
+                ref={(element) => {
+                  pageThreeRefs.current[index] = element;
+                }}
+                images={page.images}
+                amenities={page.amenities}
+                pageIndex={index}
+                totalPages={extraGalleryPages.length}
+                selectedTemplate={selectedTemplate}
+              />
+            ))}
           </div>
 
           {/* Tips Card */}

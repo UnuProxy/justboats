@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { getDefaultRouteForRole } from '../config/accessControl';
 
 const Login = () => {
   const { loginWithGoogle, authError, user, userRole, loading, setAuthError } = useAuth();
@@ -10,11 +11,7 @@ const Login = () => {
 
   useEffect(() => {
     if (!loading && user && userRole) {
-      if (userRole === 'admin') {
-        navigate('/user-management');
-      } else {
-        navigate('/');
-      }
+      navigate(getDefaultRouteForRole(userRole));
     }
   }, [user, userRole, loading, navigate]);
 

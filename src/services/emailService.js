@@ -60,7 +60,7 @@ export const sendBookingEmail = async (bookingData) => {
 
     console.log('Prepared email data:', emailData);
 
-    // Add to mail queue collection in Firestore
+   
     const docRef = await addDoc(collection(db, 'mail'), emailData);
     console.log('Successfully added email to queue with ID:', docRef.id);
 
