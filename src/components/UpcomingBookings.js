@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Calendar, ChevronLeft, ChevronRight, Ship, Clock, Users, Euro, MapPin, Home, FileText } from 'lucide-react';
 import {
   collection,
@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import BookingDetails from './BookingDetails';
+import ExternalBookingDetails from './ExternalBookingDetails';
 import { useSearchParams } from 'react-router-dom';
 import CalendarPicker from './CalendarPicker';
 import { useAuth } from '../context/AuthContext';
@@ -29,10 +30,14 @@ function UpcomingBookings() {
   const driverDestinationFallback = "To be confirmed";
 
   // State variables
-  const [bookings, setBookings] = useState([]);
+  const [baseBookings, setBaseBookings] = useState([]);
+  const [externalBookings, setExternalBookings] = useState([]);
   const [filteredBookings, setFilteredBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [externalSyncError, setExternalSyncError] = useState(null);
+  const [externalSyncing, setExternalSyncing] = useState(false);
+  const [externalLastSyncedAt, setExternalLastSyncedAt] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
   
 
@@ -116,6 +121,111 @@ function UpcomingBookings() {
       return null;
     }
   };
+
+  const toIsoDate = (value) => {
+    if (!value) return null;
+
+    try {
+      const date = new Date(value);
+      if (isNaN(date.getTime())) return null;
+      return date.toISOString().split('T')[0];
+    } catch (e) {
+      console.error('Error normalizing external date:', value, e);
+      return null;
+    }
+  };
+
+  const getExternalTimeLabel = (value, fallback) => {
+    if (!value) return fallback;
+
+    try {
+      const date = new Date(value);
+      if (isNaN(date.getTime())) return fallback;
+
+      const hours = date.getHours();
+      const minutes = date.getMinutes();
+      if (hours === 0 && minutes === 0) return fallback;
+
+      return date.toLocaleTimeString('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (e) {
+      console.error('Error formatting external time:', value, e);
+      return fallback;
+    }
+  };
+
+  const getExternalPaymentStatus = (booking) => {
+    const amountPaid = Number(booking?.payment?.amountPaid || 0);
+    const totalPrice = Number(booking?.totalPrice || booking?.basePrice || 0);
+    const status = String(booking?.status || '').toLowerCase();
+
+    if (status === 'cancelled') return 'Cancelled';
+    if (amountPaid > 0 && amountPaid >= totalPrice && totalPrice > 0) return 'Completed';
+    if (amountPaid > 0) return 'Partial';
+    if (status === 'paid' || status === 'completed') return 'Completed';
+    return 'No Payment';
+  };
+
+  const normalizeExternalBookingData = useCallback((externalBooking) => {
+    const lead = externalBooking?.lead || {};
+    const bookingDate = toIsoDate(externalBooking?.startDate);
+    const endDate = toIsoDate(externalBooking?.endDate);
+    const isMultiDay = Boolean(bookingDate && endDate && bookingDate !== endDate);
+    const paymentStatus = getExternalPaymentStatus(externalBooking);
+    const clientName =
+      [lead.firstName, lead.lastName].filter(Boolean).join(' ').trim() ||
+      lead.email ||
+      'Boatox client';
+
+    return {
+      id: `boatox-ibiza:${externalBooking.id}`,
+      externalId: externalBooking.id,
+      isExternal: true,
+      sourceApp: 'boatox-ibiza',
+      sourceLabel: 'Boatox Ibiza',
+      clientType: 'External',
+      partnerName: 'Boatox Ibiza',
+      clientName,
+      clientPhone: lead.phone || lead.whatsapp || 'N/A',
+      clientEmail: lead.email || 'N/A',
+      clientPassport: 'N/A',
+      boatCompanyName: 'Boatox Ibiza',
+      boatName: externalBooking?.boat?.name || externalBooking?.boatName || externalBooking?.boatId || 'N/A',
+      numberOfPassengers: Number(externalBooking?.numberOfGuests || 0),
+      bookingDate: bookingDate || 'N/A',
+      startTime: isMultiDay
+        ? 'Multi-day'
+        : getExternalTimeLabel(externalBooking?.startDate, 'Day charter'),
+      endTime: isMultiDay
+        ? endDate || 'TBC'
+        : getExternalTimeLabel(externalBooking?.endDate, 'Flexible'),
+      basePrice: Number(externalBooking?.basePrice || 0),
+      discount: 0,
+      finalPrice: Number(externalBooking?.totalPrice || externalBooking?.basePrice || 0),
+      paymentStatus,
+      privateTransfer: false,
+      pickupLocation: '',
+      pickupLocationDetail: '',
+      dropoffLocation: '',
+      dropoffLocationDetail: '',
+      pickupAddress: '',
+      dropoffAddress: '',
+      clientNotes: externalBooking?.notes || lead?.specialRequirements || 'None',
+      restaurantName: '',
+      isCancelled: String(externalBooking?.status || '').toLowerCase() === 'cancelled',
+      clientDetails: lead,
+      tripHandlingType: 'external',
+      tripHandlingCompany: 'boatox-ibiza',
+      externalData: externalBooking,
+      pricing: {
+        agreedPrice: Number(externalBooking?.totalPrice || externalBooking?.basePrice || 0),
+        totalPaid: Number(externalBooking?.payment?.amountPaid || 0),
+        paymentStatus
+      }
+    };
+  }, []);
 
   // Get partner name helper
   const getPartnerName = useCallback((booking) => {
@@ -338,6 +448,15 @@ function UpcomingBookings() {
     };
   }, [getPartnerName, isAdminUser, isDriverUser, isEmployeeUser]);
 
+  const bookings = useMemo(() => {
+    const merged = [...baseBookings, ...externalBookings];
+    return merged.sort((a, b) => {
+      const aDate = new Date(a.bookingDate || 0).getTime();
+      const bDate = new Date(b.bookingDate || 0).getTime();
+      return aDate - bDate;
+    });
+  }, [baseBookings, externalBookings]);
+
   // Real-time listener setup for base bookings
   useEffect(() => {
     setLoading(true);
@@ -350,7 +469,7 @@ function UpcomingBookings() {
         const bookingsData = snapshot.docs
           .map(doc => normalizeBookingData(doc.data(), doc.id))
           .filter(Boolean);
-        setBookings(bookingsData);
+        setBaseBookings(bookingsData);
         setLoading(false);
       },
       (err) => {
@@ -362,6 +481,54 @@ function UpcomingBookings() {
 
     return () => unsubscribe();
   }, [normalizeBookingData]);
+
+  const fetchExternalBookings = useCallback(async () => {
+    setExternalSyncing(true);
+
+    try {
+      const response = await fetch('/api/external/boatox-bookings', {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json'
+        }
+      });
+
+      const body = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const message =
+          (body &&
+            typeof body === 'object' &&
+            (typeof body.error === 'string'
+              ? body.error
+              : typeof body.message === 'string'
+              ? body.message
+              : null)) ||
+          `Boatox sync failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const normalizedExternalBookings = Array.isArray(body?.bookings)
+        ? body.bookings.map(normalizeExternalBookingData).filter(Boolean)
+        : [];
+
+      setExternalBookings(normalizedExternalBookings);
+      setExternalSyncError(null);
+      setExternalLastSyncedAt(body?.syncedAt || new Date().toISOString());
+    } catch (err) {
+      console.error('Error fetching Boatox Ibiza bookings:', err);
+      setExternalSyncError(err.message || 'Failed to sync Boatox Ibiza bookings.');
+    } finally {
+      setExternalSyncing(false);
+    }
+  }, [normalizeExternalBookingData]);
+
+  useEffect(() => {
+    fetchExternalBookings();
+    const intervalId = window.setInterval(fetchExternalBookings, 30000);
+
+    return () => window.clearInterval(intervalId);
+  }, [fetchExternalBookings]);
 
 
 
@@ -989,6 +1156,11 @@ function UpcomingBookings() {
                           <span className="text-xs text-gray-500 font-medium">
                             {formatDateForDisplay(booking.bookingDate)}
                           </span>
+                          {booking.isExternal && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-blue-100 text-blue-700 border-blue-200">
+                              Boatox
+                            </span>
+                          )}
                           {(booking.clientType === 'Hotel' || booking.clientType === 'Collaborator') && booking.partnerName && (
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
                               booking.clientType === 'Hotel'
@@ -1260,6 +1432,11 @@ function UpcomingBookings() {
                               <h4 className="font-bold text-base text-gray-900 truncate group-hover:text-blue-600 transition-colors">
                                 {booking.clientName}
                               </h4>
+                          {booking.isExternal && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-blue-100 text-blue-700 border-blue-200">
+                              Boatox
+                            </span>
+                          )}
                               {(booking.clientType === 'Hotel' || booking.clientType === 'Collaborator') && booking.partnerName && (
                                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
                                   booking.clientType === 'Hotel'
@@ -1394,20 +1571,53 @@ function UpcomingBookings() {
   return (
     <div className="p-3 sm:p-4 md:p-6 space-y-4 bg-gray-50 min-h-screen">
       <LoadingOverlay isActive={isFiltering} />
-      
 
-      
+      <div className="rounded-xl border border-blue-100 bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-gray-900">
+              Boatox Ibiza bookings are included in this view.
+            </p>
+            <p className="text-xs text-gray-500">
+              They appear together with Just Boats bookings and stay read-only here.
+            </p>
+          </div>
+          <div className="text-xs text-gray-500">
+            {externalSyncing
+              ? 'Syncing Boatox Ibiza...'
+              : externalLastSyncedAt
+              ? `Last sync ${new Date(externalLastSyncedAt).toLocaleTimeString('en-GB', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}`
+              : 'Waiting for first Boatox sync'}
+          </div>
+        </div>
+        {externalSyncError && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Boatox sync issue: {externalSyncError}
+          </div>
+        )}
+      </div>
+
       <SimpleDatePicker />
       
       {isSearchMode ? renderSearchResults() : renderTimelineView()}
       
       {selectedBooking && !isDriverUser && (
-        <BookingDetails
-          booking={selectedBooking}
-          onClose={handleBookingClose}
-          onDelete={handleBookingDelete} 
-          onSave={handleBookingSave}
-        />
+        selectedBooking.isExternal ? (
+          <ExternalBookingDetails
+            booking={selectedBooking}
+            onClose={handleBookingClose}
+          />
+        ) : (
+          <BookingDetails
+            booking={selectedBooking}
+            onClose={handleBookingClose}
+            onDelete={handleBookingDelete} 
+            onSave={handleBookingSave}
+          />
+        )
       )}
     </div>
   );
