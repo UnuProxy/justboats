@@ -78,12 +78,12 @@ const DEFAULT_PARTNERS = [
 ];
 
 const PRICING_PERIODS = [
-  { key: 'may', inputLabel: 'May', brochureLabel: 'May' },
-  { key: 'juneEarly', inputLabel: 'Jun 1-14', brochureLabel: '1-14 Jun' },
-  { key: 'peakSeason', inputLabel: '15 Jun - 20 Aug', brochureLabel: '15 Jun - 20 Aug' },
-  { key: 'augustLate', inputLabel: 'Aug 21-31', brochureLabel: '21-31 Aug' },
-  { key: 'sept', inputLabel: 'Sept', brochureLabel: 'Sept.' },
-  { key: 'oct', inputLabel: 'Oct', brochureLabel: 'Oct.' },
+  { key: 'may', defaultLabel: 'May' },
+  { key: 'juneEarly', defaultLabel: 'Jun 1-14' },
+  { key: 'peakSeason', defaultLabel: '15 Jun - 20 Aug' },
+  { key: 'augustLate', defaultLabel: 'Aug 21-31' },
+  { key: 'sept', defaultLabel: 'Sept.' },
+  { key: 'oct', defaultLabel: 'Oct.' },
 ];
 const LEGACY_MONTHS = ['May', 'June', 'July', 'Aug', 'Sept', 'Oct'];
 const DEFAULT_INCLUDED_ITEMS = ['Captain', 'Soft drinks', 'Ice', 'Snorkel gear', 'Towels'];
@@ -125,6 +125,15 @@ const normalizeMonthlyPricing = (pricing = {}) => ({
   Oct: firstDefinedValue(pricing.Oct, ''),
 });
 
+const normalizePricingLabels = (labels = {}) => ({
+  may: firstDefinedValue(labels.may, 'May'),
+  juneEarly: firstDefinedValue(labels.juneEarly, 'Jun 1-14'),
+  peakSeason: firstDefinedValue(labels.peakSeason, '15 Jun - 20 Aug'),
+  augustLate: firstDefinedValue(labels.augustLate, 'Aug 21-31'),
+  sept: firstDefinedValue(labels.sept, 'Sept.'),
+  oct: firstDefinedValue(labels.oct, 'Oct.'),
+});
+
 const chunkImages = (images, size) => {
   const chunks = [];
   for (let index = 0; index < images.length; index += size) {
@@ -151,6 +160,7 @@ const createEmptyFormData = () => ({
   amenities: [...DEFAULT_AMENITIES],
   images: [],
   pricing: normalizePricing(),
+  pricingLabels: normalizePricingLabels(),
   monthlyPricing: normalizeMonthlyPricing(),
 });
 
@@ -432,8 +442,16 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
   );
 };
 
-const PricingTable = ({ pricing, onPricingChange, monthlyPricing, onMonthlyPricingChange }) => {
+const PricingTable = ({
+  pricing,
+  onPricingChange,
+  pricingLabels,
+  onPricingLabelsChange,
+  monthlyPricing,
+  onMonthlyPricingChange,
+}) => {
   const normalizedPricing = normalizePricing(pricing);
+  const normalizedPricingLabels = normalizePricingLabels(pricingLabels);
   const normalizedMonthlyPricing = normalizeMonthlyPricing(monthlyPricing);
   const [draftPricing, setDraftPricing] = useState({});
   const [draftMonthlyPricing, setDraftMonthlyPricing] = useState({});
@@ -503,9 +521,16 @@ const PricingTable = ({ pricing, onPricingChange, monthlyPricing, onMonthlyPrici
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
           {PRICING_PERIODS.map((period) => (
             <div key={period.key} className="space-y-1">
-              <label className="text-xs font-medium text-slate-500 block text-center min-h-[32px]">
-                {period.inputLabel}
-              </label>
+              <input
+                type="text"
+                value={normalizedPricingLabels[period.key] || ''}
+                onChange={(event) => onPricingLabelsChange({
+                  ...normalizedPricingLabels,
+                  [period.key]: event.target.value,
+                })}
+                placeholder={period.defaultLabel}
+                className="w-full px-2 py-1.5 text-center text-xs font-medium text-slate-600 border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
+              />
               <input
                 type="number"
                 value={seasonalValue(period.key)}
@@ -890,31 +915,33 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
         }}
       >
         {PRICING_PERIODS.map((period) => (
-          <div key={period.key} style={{ textAlign: 'center', maxWidth: '140px' }}>
+          <div
+            key={period.key}
+            style={{
+              textAlign: 'center',
+              width: '140px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+            }}
+          >
             <div
               style={{
-                fontSize: period.brochureSubLabel ? '21px' : '22px',
+                fontSize: '22px',
                 fontWeight: 400,
                 color: hexToRgba(primaryText, 0.82),
-                marginBottom: period.brochureSubLabel ? '4px' : '8px',
+                minHeight: '54px',
+                marginBottom: '8px',
                 letterSpacing: '0.2px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                lineHeight: 1.2,
               }}
             >
-              {period.brochureLabel}
+              {normalizePricingLabels(data.pricingLabels)[period.key]}
             </div>
-            {period.brochureSubLabel && (
-              <div
-                style={{
-                  fontSize: '14px',
-                  fontWeight: 400,
-                  color: hexToRgba(primaryText, 0.7),
-                  marginBottom: '8px',
-                  letterSpacing: '0.2px',
-                }}
-              >
-                {period.brochureSubLabel}
-              </div>
-            )}
             <div
               style={{
                 fontSize: '32px',
@@ -1588,6 +1615,7 @@ const BoatBrochureBuilder = () => {
       amenities: template.amenities || [...DEFAULT_AMENITIES],
       images: normalizeSavedImages(template.images),
       pricing: normalizePricing(template.pricing),
+      pricingLabels: normalizePricingLabels(template.pricingLabels),
       monthlyPricing: normalizeMonthlyPricing(template.monthlyPricing || template.pricing),
     });
     setSelectedTemplate(template.template || 'luxury');
@@ -1837,6 +1865,8 @@ const BoatBrochureBuilder = () => {
                 <PricingTable
                   pricing={formData.pricing}
                   onPricingChange={(p) => updateFormData('pricing', p)}
+                  pricingLabels={formData.pricingLabels}
+                  onPricingLabelsChange={(labels) => updateFormData('pricingLabels', labels)}
                   monthlyPricing={formData.monthlyPricing}
                   onMonthlyPricingChange={(p) => updateFormData('monthlyPricing', p)}
                 />
