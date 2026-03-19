@@ -7,7 +7,7 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import {
   Ship, Upload, Download, Trash2, Eye, Image as ImageIcon,
   Calendar, ChevronDown,
-  Palette, FileText, Copy, Check, Sparkles, RefreshCw, Save,
+  Palette, FileText, Check, Sparkles, RefreshCw, Save,
   Building2, Utensils, GripVertical
 } from 'lucide-react';
 
@@ -92,7 +92,7 @@ const DEFAULT_AMENITIES = ['Bedroom Cabin', 'Bathroom', 'Wi-Fi', 'Bluetooth Audi
 const EXTRA_GALLERY_PAGE_SIZE = 6;
 const MAX_BROCHURE_IMAGES = 10;
 const BROCHURE_COLLECTION = 'boatBrochureTemplates';
-const PRICE_MARKUP_RATE = 0.02;
+const PRICE_MARKUP_RATE = 0.05;
 
 const hexToRgba = (hex, alpha = 1) => {
   if (!hex || typeof hex !== 'string' || !hex.startsWith('#')) return `rgba(255,255,255,${alpha})`;
@@ -124,6 +124,22 @@ const normalizeMonthlyPricing = (pricing = {}) => ({
   Sept: firstDefinedValue(pricing.Sept, ''),
   Oct: firstDefinedValue(pricing.Oct, ''),
 });
+
+const firstPopulatedValue = (...values) => values.find((value) => value !== undefined && value !== null && value !== '');
+
+const getBrochureDisplayPricing = (data = {}) => {
+  const seasonalPricing = normalizePricing(data.pricing);
+  const monthlyPricing = normalizeMonthlyPricing(data.monthlyPricing);
+
+  return {
+    may: firstPopulatedValue(seasonalPricing.may, monthlyPricing.May, ''),
+    juneEarly: firstPopulatedValue(seasonalPricing.juneEarly, monthlyPricing.June, ''),
+    peakSeason: firstPopulatedValue(seasonalPricing.peakSeason, monthlyPricing.July, monthlyPricing.June, monthlyPricing.Aug, ''),
+    augustLate: firstPopulatedValue(seasonalPricing.augustLate, monthlyPricing.Aug, ''),
+    sept: firstPopulatedValue(seasonalPricing.sept, monthlyPricing.Sept, ''),
+    oct: firstPopulatedValue(seasonalPricing.oct, monthlyPricing.Oct, ''),
+  };
+};
 
 const normalizePricingLabels = (labels = {}) => ({
   may: firstDefinedValue(labels.may, 'May'),
@@ -285,11 +301,16 @@ const uploadBrochureImages = async (brochureId, images, previousImages = []) => 
 const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES }) => {
   const fileInputRef = useRef(null);
   const [draggedImageId, setDraggedImageId] = useState(null);
+  const [isFileDragActive, setIsFileDragActive] = useState(false);
 
-  const handleFileChange = async (e) => {
-    const files = Array.from(e.target.files);
+  const processFiles = async (incomingFiles = []) => {
+    const imageFiles = Array.from(incomingFiles).filter((file) => file.type.startsWith('image/'));
     const remaining = maxImages - images.length;
-    const toProcess = files.slice(0, remaining);
+    const toProcess = imageFiles.slice(0, remaining);
+
+    if (!toProcess.length) {
+      return;
+    }
 
     const readAsDataUrl = (file) => new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -311,6 +332,10 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
       console.error('Image upload error:', err);
       alert('Some images could not be loaded. Please try again.');
     }
+  };
+
+  const handleFileChange = async (e) => {
+    await processFiles(e.target.files);
 
     e.target.value = '';
   };
@@ -360,6 +385,28 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
     setDraggedImageId(null);
   };
 
+  const hasFileDrag = (event) => Array.from(event.dataTransfer?.types || []).includes('Files');
+
+  const handleFileDragOver = (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setIsFileDragActive(true);
+  };
+
+  const handleFileDragLeave = (event) => {
+    if (!hasFileDrag(event)) return;
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    setIsFileDragActive(false);
+  };
+
+  const handleFileDrop = async (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    setIsFileDragActive(false);
+    await processFiles(event.dataTransfer.files);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -386,19 +433,38 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
         className="hidden"
       />
 
+      <div
+        onDragOver={handleFileDragOver}
+        onDragEnter={handleFileDragOver}
+        onDragLeave={handleFileDragLeave}
+        onDrop={handleFileDrop}
+        className={`rounded-2xl transition-all ${isFileDragActive ? 'ring-2 ring-cyan-300 ring-offset-2 ring-offset-white' : ''}`}
+      >
       {images.length === 0 ? (
         <div
           onClick={() => fileInputRef.current?.click()}
-          className="cursor-pointer rounded-2xl border-2 border-dashed border-slate-300 p-8 text-center transition-all hover:border-cyan-400 hover:bg-cyan-50/50"
+          className={`cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition-all ${
+            isFileDragActive
+              ? 'border-cyan-500 bg-cyan-50/70'
+              : 'border-slate-300 hover:border-cyan-400 hover:bg-cyan-50/50'
+          }`}
         >
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-cyan-100 to-teal-100">
             <ImageIcon size={28} className="text-cyan-600" />
           </div>
-          <p className="text-slate-600 font-medium">Click to upload boat images</p>
+          <p className="text-slate-600 font-medium">
+            {isFileDragActive ? 'Drop boat images here' : 'Click to upload boat images'}
+          </p>
           <p className="text-slate-400 text-sm mt-1">PNG, JPG up to 10MB • First image is the hero</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div className={`rounded-2xl border-2 border-dashed p-3 transition-all ${
+          isFileDragActive ? 'border-cyan-500 bg-cyan-50/60' : 'border-transparent'
+        }`}>
+          <div className="mb-2 text-center text-xs font-medium text-slate-500">
+            {isFileDragActive ? 'Drop images to add them to this brochure' : 'Drag images here to upload, or drag thumbnails to reorder'}
+          </div>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           {images.map((img, idx) => (
             <div
               key={img.id}
@@ -437,7 +503,9 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
             </div>
           ))}
         </div>
+        </div>
       )}
+      </div>
     </div>
   );
 };
@@ -470,10 +538,6 @@ const PricingTable = ({
   };
 
   const commitPrice = (month) => {
-    const rawValue = Object.prototype.hasOwnProperty.call(draftPricing, month)
-      ? draftPricing[month]
-      : normalizedPricing[month];
-    onPricingChange({ ...normalizedPricing, [month]: applyPriceMarkup(rawValue) });
     setDraftPricing((current) => {
       const next = { ...current };
       delete next[month];
@@ -487,10 +551,6 @@ const PricingTable = ({
   };
 
   const commitMonthlyPrice = (month) => {
-    const rawValue = Object.prototype.hasOwnProperty.call(draftMonthlyPricing, month)
-      ? draftMonthlyPricing[month]
-      : normalizedMonthlyPricing[month];
-    onMonthlyPricingChange({ ...normalizedMonthlyPricing, [month]: applyPriceMarkup(rawValue) });
     setDraftMonthlyPricing((current) => {
       const next = { ...current };
       delete next[month];
@@ -517,7 +577,7 @@ const PricingTable = ({
     <div className="space-y-5">
       <div className="space-y-3">
         <label className="text-sm font-semibold text-slate-700">Seasonal Pricing (€)</label>
-        <p className="text-xs text-slate-500">A 2% markup is applied automatically when you finish each price field.</p>
+        <p className="text-xs text-slate-500">The brochure preview and PDF display each price with a 5% markup. The input fields keep your base price.</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
           {PRICING_PERIODS.map((period) => (
             <div key={period.key} className="space-y-1">
@@ -714,6 +774,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
   const hasTwoBottomImages = Boolean(firstBottomImage && secondBottomImage);
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
+  const displayPricing = getBrochureDisplayPricing(data);
 
   return (
     <div
@@ -951,7 +1012,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {normalizePricing(data.pricing)[period.key] || '—'}€
+              {applyPriceMarkup(displayPricing[period.key]) || '—'}€
             </div>
           </div>
         ))}
@@ -1408,13 +1469,15 @@ const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading, activeTem
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {templates.map((tmpl) => (
-        <div
+        <button
           key={tmpl.id}
+          type="button"
+          onClick={() => onLoad(tmpl)}
           className={`group p-4 bg-white border rounded-xl transition-all ${
             tmpl.id === activeTemplateId
               ? 'border-cyan-400 shadow-md ring-2 ring-cyan-100'
               : 'border-slate-200 hover:border-cyan-300 hover:shadow-md'
-          }`}
+          } text-left`}
         >
           <div className="flex items-start justify-between mb-2">
             <div>
@@ -1430,16 +1493,24 @@ const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading, activeTem
                 {formatTemplateDate(tmpl.updatedAt || tmpl.createdAt)}
               </p>
             </div>
-            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex gap-1 opacity-100 transition-opacity">
               <button
-                onClick={() => onLoad(tmpl)}
-                className="p-1.5 text-cyan-600 hover:bg-cyan-50 rounded-lg"
-                title="Load"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onLoad(tmpl);
+                }}
+                className="px-2 py-1.5 text-xs font-semibold text-cyan-700 bg-cyan-50 hover:bg-cyan-100 rounded-lg"
+                title="Edit brochure"
               >
-                <Copy size={14} />
+                Edit
               </button>
               <button
-                onClick={() => onDelete(tmpl.id)}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete(tmpl.id);
+                }}
                 className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"
                 title="Delete"
               >
@@ -1452,7 +1523,10 @@ const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading, activeTem
             <span className="px-2 py-0.5 bg-slate-100 rounded-full">{tmpl.template || 'luxury'}</span>
             <span className="px-2 py-0.5 bg-slate-100 rounded-full">{tmpl.images?.length || 0} imgs</span>
           </div>
-        </div>
+          <p className="mt-3 text-xs font-medium text-cyan-700">
+            {tmpl.id === activeTemplateId ? 'Currently open in editor' : 'Tap to edit this brochure'}
+          </p>
+        </button>
       ))}
     </div>
   );
