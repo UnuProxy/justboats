@@ -16,6 +16,7 @@ const adminEmails = process.env.REACT_APP_ADMIN_EMAILS
   : ['julian.pirvu@gmail.com']; // Default admin email
 
 const ALLOWED_ROLES = ['admin', 'staff', 'employee', 'driver', 'brochure'];
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Adds or updates a user in the 'approvedUsers' collection.
@@ -24,9 +25,15 @@ const ALLOWED_ROLES = ['admin', 'staff', 'employee', 'driver', 'brochure'];
  */
 export const addApprovedUser = async (userData) => {
   try {
-    // Validate email
-    if (!userData.email || !userData.email.endsWith('@gmail.com')) {
-      throw new Error('Only Gmail addresses are allowed');
+    const normalizedEmail = userData.email?.trim().toLowerCase();
+    const isBrochureUser = userData.role === 'brochure';
+
+    if (!normalizedEmail || !EMAIL_PATTERN.test(normalizedEmail)) {
+      throw new Error('A valid email address is required');
+    }
+
+    if (!isBrochureUser && !normalizedEmail.endsWith('@gmail.com')) {
+      throw new Error('Only Gmail addresses are allowed for this role');
     }
 
     // Validate required fields
@@ -41,10 +48,10 @@ export const addApprovedUser = async (userData) => {
     console.log('Received user data:', userData); // Debug log
 
     // Use email as document ID in 'approvedUsers'
-    const approvedUserRef = doc(db, 'approvedUsers', userData.email);
+    const approvedUserRef = doc(db, 'approvedUsers', normalizedEmail);
 
     // Check if user is already approved
-    const q = query(collection(db, 'approvedUsers'), where('email', '==', userData.email));
+    const q = query(collection(db, 'approvedUsers'), where('email', '==', normalizedEmail));
     const approvedUserSnapshot = await getDocs(q);
     
     if (!approvedUserSnapshot.empty) {
@@ -53,7 +60,7 @@ export const addApprovedUser = async (userData) => {
 
     // Prepare user data for Firestore
     const userDataForFirestore = {
-      email: userData.email,
+      email: normalizedEmail,
       name: userData.name,
       displayName: userData.name, // Ensure displayName is set
       role: userData.role, // Use the role from the form
@@ -144,8 +151,10 @@ export const validateUserData = (userData) => {
   
   if (!userData.email) {
     errors.push('Email is required');
-  } else if (!userData.email.endsWith('@gmail.com')) {
-    errors.push('Only Gmail addresses are allowed');
+  } else if (!EMAIL_PATTERN.test(userData.email.trim().toLowerCase())) {
+    errors.push('A valid email address is required');
+  } else if (userData.role !== 'brochure' && !userData.email.trim().toLowerCase().endsWith('@gmail.com')) {
+    errors.push('Only Gmail addresses are allowed for this role');
   }
   
   if (!userData.name || userData.name.trim() === '') {

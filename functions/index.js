@@ -4,6 +4,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 const axios = require('axios');
+const crypto = require('crypto');
 const { getMessaging } = require('firebase-admin/messaging');
 const Stripe = require('stripe');
 
@@ -12,6 +13,17 @@ admin.initializeApp();
 const db = admin.firestore();
 
 const TEAM_ROLES = ['admin', 'staff'];
+const PASSWORD_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+
+function generateTemporaryPassword(length = 14) {
+  let password = '';
+
+  for (let index = 0; index < length; index += 1) {
+    password += PASSWORD_CHARSET[crypto.randomInt(0, PASSWORD_CHARSET.length)];
+  }
+
+  return password;
+}
 
 async function getUserRole(uid) {
   if (!uid) {
@@ -393,6 +405,118 @@ async function createStripePaymentLinkInternal(data, authContext) {
   };
 }
 
+async function createBrochureAccessInternal(data, authContext) {
+  let createdAuthUser = null;
+  let approvedUserCreated = false;
+  let userDocumentCreated = false;
+
+  try {
+    const email = String(data?.email || '').trim().toLowerCase();
+    const name = String(data?.name || '').trim();
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!name) {
+      throw new HttpsError('invalid-argument', 'Name is required');
+    }
+
+    if (!emailPattern.test(email)) {
+      throw new HttpsError('invalid-argument', 'A valid email address is required');
+    }
+
+    const approvedUserRef = db.collection('approvedUsers').doc(email);
+    const approvedUserSnapshot = await approvedUserRef.get();
+    if (approvedUserSnapshot.exists) {
+      throw new HttpsError('already-exists', 'User is already approved');
+    }
+
+    try {
+      await admin.auth().getUserByEmail(email);
+      throw new HttpsError('already-exists', 'An account with this email already exists');
+    } catch (error) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      if (error.code !== 'auth/user-not-found') {
+        throw error;
+      }
+    }
+
+    const password = generateTemporaryPassword();
+    createdAuthUser = await admin.auth().createUser({
+      email,
+      password,
+      displayName: name
+    });
+
+    await approvedUserRef.set({
+      email,
+      name,
+      displayName: name,
+      role: 'brochure',
+      authProvider: 'password',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdBy: authContext.uid
+    });
+    approvedUserCreated = true;
+
+    await db.collection('users').doc(createdAuthUser.uid).set({
+      email,
+      name,
+      displayName: name,
+      role: 'brochure',
+      authProvider: 'password',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      firstLogin: null,
+      lastLogin: null,
+      lastActive: null,
+      loginCount: 0
+    });
+    userDocumentCreated = true;
+
+    return {
+      success: true,
+      email,
+      password,
+      message: 'Brochure access created successfully.'
+    };
+  } catch (error) {
+    if (userDocumentCreated && createdAuthUser?.uid) {
+      try {
+        await db.collection('users').doc(createdAuthUser.uid).delete();
+      } catch (cleanupError) {
+        console.error('Failed to clean up brochure user document:', cleanupError);
+      }
+    }
+
+    if (approvedUserCreated) {
+      try {
+        await db.collection('approvedUsers').doc(String(data?.email || '').trim().toLowerCase()).delete();
+      } catch (cleanupError) {
+        console.error('Failed to clean up brochure approved user:', cleanupError);
+      }
+    }
+
+    if (createdAuthUser?.uid) {
+      try {
+        await admin.auth().deleteUser(createdAuthUser.uid);
+      } catch (cleanupError) {
+        console.error('Failed to clean up brochure auth user:', cleanupError);
+      }
+    }
+
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+
+    if (error.code === 'auth/email-already-exists') {
+      throw new HttpsError('already-exists', 'An account with this email already exists');
+    }
+
+    throw new HttpsError('internal', error.message || 'Failed to create brochure access');
+  }
+}
+
 // Create a Stripe Payment Link (admin + staff only) - callable
 exports.createStripePaymentLink = onCall({
   region: "us-central1",
@@ -410,6 +534,52 @@ exports.createStripePaymentLink = onCall({
     }
     const message = error.response?.data?.error?.message || error.message || 'Failed to create payment link';
     throw new HttpsError('internal', message);
+  }
+});
+
+exports.createBrochureAccess = onCall({
+  region: "us-central1",
+  cors: ALLOWED_ORIGINS,
+  maxInstances: 10
+}, async (request) => {
+  try {
+    const authContext = await assertCallableAuthorization(request, ['admin']);
+    return await createBrochureAccessInternal(request.data || {}, authContext);
+  } catch (error) {
+    console.error('createBrochureAccess error:', error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError('internal', error.message || 'Failed to create brochure access');
+  }
+});
+
+exports.createBrochureAccessHttp = onRequest({
+  region: "us-central1",
+  cors: false,
+  maxInstances: 10
+}, async (req, res) => {
+  if (handleCors(req, res)) {
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method Not Allowed' });
+    return;
+  }
+
+  const authContext = await authenticateHttpRequest(req, res, ['admin']);
+  if (!authContext) {
+    return;
+  }
+
+  try {
+    const result = await createBrochureAccessInternal(req.body || {}, authContext);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('createBrochureAccessHttp error:', error);
+    const status = mapHttpsErrorToStatus(error);
+    res.status(status).json({ error: error.message || 'Failed to create brochure access' });
   }
 });
 

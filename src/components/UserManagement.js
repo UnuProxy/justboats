@@ -1,7 +1,8 @@
 // UserManagement.js
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase/firebaseConfig';
+import { auth, db, functions } from '../firebase/firebaseConfig';
 import { collection, query, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { addApprovedUser, removeApprovedUser } from '../utils/userManagement';
 import { Trash2, UserPlus, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -94,12 +95,18 @@ const UserManagement = () => {
   const [approvedUsers, setApprovedUsers] = useState([]);
   const [activeUsers, setActiveUsers] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [createdCredentials, setCreatedCredentials] = useState(null);
   const [newUser, setNewUser] = useState({
     email: '',
     name: '',
     role: 'employee'
   });
   const [error, setError] = useState('');
+  const createBrochureAccess = httpsCallable(functions, 'createBrochureAccess');
+  const defaultBrochureAccessEndpoint = process.env.REACT_APP_FIREBASE_PROJECT_ID
+    ? `https://us-central1-${process.env.REACT_APP_FIREBASE_PROJECT_ID}.cloudfunctions.net/createBrochureAccessHttp`
+    : 'https://us-central1-crm-boats.cloudfunctions.net/createBrochureAccessHttp';
+  const brochureAccessEndpoint = process.env.REACT_APP_BROCHURE_ACCESS_ENDPOINT || defaultBrochureAccessEndpoint;
 
   const admin = isAdmin();
 
@@ -148,22 +155,82 @@ const UserManagement = () => {
   const handleAddUser = async (e) => {
     e.preventDefault();
     setError('');
-    
-    if (!newUser.email || !newUser.email.endsWith('@gmail.com')) {
-      setError('Only Gmail addresses are allowed');
+    setCreatedCredentials(null);
+
+    const normalizedEmail = newUser.email.trim().toLowerCase();
+    const normalizedName = newUser.name.trim();
+    const isBrochureUser = newUser.role === 'brochure';
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!normalizedEmail || !emailPattern.test(normalizedEmail)) {
+      setError('Please enter a valid email address');
       return;
     }
 
-    if (!newUser.name || newUser.name.trim() === '') {
+    if (!isBrochureUser && !normalizedEmail.endsWith('@gmail.com')) {
+      setError('Only Gmail addresses are allowed for this role');
+      return;
+    }
+
+    if (!normalizedName) {
       setError('Name is required');
       return;
     }
 
     try {
+      if (isBrochureUser) {
+        let data = null;
+
+        try {
+          const result = await createBrochureAccess({
+            email: normalizedEmail,
+            name: normalizedName
+          });
+          data = result.data || {};
+        } catch (callableError) {
+          const token = await auth.currentUser?.getIdToken();
+          if (!token) {
+            throw callableError;
+          }
+
+          const response = await fetch(brochureAccessEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              email: normalizedEmail,
+              name: normalizedName
+            })
+          });
+
+          const fallbackData = await response.json().catch(() => null);
+          if (!response.ok) {
+            const fallbackMessage = fallbackData?.error || callableError?.message || `Request failed (${response.status})`;
+            throw new Error(fallbackMessage);
+          }
+
+          data = fallbackData || {};
+        }
+
+        if (data.success) {
+          setCreatedCredentials({
+            email: data.email,
+            password: data.password
+          });
+          setNewUser({ email: '', name: '', role: 'employee' });
+          return;
+        }
+
+        setError(data.error || 'Failed to create brochure access');
+        return;
+      }
+
       const userData = {
-        email: newUser.email.trim(),
-        name: newUser.name.trim(),
-        displayName: newUser.name.trim(),
+        email: normalizedEmail,
+        name: normalizedName,
+        displayName: normalizedName,
         role: newUser.role,
         createdAt: new Date()
       };
@@ -174,6 +241,7 @@ const UserManagement = () => {
 
       if (result.success) {
         setShowAddForm(false);
+        setCreatedCredentials(null);
         setNewUser({ email: '', name: '', role: 'employee' });
         alert(result.message || 'User added successfully.');
       } else {
@@ -387,68 +455,115 @@ const UserManagement = () => {
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-base sm:text-lg font-semibold">Add New User</h3>
               <button 
-                onClick={() => setShowAddForm(false)} 
+                onClick={() => {
+                  setShowAddForm(false);
+                  setCreatedCredentials(null);
+                }}
                 className="text-gray-500 hover:text-gray-700 p-2"
                 aria-label="Close"
               >
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleAddUser} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Name</label>
-                <input
-                  type="text"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-base"
-                  placeholder="Enter user's name"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Gmail Address</label>
-                <input
-                  type="email"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-base"
-                  placeholder="user@gmail.com"
-                  pattern=".*@gmail\.com$"
-                  title="Please enter a valid Gmail address"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Role</label>
-                <select
-                  value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-base"
-                >
-                  <option value="staff">Staff</option>
-                  <option value="employee">Employee</option>
-                  <option value="driver">Driver</option>
-                  <option value="brochure">Brochure access</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </div>
-              <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+            {createdCredentials ? (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+                  <p className="text-sm font-medium text-green-800">Brochure access created.</p>
+                  <p className="mt-2 text-sm text-green-700">Share these credentials now. The password is only shown once.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Email</label>
+                  <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 break-all">
+                    {createdCredentials.email}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Generated Password</label>
+                  <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-mono text-gray-900 break-all">
+                    {createdCredentials.password}
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => setShowAddForm(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm sm:text-base w-full sm:w-auto"
+                  onClick={() => {
+                    setShowAddForm(false);
+                    setCreatedCredentials(null);
+                  }}
+                  className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm sm:text-base w-full sm:w-auto mt-2 sm:mt-0"
-                >
-                  Add User
+                  Done
                 </button>
               </div>
-            </form>
+            ) : (
+              <form onSubmit={handleAddUser} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Name</label>
+                  <input
+                    type="text"
+                    value={newUser.name}
+                    onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-base"
+                    placeholder="Enter user's name"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    {newUser.role === 'brochure' ? 'Email Address' : 'Gmail Address'}
+                  </label>
+                  <input
+                    type="email"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-base"
+                    placeholder={newUser.role === 'brochure' ? 'brochure@example.com' : 'user@gmail.com'}
+                    pattern={newUser.role === 'brochure' ? undefined : '.*@gmail\\.com$'}
+                    title={newUser.role === 'brochure' ? 'Please enter a valid email address' : 'Please enter a valid Gmail address'}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Role</label>
+                  <select
+                    value={newUser.role}
+                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-base"
+                  >
+                    <option value="staff">Staff</option>
+                    <option value="employee">Employee</option>
+                    <option value="driver">Driver</option>
+                    <option value="brochure">Brochure access</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                {newUser.role === 'brochure' && (
+                  <p className="text-xs text-gray-500">
+                    Brochure users get a generated password automatically and do not need a Gmail account.
+                  </p>
+                )}
+                <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddForm(false);
+                      setCreatedCredentials(null);
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm sm:text-base w-full sm:w-auto"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm sm:text-base w-full sm:w-auto mt-2 sm:mt-0"
+                  >
+                    Add User
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

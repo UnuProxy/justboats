@@ -5,9 +5,10 @@ import { useAuth } from '../context/AuthContext';
 import { getDefaultRouteForRole } from '../config/accessControl';
 
 const Login = () => {
-  const { loginWithGoogle, authError, user, userRole, loading, setAuthError } = useAuth();
+  const { loginWithGoogle, loginWithEmail, authError, user, userRole, loading, setAuthError } = useAuth();
   const navigate = useNavigate();
   const [authenticating, setAuthenticating] = useState(false);
+  const [emailLogin, setEmailLogin] = useState({ email: '', password: '' });
 
   useEffect(() => {
     if (!loading && user && userRole) {
@@ -26,6 +27,25 @@ const Login = () => {
       }
     } catch (error) {
       console.error('Login error:', error);
+      setAuthError(error.message);
+    } finally {
+      setAuthenticating(false);
+    }
+  };
+
+  const handleEmailLogin = async (event) => {
+    event.preventDefault();
+
+    try {
+      setAuthError(null);
+      setAuthenticating(true);
+      const result = await loginWithEmail(emailLogin.email, emailLogin.password);
+
+      if (!result.success && result.error) {
+        console.error('Email login error:', result.error);
+      }
+    } catch (error) {
+      console.error('Email login error:', error);
       setAuthError(error.message);
     } finally {
       setAuthenticating(false);
@@ -95,6 +115,59 @@ const Login = () => {
             </>
           )}
         </button>
+
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-200" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase tracking-[0.2em] text-system-gray-500">
+            <span className="bg-white px-3">Or</span>
+          </div>
+        </div>
+
+        <form onSubmit={handleEmailLogin} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-system-gray-700 mb-1">
+              Email
+            </label>
+            <input
+              type="email"
+              value={emailLogin.email}
+              onChange={(event) => setEmailLogin((current) => ({ ...current, email: event.target.value }))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base"
+              placeholder="brochure@example.com"
+              autoComplete="email"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-system-gray-700 mb-1">
+              Password
+            </label>
+            <input
+              type="password"
+              value={emailLogin.password}
+              onChange={(event) => setEmailLogin((current) => ({ ...current, password: event.target.value }))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base"
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            className="app-button--primary w-full"
+            disabled={isLoginLoading}
+          >
+            {isLoginLoading ? 'Signing in...' : 'Sign in with Email'}
+          </button>
+        </form>
+
+        <p className="text-xs text-system-gray-500 text-center">
+          Brochure users can sign in with any approved email and the generated password they were given.
+        </p>
       </div>
     </div>
   );

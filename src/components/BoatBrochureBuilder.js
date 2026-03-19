@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
-import { db } from '../firebase/firebaseConfig';
-import { collection, getDocs, addDoc, deleteDoc, doc } from 'firebase/firestore';
+import { db, storage } from '../firebase/firebaseConfig';
+import { collection, getDocs, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import {
   Ship, Upload, Download, Trash2, Eye, Image as ImageIcon,
   Calendar, ChevronDown,
@@ -90,6 +91,7 @@ const DEFAULT_NOT_INCLUDED_ITEMS = ['Fuel', 'Seabob', 'Overnight stay', 'Transfe
 const DEFAULT_AMENITIES = ['Bedroom Cabin', 'Bathroom', 'Wi-Fi', 'Bluetooth Audio', 'Sunbed', 'Fridge', 'Deck Shower', 'Swim Ladder'];
 const EXTRA_GALLERY_PAGE_SIZE = 6;
 const MAX_BROCHURE_IMAGES = 10;
+const BROCHURE_COLLECTION = 'boatBrochureTemplates';
 
 const hexToRgba = (hex, alpha = 1) => {
   if (!hex || typeof hex !== 'string' || !hex.startsWith('#')) return `rgba(255,255,255,${alpha})`;
@@ -134,6 +136,120 @@ const getBrochureAmenities = (data) => (
   ((data.amenities && data.amenities.length ? data.amenities : DEFAULT_AMENITIES))
     .map((item) => (item === 'Bedroom Cabin' ? `Bedroom Cabin (${Math.max(1, Number(data.bedroomCount) || 1)})` : item))
 );
+
+const createEmptyFormData = () => ({
+  boatName: '',
+  length: '',
+  beam: '',
+  capacity: '',
+  fuelConsumption: '',
+  includedNote: '(Crew and VAT 21% included. FUEL not included)',
+  bedroomCount: 1,
+  includedItems: [...DEFAULT_INCLUDED_ITEMS],
+  notIncludedItems: [...DEFAULT_NOT_INCLUDED_ITEMS],
+  amenities: [...DEFAULT_AMENITIES],
+  images: [],
+  pricing: normalizePricing(),
+  monthlyPricing: normalizeMonthlyPricing(),
+});
+
+const createStoredImageId = (seed, index) => seed || `saved-image-${index}`;
+
+const normalizeSavedImages = (images = []) => (
+  Array.isArray(images)
+    ? images
+      .map((image, index) => {
+        if (!image) return null;
+        if (typeof image === 'string') {
+          return {
+            id: createStoredImageId(image, index),
+            src: image,
+            name: `Image ${index + 1}`,
+            storagePath: null,
+          };
+        }
+
+        const src = image.src || image.url || image.downloadURL || '';
+        if (!src) return null;
+
+        return {
+          id: createStoredImageId(image.id || image.storagePath || src, index),
+          src,
+          name: image.name || `Image ${index + 1}`,
+          storagePath: image.storagePath || null,
+        };
+      })
+      .filter(Boolean)
+    : []
+);
+
+const parseDateValue = (value) => {
+  if (!value) return 0;
+  if (typeof value?.toDate === 'function') {
+    return value.toDate().getTime();
+  }
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const sortTemplates = (templates = []) => (
+  [...templates].sort((a, b) => parseDateValue(b.updatedAt || b.createdAt) - parseDateValue(a.updatedAt || a.createdAt))
+);
+
+const formatTemplateDate = (value) => {
+  const time = parseDateValue(value);
+  return time ? new Date(time).toLocaleDateString() : 'Unknown date';
+};
+
+const sanitizeFileName = (value = 'image') => String(value).replace(/[^a-zA-Z0-9._-]+/g, '-');
+
+const deleteStoredImages = async (images = []) => {
+  const removablePaths = images
+    .map((image) => image?.storagePath)
+    .filter(Boolean);
+
+  await Promise.all(removablePaths.map(async (storagePath) => {
+    try {
+      await deleteObject(ref(storage, storagePath));
+    } catch (error) {
+      console.warn('Unable to delete brochure image from storage:', storagePath, error);
+    }
+  }));
+};
+
+const uploadBrochureImages = async (brochureId, images, previousImages = []) => {
+  const uploadedImages = await Promise.all(images.map(async (image, index) => {
+    if (image.storagePath && /^https?:/i.test(image.src || '')) {
+      return {
+        id: image.id || image.storagePath,
+        src: image.src,
+        name: image.name || `Image ${index + 1}`,
+        storagePath: image.storagePath,
+      };
+    }
+
+    const imageBlob = await fetch(image.src).then((response) => response.blob());
+    const fileName = sanitizeFileName(image.name || `image-${index + 1}.jpg`);
+    const storagePath = `boatBrochureTemplates/${brochureId}/${Date.now()}-${index}-${fileName}`;
+    const storageRef = ref(storage, storagePath);
+
+    await uploadBytes(storageRef, imageBlob, imageBlob.type ? { contentType: imageBlob.type } : undefined);
+    const downloadURL = await getDownloadURL(storageRef);
+
+    return {
+      id: storagePath,
+      src: downloadURL,
+      name: image.name || `Image ${index + 1}`,
+      storagePath,
+    };
+  }));
+
+  const nextPaths = new Set(uploadedImages.map((image) => image.storagePath).filter(Boolean));
+  const removedImages = previousImages.filter((image) => image?.storagePath && !nextPaths.has(image.storagePath));
+  await deleteStoredImages(removedImages);
+
+  return uploadedImages;
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COMPONENTS
@@ -1171,7 +1287,7 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, 
 // SAVED TEMPLATES PANEL
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading }) => {
+const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading, activeTemplateId }) => {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -1194,13 +1310,24 @@ const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading }) => {
       {templates.map((tmpl) => (
         <div
           key={tmpl.id}
-          className="group p-4 bg-white border border-slate-200 rounded-xl hover:border-cyan-300 hover:shadow-md transition-all"
+          className={`group p-4 bg-white border rounded-xl transition-all ${
+            tmpl.id === activeTemplateId
+              ? 'border-cyan-400 shadow-md ring-2 ring-cyan-100'
+              : 'border-slate-200 hover:border-cyan-300 hover:shadow-md'
+          }`}
         >
           <div className="flex items-start justify-between mb-2">
             <div>
-              <h4 className="font-semibold text-slate-800">{tmpl.boatName || 'Unnamed'}</h4>
+              <div className="flex items-center gap-2">
+                <h4 className="font-semibold text-slate-800">{tmpl.boatName || 'Unnamed'}</h4>
+                {tmpl.id === activeTemplateId && (
+                  <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700">
+                    Editing
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-500">
-                {tmpl.createdAt ? new Date(tmpl.createdAt).toLocaleDateString() : 'Unknown date'}
+                {formatTemplateDate(tmpl.updatedAt || tmpl.createdAt)}
               </p>
             </div>
             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1223,6 +1350,7 @@ const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading }) => {
           <div className="flex gap-2 text-xs text-slate-600">
             <span className="px-2 py-0.5 bg-slate-100 rounded-full">{tmpl.capacity || '?'} pax</span>
             <span className="px-2 py-0.5 bg-slate-100 rounded-full">{tmpl.template || 'luxury'}</span>
+            <span className="px-2 py-0.5 bg-slate-100 rounded-full">{tmpl.images?.length || 0} imgs</span>
           </div>
         </div>
       ))}
@@ -1241,6 +1369,7 @@ const BoatBrochureBuilder = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState([]);
+  const [activeTemplateId, setActiveTemplateId] = useState(null);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
@@ -1255,19 +1384,7 @@ const BoatBrochureBuilder = () => {
 
   // Form state
   const [formData, setFormData] = useState({
-    boatName: '',
-    length: '',
-    beam: '',
-    capacity: '',
-    fuelConsumption: '',
-    includedNote: '(Crew and VAT 21% included. FUEL not included)',
-    bedroomCount: 1,
-    includedItems: [...DEFAULT_INCLUDED_ITEMS],
-    notIncludedItems: [...DEFAULT_NOT_INCLUDED_ITEMS],
-    amenities: [...DEFAULT_AMENITIES],
-    images: [],
-    pricing: normalizePricing(),
-    monthlyPricing: normalizeMonthlyPricing(),
+    ...createEmptyFormData(),
   });
 
   const [selectedTemplate, setSelectedTemplate] = useState('luxury');
@@ -1292,8 +1409,14 @@ const BoatBrochureBuilder = () => {
   useEffect(() => {
     const loadTemplates = async () => {
       try {
-        const snap = await getDocs(collection(db, 'boatBrochureTemplates'));
-        const templates = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        const snap = await getDocs(collection(db, BROCHURE_COLLECTION));
+        const templates = sortTemplates(
+          snap.docs.map((entry) => ({
+            id: entry.id,
+            ...entry.data(),
+            images: normalizeSavedImages(entry.data().images),
+          }))
+        );
         setSavedTemplates(templates);
       } catch (err) {
         console.error('Error loading templates:', err);
@@ -1310,6 +1433,14 @@ const BoatBrochureBuilder = () => {
 
   const updateFormData = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const resetEditor = () => {
+    setFormData(createEmptyFormData());
+    setSelectedTemplate('luxury');
+    setFooterType('restaurants');
+    setFooterItems(['cancarlito', 'esmoli', 'chezgerdi', 'tiburon', 'juanyandrea']);
+    setActiveTemplateId(null);
   };
 
   const toggleChecklistItem = (field, value) => {
@@ -1330,21 +1461,41 @@ const BoatBrochureBuilder = () => {
 
     setIsSaving(true);
     try {
+      const templateRef = activeTemplateId
+        ? doc(db, BROCHURE_COLLECTION, activeTemplateId)
+        : doc(collection(db, BROCHURE_COLLECTION));
+      const brochureId = templateRef.id;
+      const previousTemplate = savedTemplates.find((template) => template.id === brochureId);
+      const uploadedImages = await uploadBrochureImages(brochureId, formData.images, previousTemplate?.images || []);
+      const nowIso = new Date().toISOString();
       const templateData = {
         ...formData,
-        images: [], // Don't save images to Firestore (too large)
+        images: uploadedImages,
         template: selectedTemplate,
         footerType,
         footerItems,
-        createdAt: new Date().toISOString(),
+        createdAt: previousTemplate?.createdAt || nowIso,
+        updatedAt: nowIso,
       };
 
-      const docRef = await addDoc(collection(db, 'boatBrochureTemplates'), templateData);
-      setSavedTemplates((prev) => [...prev, { id: docRef.id, ...templateData }]);
-      alert('Template saved successfully!');
+      await setDoc(templateRef, templateData);
+
+      const savedTemplate = {
+        id: brochureId,
+        ...templateData,
+        images: normalizeSavedImages(templateData.images),
+      };
+
+      setSavedTemplates((prev) => sortTemplates([
+        ...prev.filter((template) => template.id !== brochureId),
+        savedTemplate,
+      ]));
+      setFormData((prev) => ({ ...prev, images: savedTemplate.images }));
+      setActiveTemplateId(brochureId);
+      alert(previousTemplate ? 'Brochure updated successfully!' : 'Brochure saved successfully!');
     } catch (err) {
       console.error('Error saving template:', err);
-      alert('Failed to save template');
+      alert(err.message || 'Failed to save brochure');
     } finally {
       setIsSaving(false);
     }
@@ -1362,21 +1513,27 @@ const BoatBrochureBuilder = () => {
       includedItems: template.includedItems || [...DEFAULT_INCLUDED_ITEMS],
       notIncludedItems: template.notIncludedItems || [...DEFAULT_NOT_INCLUDED_ITEMS],
       amenities: template.amenities || [...DEFAULT_AMENITIES],
-      images: [],
+      images: normalizeSavedImages(template.images),
       pricing: normalizePricing(template.pricing),
       monthlyPricing: normalizeMonthlyPricing(template.monthlyPricing || template.pricing),
     });
     setSelectedTemplate(template.template || 'luxury');
     setFooterType(template.footerType || 'restaurants');
     setFooterItems(template.footerItems || []);
-    alert('Template loaded! Add images to complete.');
+    setActiveTemplateId(template.id);
+    alert('Brochure loaded. You can edit and update it here.');
   };
 
   const handleDeleteTemplate = async (id) => {
     if (!window.confirm('Delete this saved template?')) return;
     try {
-      await deleteDoc(doc(db, 'boatBrochureTemplates', id));
+      const templateToDelete = savedTemplates.find((template) => template.id === id);
+      await deleteStoredImages(templateToDelete?.images || []);
+      await deleteDoc(doc(db, BROCHURE_COLLECTION, id));
       setSavedTemplates((prev) => prev.filter((t) => t.id !== id));
+      if (activeTemplateId === id) {
+        resetEditor();
+      }
     } catch (err) {
       console.error('Error deleting template:', err);
     }
@@ -1702,6 +1859,7 @@ const BoatBrochureBuilder = () => {
                   onLoad={handleLoadTemplate}
                   onDelete={handleDeleteTemplate}
                   isLoading={isLoadingTemplates}
+                  activeTemplateId={activeTemplateId}
                 />
               </div>
             )}
@@ -1713,6 +1871,13 @@ const BoatBrochureBuilder = () => {
           {/* Action Buttons */}
           <div className="space-y-3">
             <div className="flex flex-wrap gap-3">
+              <button
+                onClick={resetEditor}
+                className="flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all"
+              >
+                <RefreshCw size={18} />
+                New Brochure
+              </button>
               <button
                 onClick={() => setShowPreview(!showPreview)}
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all"
@@ -1726,9 +1891,14 @@ const BoatBrochureBuilder = () => {
                 className="flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all disabled:opacity-50"
               >
                 {isSaving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
-                Save
+                {activeTemplateId ? 'Update Brochure' : 'Save Brochure'}
               </button>
             </div>
+            {activeTemplateId && (
+              <p className="rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">
+                Editing saved brochure: <span className="font-semibold">{formData.boatName || 'Untitled brochure'}</span>
+              </p>
+            )}
             <div className="flex gap-3">
               <button
                 onClick={generateImage}

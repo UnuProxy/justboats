@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { auth, googleProvider, db } from '../firebase/firebaseConfig';
 import {
   signInWithPopup,
+  signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
@@ -70,10 +71,12 @@ export function AuthProvider({ children }) {
 
             const approvedUser = approvedSnapshot.data();
             const role = approvedUser.role;
+            const displayName = authUser.displayName || approvedUser.displayName || approvedUser.name || authUser.email;
 
             await setDoc(userDocRef, {
               email: authUser.email,
-              name: authUser.displayName,
+              name: displayName,
+              displayName,
               role,
               createdAt: serverTimestamp(),
               firstLogin: serverTimestamp(),
@@ -116,6 +119,18 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const loginWithEmail = async (email, password) => {
+    try {
+      setAuthError(null);
+      const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+      return { success: true, credential };
+    } catch (error) {
+      console.error('Email sign-in error:', error);
+      setAuthError(error.message);
+      return { success: false, error: error.message };
+    }
+  };
+
   const logout = async () => {
     try {
       await signOut(auth);
@@ -139,6 +154,7 @@ export function AuthProvider({ children }) {
       user,
       userRole,
       loginWithGoogle,
+      loginWithEmail,
       logout,
       isAdmin,
       isStaff,
