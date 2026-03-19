@@ -104,7 +104,7 @@ const hexToRgba = (hex, alpha = 1) => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
-const firstDefinedValue = (...values) => values.find((value) => value !== undefined && value !== null && value !== '');
+const firstDefinedValue = (...values) => values.find((value) => value !== undefined && value !== null);
 
 const normalizePricing = (pricing = {}) => ({
   may: firstDefinedValue(pricing.may, pricing.May, ''),
