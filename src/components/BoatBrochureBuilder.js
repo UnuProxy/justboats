@@ -92,6 +92,7 @@ const DEFAULT_AMENITIES = ['Bedroom Cabin', 'Bathroom', 'Wi-Fi', 'Bluetooth Audi
 const EXTRA_GALLERY_PAGE_SIZE = 6;
 const MAX_BROCHURE_IMAGES = 10;
 const BROCHURE_COLLECTION = 'boatBrochureTemplates';
+const PRICE_MARKUP_RATE = 0.02;
 
 const hexToRgba = (hex, alpha = 1) => {
   if (!hex || typeof hex !== 'string' || !hex.startsWith('#')) return `rgba(255,255,255,${alpha})`;
@@ -202,6 +203,22 @@ const formatTemplateDate = (value) => {
 };
 
 const sanitizeFileName = (value = 'image') => String(value).replace(/[^a-zA-Z0-9._-]+/g, '-');
+
+const applyPriceMarkup = (value) => {
+  if (value === '' || value === null || value === undefined) {
+    return '';
+  }
+
+  const numericValue = Number(value);
+  if (Number.isNaN(numericValue)) {
+    return '';
+  }
+
+  const adjustedValue = Math.round((numericValue * (1 + PRICE_MARKUP_RATE) + Number.EPSILON) * 100) / 100;
+  return Number.isInteger(adjustedValue)
+    ? String(adjustedValue)
+    : adjustedValue.toFixed(2).replace(/\.?0+$/, '');
+};
 
 const deleteStoredImages = async (images = []) => {
   const removablePaths = images
@@ -418,19 +435,71 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
 const PricingTable = ({ pricing, onPricingChange, monthlyPricing, onMonthlyPricingChange }) => {
   const normalizedPricing = normalizePricing(pricing);
   const normalizedMonthlyPricing = normalizeMonthlyPricing(monthlyPricing);
+  const [draftPricing, setDraftPricing] = useState({});
+  const [draftMonthlyPricing, setDraftMonthlyPricing] = useState({});
 
-  const updatePrice = (month, value) => {
+  useEffect(() => {
+    setDraftPricing({});
+  }, [pricing]);
+
+  useEffect(() => {
+    setDraftMonthlyPricing({});
+  }, [monthlyPricing]);
+
+  const updatePriceDraft = (month, value) => {
+    setDraftPricing((current) => ({ ...current, [month]: value }));
     onPricingChange({ ...normalizedPricing, [month]: value });
   };
 
-  const updateMonthlyPrice = (month, value) => {
+  const commitPrice = (month) => {
+    const rawValue = Object.prototype.hasOwnProperty.call(draftPricing, month)
+      ? draftPricing[month]
+      : normalizedPricing[month];
+    onPricingChange({ ...normalizedPricing, [month]: applyPriceMarkup(rawValue) });
+    setDraftPricing((current) => {
+      const next = { ...current };
+      delete next[month];
+      return next;
+    });
+  };
+
+  const updateMonthlyPriceDraft = (month, value) => {
+    setDraftMonthlyPricing((current) => ({ ...current, [month]: value }));
     onMonthlyPricingChange({ ...normalizedMonthlyPricing, [month]: value });
+  };
+
+  const commitMonthlyPrice = (month) => {
+    const rawValue = Object.prototype.hasOwnProperty.call(draftMonthlyPricing, month)
+      ? draftMonthlyPricing[month]
+      : normalizedMonthlyPricing[month];
+    onMonthlyPricingChange({ ...normalizedMonthlyPricing, [month]: applyPriceMarkup(rawValue) });
+    setDraftMonthlyPricing((current) => {
+      const next = { ...current };
+      delete next[month];
+      return next;
+    });
+  };
+
+  const seasonalValue = (month) => (Object.prototype.hasOwnProperty.call(draftPricing, month)
+    ? draftPricing[month]
+    : (normalizedPricing[month] || ''));
+
+  const monthlyValue = (month) => (Object.prototype.hasOwnProperty.call(draftMonthlyPricing, month)
+    ? draftMonthlyPricing[month]
+    : (normalizedMonthlyPricing[month] || ''));
+
+  const handlePriceKeyDown = (event, onCommit) => {
+    if (event.key === 'Enter') {
+      event.currentTarget.blur();
+      onCommit();
+    }
   };
 
   return (
     <div className="space-y-5">
       <div className="space-y-3">
         <label className="text-sm font-semibold text-slate-700">Seasonal Pricing (€)</label>
+        <p className="text-xs text-slate-500">A 2% markup is applied automatically when you finish each price field.</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
           {PRICING_PERIODS.map((period) => (
             <div key={period.key} className="space-y-1">
@@ -439,8 +508,10 @@ const PricingTable = ({ pricing, onPricingChange, monthlyPricing, onMonthlyPrici
               </label>
               <input
                 type="number"
-                value={normalizedPricing[period.key] || ''}
-                onChange={(e) => updatePrice(period.key, e.target.value)}
+                value={seasonalValue(period.key)}
+                onChange={(e) => updatePriceDraft(period.key, e.target.value)}
+                onBlur={() => commitPrice(period.key)}
+                onKeyDown={(event) => handlePriceKeyDown(event, () => commitPrice(period.key))}
                 placeholder="0"
                 className="w-full px-2 py-2 text-center text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
               />
@@ -460,8 +531,10 @@ const PricingTable = ({ pricing, onPricingChange, monthlyPricing, onMonthlyPrici
               <label className="text-xs font-medium text-slate-500 block text-center">{month}</label>
               <input
                 type="number"
-                value={normalizedMonthlyPricing[month] || ''}
-                onChange={(e) => updateMonthlyPrice(month, e.target.value)}
+                value={monthlyValue(month)}
+                onChange={(e) => updateMonthlyPriceDraft(month, e.target.value)}
+                onBlur={() => commitMonthlyPrice(month)}
+                onKeyDown={(event) => handlePriceKeyDown(event, () => commitMonthlyPrice(month))}
                 placeholder="0"
                 className="w-full px-2 py-2 text-center text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all bg-white"
               />
