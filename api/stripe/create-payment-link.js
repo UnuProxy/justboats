@@ -59,6 +59,8 @@ async function createStripePaymentLink({
   successUrl,
   notes,
   sourceApp,
+  statusCallbackUrl,
+  statusCallbackAuthToken,
 }) {
   const numericAmount = Number(amount);
   if (!numericAmount || Number.isNaN(numericAmount) || numericAmount <= 0) {
@@ -126,6 +128,8 @@ async function createStripePaymentLink({
         paidAt: null,
         notes: notes || null,
         sourceApp: resolvedSourceApp,
+        statusCallbackUrl: statusCallbackUrl || null,
+        statusCallbackAuthToken: statusCallbackAuthToken || null,
       });
     } catch (error) {
       console.error('Payment link provider: failed to persist payment link', error);

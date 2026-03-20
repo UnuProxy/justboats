@@ -70,6 +70,7 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
       ref = snap.ref;
     }
 
+    const existing = snap.data() || {};
     const update = {
       paymentStatus,
       lastStripeSessionId: session.id || null,
@@ -80,6 +81,29 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
     };
 
     await ref.set(update, { merge: true });
+
+    if (paymentStatus === 'paid' && existing.statusCallbackUrl) {
+      try {
+        await fetch(existing.statusCallbackUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(existing.statusCallbackAuthToken
+              ? { Authorization: `Bearer ${existing.statusCallbackAuthToken}` }
+              : {}),
+          },
+          body: JSON.stringify({
+            stripePaymentLinkId: stripeLinkId,
+            status: 'completed',
+            paidAt: session.created
+              ? new Date(session.created * 1000).toISOString()
+              : new Date().toISOString(),
+          }),
+        });
+      } catch (callbackError) {
+        console.error('Stripe webhook: failed to notify external callback', callbackError);
+      }
+    }
 
     if (paymentStatus === 'paid' && stripe) {
       try {

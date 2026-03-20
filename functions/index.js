@@ -201,6 +201,8 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
 
     await ref.set(updateData, { merge: true });
 
+    await notifyPaymentLinkStatusCallback(existing, stripeLinkId, paymentStatus, session);
+
     if (paymentStatus === 'paid' && stripe) {
       try {
         await stripe.paymentLinks.update(stripeLinkId, { active: false });
@@ -210,6 +212,35 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
     }
   } catch (error) {
     console.error('Failed to update payment link status', error);
+  }
+}
+
+async function notifyPaymentLinkStatusCallback(paymentLinkData = {}, stripeLinkId, paymentStatus, session = {}) {
+  if (paymentStatus !== 'paid' || paymentLinkData?.paymentStatus === 'paid' || !paymentLinkData?.statusCallbackUrl) {
+    return;
+  }
+
+  try {
+    await axios.post(
+      paymentLinkData.statusCallbackUrl,
+      {
+        stripePaymentLinkId: stripeLinkId,
+        status: 'completed',
+        paidAt: session.created
+          ? new Date(session.created * 1000).toISOString()
+          : new Date().toISOString(),
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(paymentLinkData.statusCallbackAuthToken
+            ? { Authorization: `Bearer ${paymentLinkData.statusCallbackAuthToken}` }
+            : {}),
+        },
+      }
+    );
+  } catch (callbackError) {
+    console.error('Failed to notify external payment link status callback', callbackError);
   }
 }
 
@@ -301,7 +332,9 @@ async function createStripePaymentLinkInternal(data, authContext) {
     customerEmail,
     bookingId,
     successUrl,
-    notes
+    notes,
+    statusCallbackUrl,
+    statusCallbackAuthToken
   } = data || {};
 
   const numericAmount = Number(amount);
@@ -366,7 +399,9 @@ async function createStripePaymentLinkInternal(data, authContext) {
     createdBy: authContext?.uid || null,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     paidAt: null,
-    notes: notes || null
+    notes: notes || null,
+    statusCallbackUrl: statusCallbackUrl || null,
+    statusCallbackAuthToken: statusCallbackAuthToken || null
   });
 
   // Backfill metadata onto the Stripe link for webhook correlation
@@ -772,6 +807,7 @@ exports.refreshPaymentLinkStatusHttp = onRequest({
     };
 
     await ref.set(update, { merge: true });
+    await notifyPaymentLinkStatusCallback(data, stripeLinkId, paymentStatus, session);
 
     if (paymentStatus === 'paid') {
       try {
@@ -915,6 +951,7 @@ exports.reconcilePaymentLinks = onSchedule({
       };
 
       await doc.ref.set(update, { merge: true });
+      await notifyPaymentLinkStatusCallback(data, stripeLinkId, paymentStatus, session);
 
       // If paid, deactivate the link to enforce single-use
       if (paymentStatus === 'paid') {
