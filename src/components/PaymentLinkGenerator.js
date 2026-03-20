@@ -49,6 +49,7 @@ const defaultRefreshLinkEndpoint = process.env.REACT_APP_FIREBASE_PROJECT_ID
   ? `https://us-central1-${process.env.REACT_APP_FIREBASE_PROJECT_ID}.cloudfunctions.net/refreshPaymentLinkStatusHttp`
   : 'https://us-central1-crm-boats.cloudfunctions.net/refreshPaymentLinkStatusHttp';
 const refreshPaymentLinkEndpoint = process.env.REACT_APP_REFRESH_PAYMENT_LINK_ENDPOINT || defaultRefreshLinkEndpoint;
+const BOATOX_STATUS_CALLBACK_URL = 'https://boatox.vercel.app/api/payment-links/provider-status';
 
 const formatAmount = (value, currency) => {
   const amount = Number(value) || 0;
@@ -56,6 +57,18 @@ const formatAmount = (value, currency) => {
     style: 'currency',
     currency: currency?.toUpperCase() || 'EUR'
   }).format(amount);
+};
+
+const isBoatoxPaymentRecord = (item = {}) => {
+  const sourceApp = String(item.sourceApp || '').trim().toLowerCase();
+  const description = String(item.description || '').trim().toLowerCase();
+
+  return (
+    sourceApp === 'boatox-ibiza' ||
+    (sourceApp === 'external-app' &&
+      item.statusCallbackUrl === BOATOX_STATUS_CALLBACK_URL &&
+      description.startsWith('boatox payment'))
+  );
 };
 
 const PaymentLinkGenerator = () => {
@@ -124,7 +137,7 @@ const PaymentLinkGenerator = () => {
           bookingId: form.bookingId,
           successUrl: form.successUrl,
           notes: form.notes,
-          sourceApp: 'boatox-ibiza'
+          sourceApp: 'nautiq-app'
         })
       });
 
@@ -193,7 +206,7 @@ const PaymentLinkGenerator = () => {
             stripeLastCheckedAt: data.stripeLastCheckedAt?.toDate ? data.stripeLastCheckedAt.toDate() : null
           };
         });
-        setHistory(items);
+        setHistory(items.filter((item) => !isBoatoxPaymentRecord(item)));
         setHistoryLoading(false);
       },
       (err) => {

@@ -17,6 +17,10 @@ import { useSearchParams } from 'react-router-dom';
 import CalendarPicker from './CalendarPicker';
 import { useAuth } from '../context/AuthContext';
 
+const BOATOX_BOOKINGS_PROXY_URL = process.env.NODE_ENV === 'development'
+  ? (process.env.REACT_APP_BOATOX_BOOKINGS_PROXY_URL || 'https://www.nautiqibiza-booking.com/api/external/boatox-bookings')
+  : '/api/external/boatox-bookings';
+
 function UpcomingBookings() {
   // Get URL parameters for booking highlight
   const [searchParams] = useSearchParams();
@@ -486,7 +490,7 @@ function UpcomingBookings() {
     setExternalSyncing(true);
 
     try {
-      const response = await fetch('/api/external/boatox-bookings', {
+      const response = await fetch(BOATOX_BOOKINGS_PROXY_URL, {
         method: 'GET',
         headers: {
           Accept: 'application/json'

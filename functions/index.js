@@ -363,6 +363,7 @@ async function createStripePaymentLinkInternal(data, authContext) {
     customerName,
     customerEmail,
     bookingId,
+    bookingReference,
     successUrl,
     notes,
     sourceApp,
@@ -402,6 +403,7 @@ async function createStripePaymentLinkInternal(data, authContext) {
   formData.append('metadata[source]', resolvedSourceApp);
 
   if (bookingId) formData.append('metadata[bookingId]', String(bookingId));
+  if (bookingReference) formData.append('metadata[bookingReference]', String(bookingReference));
   if (customerName) formData.append('metadata[customerName]', customerName);
   if (customerEmail) formData.append('metadata[customerEmail]', customerEmail);
   if (notes) formData.append('metadata[notes]', notes);
@@ -429,6 +431,7 @@ async function createStripePaymentLinkInternal(data, authContext) {
     currency: currency.toLowerCase(),
     description: linkDescription,
     bookingId: bookingId || null,
+    bookingReference: bookingReference || null,
     customerName: customerName || null,
     customerEmail: customerEmail || null,
     stripeLinkId: link.id,
@@ -451,6 +454,7 @@ async function createStripePaymentLinkInternal(data, authContext) {
         metadata: {
           firestoreId: link.id,
           bookingId: bookingId || '',
+          bookingReference: bookingReference || '',
           customerEmail: customerEmail || '',
           customerName: customerName || ''
         },
@@ -460,6 +464,7 @@ async function createStripePaymentLinkInternal(data, authContext) {
           metadata: {
             firestoreId: link.id,
             bookingId: bookingId || '',
+            bookingReference: bookingReference || '',
             customerEmail: customerEmail || '',
             customerName: customerName || ''
           }

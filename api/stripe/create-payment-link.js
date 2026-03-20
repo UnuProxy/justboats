@@ -92,6 +92,7 @@ async function createStripePaymentLink({
   customerName,
   customerEmail,
   bookingId,
+  bookingReference,
   successUrl,
   notes,
   sourceApp,
@@ -131,6 +132,7 @@ async function createStripePaymentLink({
   formData.append('metadata[provider]', 'payment-link-provider');
 
   if (bookingId) formData.append('metadata[bookingId]', String(bookingId));
+  if (bookingReference) formData.append('metadata[bookingReference]', String(bookingReference));
   if (customerName) formData.append('metadata[customerName]', String(customerName));
   if (customerEmail) formData.append('metadata[customerEmail]', String(customerEmail));
   if (notes) formData.append('metadata[notes]', String(notes));
@@ -158,6 +160,7 @@ async function createStripePaymentLink({
         currency: String(currency || 'eur').toLowerCase(),
         description: linkDescription,
         bookingId: bookingId || null,
+        bookingReference: bookingReference || null,
         customerName: customerName || null,
         customerEmail: customerEmail || null,
         stripeLinkId: link.id,

@@ -19,7 +19,9 @@ export default async function handler(req, res) {
   }
 
   const providerUrl = process.env.BOATOX_BOOKINGS_URL?.trim();
-  const providerApiKey = process.env.BOATOX_BOOKINGS_API_KEY?.trim();
+  const providerApiKey =
+    process.env.BOATOX_BOOKINGS_API_KEY?.trim() ||
+    process.env.PAYMENT_LINK_PROVIDER_API_KEY?.trim();
   if (!providerUrl) {
     res.status(500).json({ error: 'BOATOX_BOOKINGS_URL is not configured.' });
     return;

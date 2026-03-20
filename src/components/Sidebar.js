@@ -248,6 +248,7 @@ const Sidebar = () => {
           { name: 'All bookings', icon: Calendar, path: '/bookings', allowed: roleCanSee('/bookings', true), badge: { text: 'LIVE' } },
           { name: 'New booking', icon: PlusCircle, path: '/add-booking', allowed: roleCanSee('/add-booking', true) },
           { name: 'San Antonio tours', icon: Ship, path: '/san-antonio-tours', allowed: roleCanSee('/san-antonio-tours', true) },
+          { name: 'Boatox payments', icon: CreditCard, path: '/boatox-payments', allowed: roleCanSee('/boatox-payments', true) },
         ]
       },
       {

@@ -12,6 +12,7 @@ import Login from './components/Login';
 import ClientDirectory from './components/ClientDirectory';
 import PaymentTracking from './components/PaymentTracking';
 import PaymentLinkGenerator from './components/PaymentLinkGenerator';
+import BoatoxPayments from './components/BoatoxPayments';
 import ExpenseOverview from './components/ExpenseOverview';
 import BoatManagement from './components/BoatManagement';
 import AddBoat from './components/AddBoat';
@@ -239,6 +240,16 @@ function App() {
                             
 
                             {/* Financial Routes */}
+                            <Route
+                                path="/boatox-payments"
+                                element={
+                                    <ProtectedRoute requiredPermission="staff">
+                                        <ProtectedLayout>
+                                            <BoatoxPayments />
+                                        </ProtectedLayout>
+                                    </ProtectedRoute>
+                                }
+                            />
                             <Route
                                 path="/payment-links"
                                 element={

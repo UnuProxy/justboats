@@ -3,6 +3,7 @@ const STAFF_ALLOWED_PATTERNS = [
   '/bookings/:id',            // Specific booking detail
   '/add-booking',             // Capture new booking
   '/san-antonio-tours',       // Daily tour operations
+  '/boatox-payments',         // Real-time Boatox payment link monitor
   '/boats',                   // Fleet overview
   '/add-boat',                // Add new boat
   '/edit-boat/:id',           // Edit boat details
