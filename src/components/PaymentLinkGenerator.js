@@ -123,7 +123,8 @@ const PaymentLinkGenerator = () => {
           customerEmail: form.customerEmail,
           bookingId: form.bookingId,
           successUrl: form.successUrl,
-          notes: form.notes
+          notes: form.notes,
+          sourceApp: 'boatox-ibiza'
         })
       });
 

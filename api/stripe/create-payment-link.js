@@ -2,6 +2,7 @@ import admin from 'firebase-admin';
 
 const DEFAULT_SUCCESS_URL = process.env.SUCCESS_REDIRECT_URL || 'https://nautiqibiza.com/thanks';
 const STRIPE_API_BASE = 'https://api.stripe.com/v1';
+const BOATOX_STATUS_CALLBACK_URL = 'https://boatox.vercel.app/api/payment-links/provider-status';
 
 let firestoreInstance = null;
 
@@ -49,6 +50,41 @@ function setCors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-source-app');
 }
 
+function resolveCallbackConfig(sourceApp, statusCallbackUrl, statusCallbackAuthToken) {
+  const normalizedSourceApp = String(sourceApp || '').trim().toLowerCase();
+  const explicitUrl = typeof statusCallbackUrl === 'string' ? statusCallbackUrl.trim() : '';
+  const explicitToken = typeof statusCallbackAuthToken === 'string' ? statusCallbackAuthToken.trim() : '';
+
+  if (explicitUrl || explicitToken) {
+    return {
+      statusCallbackUrl: explicitUrl || null,
+      statusCallbackAuthToken: explicitToken || null,
+    };
+  }
+
+  const defaultToken = String(
+    process.env.PAYMENT_LINK_SYNC_SECRET ||
+    process.env.PAYMENT_LINK_PROVIDER_API_KEY ||
+    ''
+  ).trim();
+  const shouldUseBoatoxDefaults =
+    !normalizedSourceApp ||
+    normalizedSourceApp === 'external-app' ||
+    normalizedSourceApp === 'boatox-ibiza';
+
+  if (!shouldUseBoatoxDefaults || !defaultToken) {
+    return {
+      statusCallbackUrl: null,
+      statusCallbackAuthToken: null,
+    };
+  }
+
+  return {
+    statusCallbackUrl: BOATOX_STATUS_CALLBACK_URL,
+    statusCallbackAuthToken: defaultToken,
+  };
+}
+
 async function createStripePaymentLink({
   amount,
   currency = 'eur',
@@ -73,6 +109,11 @@ async function createStripePaymentLink({
   }
 
   const resolvedSourceApp = String(sourceApp || 'external-app').trim();
+  const callbackConfig = resolveCallbackConfig(
+    resolvedSourceApp,
+    statusCallbackUrl,
+    statusCallbackAuthToken
+  );
   const linkDescription = (description || `Payment for ${customerName || 'Boatox Ibiza client'}`).trim().slice(0, 180);
   const amountInCents = Math.round(numericAmount * 100);
 
@@ -128,8 +169,8 @@ async function createStripePaymentLink({
         paidAt: null,
         notes: notes || null,
         sourceApp: resolvedSourceApp,
-        statusCallbackUrl: statusCallbackUrl || null,
-        statusCallbackAuthToken: statusCallbackAuthToken || null,
+        statusCallbackUrl: callbackConfig.statusCallbackUrl,
+        statusCallbackAuthToken: callbackConfig.statusCallbackAuthToken,
       });
     } catch (error) {
       console.error('Payment link provider: failed to persist payment link', error);

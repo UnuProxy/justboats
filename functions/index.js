@@ -108,6 +108,7 @@ const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 const stripe = stripeSecretKey ? new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' }) : null;
 const DEFAULT_SUCCESS_URL = process.env.SUCCESS_REDIRECT_URL || 'https://nautiqibiza.com/thanks';
+const BOATOX_STATUS_CALLBACK_URL = 'https://boatox.vercel.app/api/payment-links/provider-status';
 // Simplified API key handling using Firebase Secrets
 function getApiKey() {
   const apiKey = process.env.SENDGRID_API_KEY;
@@ -158,6 +159,37 @@ function mapHttpsErrorToStatus(error) {
     return statusMap[error.code] || 500;
   }
   return 500;
+}
+
+function resolvePaymentLinkCallbackConfig(sourceApp, statusCallbackUrl, statusCallbackAuthToken) {
+  const normalizedSourceApp = String(sourceApp || '').trim().toLowerCase();
+  const explicitUrl = typeof statusCallbackUrl === 'string' ? statusCallbackUrl.trim() : '';
+  const explicitToken = typeof statusCallbackAuthToken === 'string' ? statusCallbackAuthToken.trim() : '';
+
+  if (explicitUrl || explicitToken) {
+    return {
+      statusCallbackUrl: explicitUrl || null,
+      statusCallbackAuthToken: explicitToken || null
+    };
+  }
+
+  const defaultToken = String(
+    process.env.PAYMENT_LINK_SYNC_SECRET ||
+    process.env.PAYMENT_LINK_PROVIDER_API_KEY ||
+    ''
+  ).trim();
+
+  if (normalizedSourceApp !== 'boatox-ibiza' || !defaultToken) {
+    return {
+      statusCallbackUrl: null,
+      statusCallbackAuthToken: null
+    };
+  }
+
+  return {
+    statusCallbackUrl: BOATOX_STATUS_CALLBACK_URL,
+    statusCallbackAuthToken: defaultToken
+  };
 }
 
 async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}) {
@@ -333,6 +365,7 @@ async function createStripePaymentLinkInternal(data, authContext) {
     bookingId,
     successUrl,
     notes,
+    sourceApp,
     statusCallbackUrl,
     statusCallbackAuthToken
   } = data || {};
@@ -348,6 +381,12 @@ async function createStripePaymentLinkInternal(data, authContext) {
     throw new HttpsError('failed-precondition', 'Stripe secret key is not configured.');
   }
 
+  const resolvedSourceApp = String(sourceApp || 'nautiq-app').trim();
+  const callbackConfig = resolvePaymentLinkCallbackConfig(
+    resolvedSourceApp,
+    statusCallbackUrl,
+    statusCallbackAuthToken
+  );
   const linkDescription = (description || `Payment for ${customerName || 'Nautiq Ibiza client'}`).trim().slice(0, 180);
   const formData = new URLSearchParams();
   formData.append('line_items[0][price_data][currency]', currency.toLowerCase());
@@ -360,7 +399,7 @@ async function createStripePaymentLinkInternal(data, authContext) {
   if (authContext?.uid) {
     formData.append('metadata[createdBy]', authContext.uid);
   }
-  formData.append('metadata[source]', 'nautiq-app');
+  formData.append('metadata[source]', resolvedSourceApp);
 
   if (bookingId) formData.append('metadata[bookingId]', String(bookingId));
   if (customerName) formData.append('metadata[customerName]', customerName);
@@ -400,8 +439,9 @@ async function createStripePaymentLinkInternal(data, authContext) {
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     paidAt: null,
     notes: notes || null,
-    statusCallbackUrl: statusCallbackUrl || null,
-    statusCallbackAuthToken: statusCallbackAuthToken || null
+    sourceApp: resolvedSourceApp,
+    statusCallbackUrl: callbackConfig.statusCallbackUrl,
+    statusCallbackAuthToken: callbackConfig.statusCallbackAuthToken
   });
 
   // Backfill metadata onto the Stripe link for webhook correlation
@@ -556,7 +596,7 @@ async function createBrochureAccessInternal(data, authContext) {
 exports.createStripePaymentLink = onCall({
   region: "us-central1",
   cors: ALLOWED_ORIGINS,
-  secrets: ["STRIPE_SECRET_KEY"],
+  secrets: ["STRIPE_SECRET_KEY", "PAYMENT_LINK_PROVIDER_API_KEY", "PAYMENT_LINK_SYNC_SECRET"],
   maxInstances: 10
 }, async (request) => {
   try {
@@ -622,7 +662,7 @@ exports.createBrochureAccessHttp = onRequest({
 exports.createStripePaymentLinkHttp = onRequest({
   region: "us-central1",
   cors: false,
-  secrets: ["STRIPE_SECRET_KEY"],
+  secrets: ["STRIPE_SECRET_KEY", "PAYMENT_LINK_PROVIDER_API_KEY", "PAYMENT_LINK_SYNC_SECRET"],
   maxInstances: 10
 }, async (req, res) => {
   if (handleCors(req, res)) {

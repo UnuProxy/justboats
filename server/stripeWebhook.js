@@ -84,7 +84,7 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
 
     if (paymentStatus === 'paid' && existing.statusCallbackUrl) {
       try {
-        await fetch(existing.statusCallbackUrl, {
+        const callbackResponse = await fetch(existing.statusCallbackUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -100,6 +100,11 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
               : new Date().toISOString(),
           }),
         });
+
+        if (!callbackResponse.ok) {
+          const responseText = await callbackResponse.text().catch(() => '');
+          throw new Error(`Callback failed (${callbackResponse.status}): ${responseText || callbackResponse.statusText}`);
+        }
       } catch (callbackError) {
         console.error('Stripe webhook: failed to notify external callback', callbackError);
       }
