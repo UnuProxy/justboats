@@ -125,6 +125,15 @@ const normalizeMonthlyPricing = (pricing = {}) => ({
   Oct: firstDefinedValue(pricing.Oct, ''),
 });
 
+const normalizeDisplayPriceOverrides = (pricing = {}) => ({
+  may: firstDefinedValue(pricing.may, ''),
+  juneEarly: firstDefinedValue(pricing.juneEarly, ''),
+  peakSeason: firstDefinedValue(pricing.peakSeason, ''),
+  augustLate: firstDefinedValue(pricing.augustLate, ''),
+  sept: firstDefinedValue(pricing.sept, ''),
+  oct: firstDefinedValue(pricing.oct, ''),
+});
+
 const firstPopulatedValue = (...values) => values.find((value) => value !== undefined && value !== null && value !== '');
 
 const getBrochureDisplayPricing = (data = {}) => {
@@ -139,6 +148,30 @@ const getBrochureDisplayPricing = (data = {}) => {
     sept: firstPopulatedValue(seasonalPricing.sept, monthlyPricing.Sept, ''),
     oct: firstPopulatedValue(seasonalPricing.oct, monthlyPricing.Oct, ''),
   };
+};
+
+const hasPopulatedPriceValues = (pricing = {}) => Object.values(pricing).some((value) => (
+  value !== undefined && value !== null && value !== ''
+));
+
+const getBrochureDisplayPricingLabels = (data = {}) => {
+  const seasonalPricing = normalizePricing(data.pricing);
+  const monthlyPricing = normalizeMonthlyPricing(data.monthlyPricing);
+
+  const usesMonthlyPricing = hasPopulatedPriceValues(monthlyPricing) && !hasPopulatedPriceValues(seasonalPricing);
+
+  if (usesMonthlyPricing) {
+    return {
+      may: 'May',
+      juneEarly: 'June',
+      peakSeason: 'July',
+      augustLate: 'Aug.',
+      sept: 'Sept.',
+      oct: 'Oct.',
+    };
+  }
+
+  return normalizePricingLabels(data.pricingLabels);
 };
 
 const normalizePricingLabels = (labels = {}) => ({
@@ -178,6 +211,7 @@ const createEmptyFormData = () => ({
   pricing: normalizePricing(),
   pricingLabels: normalizePricingLabels(),
   monthlyPricing: normalizeMonthlyPricing(),
+  displayPriceOverrides: normalizeDisplayPriceOverrides(),
 });
 
 const createStoredImageId = (seed, index) => seed || `saved-image-${index}`;
@@ -230,6 +264,21 @@ const formatTemplateDate = (value) => {
 
 const sanitizeFileName = (value = 'image') => String(value).replace(/[^a-zA-Z0-9._-]+/g, '-');
 
+const formatDisplayPrice = (value) => {
+  if (value === '' || value === null || value === undefined) {
+    return '';
+  }
+
+  const numericValue = Number(value);
+  if (Number.isNaN(numericValue)) {
+    return '';
+  }
+
+  return Number.isInteger(numericValue)
+    ? String(numericValue)
+    : numericValue.toFixed(2).replace(/\.?0+$/, '');
+};
+
 const applyPriceMarkup = (value) => {
   if (value === '' || value === null || value === undefined) {
     return '';
@@ -241,9 +290,15 @@ const applyPriceMarkup = (value) => {
   }
 
   const adjustedValue = Math.round((numericValue * (1 + PRICE_MARKUP_RATE) + Number.EPSILON) * 100) / 100;
-  return Number.isInteger(adjustedValue)
-    ? String(adjustedValue)
-    : adjustedValue.toFixed(2).replace(/\.?0+$/, '');
+  return formatDisplayPrice(adjustedValue);
+};
+
+const getDisplayPriceValue = (baseValue, overrideValue) => {
+  if (overrideValue !== '' && overrideValue !== null && overrideValue !== undefined) {
+    return formatDisplayPrice(overrideValue);
+  }
+
+  return applyPriceMarkup(baseValue);
 };
 
 const deleteStoredImages = async (images = []) => {
@@ -517,10 +572,15 @@ const PricingTable = ({
   onPricingLabelsChange,
   monthlyPricing,
   onMonthlyPricingChange,
+  displayPriceOverrides,
+  onDisplayPriceOverridesChange,
 }) => {
   const normalizedPricing = normalizePricing(pricing);
   const normalizedPricingLabels = normalizePricingLabels(pricingLabels);
   const normalizedMonthlyPricing = normalizeMonthlyPricing(monthlyPricing);
+  const normalizedDisplayPriceOverrides = normalizeDisplayPriceOverrides(displayPriceOverrides);
+  const displayPricing = getBrochureDisplayPricing({ pricing, monthlyPricing });
+  const displayPricingLabels = getBrochureDisplayPricingLabels({ pricing, monthlyPricing, pricingLabels });
   const [draftPricing, setDraftPricing] = useState({});
   const [draftMonthlyPricing, setDraftMonthlyPricing] = useState({});
 
@@ -566,6 +626,13 @@ const PricingTable = ({
     ? draftMonthlyPricing[month]
     : (normalizedMonthlyPricing[month] || ''));
 
+  const updateDisplayPriceOverride = (period, value) => {
+    onDisplayPriceOverridesChange({
+      ...normalizedDisplayPriceOverrides,
+      [period]: value,
+    });
+  };
+
   const handlePriceKeyDown = (event, onCommit) => {
     if (event.key === 'Enter') {
       event.currentTarget.blur();
@@ -592,7 +659,8 @@ const PricingTable = ({
                 className="w-full px-2 py-1.5 text-center text-xs font-medium text-slate-600 border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
               />
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 value={seasonalValue(period.key)}
                 onChange={(e) => updatePriceDraft(period.key, e.target.value)}
                 onBlur={() => commitPrice(period.key)}
@@ -615,13 +683,36 @@ const PricingTable = ({
             <div key={month} className="space-y-1">
               <label className="text-xs font-medium text-slate-500 block text-center">{month}</label>
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 value={monthlyValue(month)}
                 onChange={(e) => updateMonthlyPriceDraft(month, e.target.value)}
                 onBlur={() => commitMonthlyPrice(month)}
                 onKeyDown={(event) => handlePriceKeyDown(event, () => commitMonthlyPrice(month))}
                 placeholder="0"
                 className="w-full px-2 py-2 text-center text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all bg-white"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-cyan-200 bg-cyan-50/50 p-4 space-y-3">
+        <div>
+          <label className="text-sm font-semibold text-slate-700">Final Brochure Price (€)</label>
+          <p className="text-xs text-slate-500 mt-1">These fields already show the original price plus 5%. Edit them only if you want to round the final brochure number manually.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-3">
+          {PRICING_PERIODS.map((period) => (
+            <div key={period.key} className="space-y-1 min-w-0">
+              <label className="text-xs font-medium text-slate-500 block text-center">{displayPricingLabels[period.key]}</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={getDisplayPriceValue(displayPricing[period.key], normalizedDisplayPriceOverrides[period.key]) || ''}
+                onChange={(e) => updateDisplayPriceOverride(period.key, e.target.value)}
+                placeholder="0"
+                className="w-full min-w-[120px] px-3 py-2 text-center text-sm font-semibold border border-cyan-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all bg-white"
               />
             </div>
           ))}
@@ -775,6 +866,8 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
   const displayPricing = getBrochureDisplayPricing(data);
+  const displayPricingLabels = getBrochureDisplayPricingLabels(data);
+  const displayPriceOverrides = normalizeDisplayPriceOverrides(data.displayPriceOverrides);
 
   return (
     <div
@@ -1001,7 +1094,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
                 lineHeight: 1.2,
               }}
             >
-              {normalizePricingLabels(data.pricingLabels)[period.key]}
+              {displayPricingLabels[period.key]}
             </div>
             <div
               style={{
@@ -1012,7 +1105,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {applyPriceMarkup(displayPricing[period.key]) || '—'}€
+              {getDisplayPriceValue(displayPricing[period.key], displayPriceOverrides[period.key]) || '—'}€
             </div>
           </div>
         ))}
@@ -1691,6 +1784,7 @@ const BoatBrochureBuilder = () => {
       pricing: normalizePricing(template.pricing),
       pricingLabels: normalizePricingLabels(template.pricingLabels),
       monthlyPricing: normalizeMonthlyPricing(template.monthlyPricing || template.pricing),
+      displayPriceOverrides: normalizeDisplayPriceOverrides(template.displayPriceOverrides),
     });
     setSelectedTemplate(template.template || 'luxury');
     setFooterType(template.footerType || 'restaurants');
@@ -1943,6 +2037,8 @@ const BoatBrochureBuilder = () => {
                   onPricingLabelsChange={(labels) => updateFormData('pricingLabels', labels)}
                   monthlyPricing={formData.monthlyPricing}
                   onMonthlyPricingChange={(p) => updateFormData('monthlyPricing', p)}
+                  displayPriceOverrides={formData.displayPriceOverrides}
+                  onDisplayPriceOverridesChange={(overrides) => updateFormData('displayPriceOverrides', overrides)}
                 />
               </div>
             )}
