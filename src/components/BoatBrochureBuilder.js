@@ -134,33 +134,37 @@ const normalizeDisplayPriceOverrides = (pricing = {}) => ({
   oct: firstDefinedValue(pricing.oct, ''),
 });
 
-const firstPopulatedValue = (...values) => values.find((value) => value !== undefined && value !== null && value !== '');
+const normalizePricingSource = (value) => (value === 'monthly' ? 'monthly' : 'seasonal');
+
 
 const getBrochureDisplayPricing = (data = {}) => {
+  const pricingSource = normalizePricingSource(data.pricingSource);
   const seasonalPricing = normalizePricing(data.pricing);
   const monthlyPricing = normalizeMonthlyPricing(data.monthlyPricing);
 
+  if (pricingSource === 'monthly') {
+    return {
+      may: monthlyPricing.May,
+      juneEarly: monthlyPricing.June,
+      peakSeason: monthlyPricing.July,
+      augustLate: monthlyPricing.Aug,
+      sept: monthlyPricing.Sept,
+      oct: monthlyPricing.Oct,
+    };
+  }
+
   return {
-    may: firstPopulatedValue(seasonalPricing.may, monthlyPricing.May, ''),
-    juneEarly: firstPopulatedValue(seasonalPricing.juneEarly, monthlyPricing.June, ''),
-    peakSeason: firstPopulatedValue(seasonalPricing.peakSeason, monthlyPricing.July, monthlyPricing.June, monthlyPricing.Aug, ''),
-    augustLate: firstPopulatedValue(seasonalPricing.augustLate, monthlyPricing.Aug, ''),
-    sept: firstPopulatedValue(seasonalPricing.sept, monthlyPricing.Sept, ''),
-    oct: firstPopulatedValue(seasonalPricing.oct, monthlyPricing.Oct, ''),
+    may: seasonalPricing.may,
+    juneEarly: seasonalPricing.juneEarly,
+    peakSeason: seasonalPricing.peakSeason,
+    augustLate: seasonalPricing.augustLate,
+    sept: seasonalPricing.sept,
+    oct: seasonalPricing.oct,
   };
 };
 
-const hasPopulatedPriceValues = (pricing = {}) => Object.values(pricing).some((value) => (
-  value !== undefined && value !== null && value !== ''
-));
-
 const getBrochureDisplayPricingLabels = (data = {}) => {
-  const seasonalPricing = normalizePricing(data.pricing);
-  const monthlyPricing = normalizeMonthlyPricing(data.monthlyPricing);
-
-  const usesMonthlyPricing = hasPopulatedPriceValues(monthlyPricing) && !hasPopulatedPriceValues(seasonalPricing);
-
-  if (usesMonthlyPricing) {
+  if (normalizePricingSource(data.pricingSource) === 'monthly') {
     return {
       may: 'May',
       juneEarly: 'June',
@@ -211,10 +215,57 @@ const createEmptyFormData = () => ({
   pricing: normalizePricing(),
   pricingLabels: normalizePricingLabels(),
   monthlyPricing: normalizeMonthlyPricing(),
+  pricingSource: 'seasonal',
   displayPriceOverrides: normalizeDisplayPriceOverrides(),
 });
 
 const createStoredImageId = (seed, index) => seed || `saved-image-${index}`;
+
+const normalizeImageCrop = (crop = {}) => ({
+  x: Math.min(80, Math.max(20, Number(firstDefinedValue(crop.x, crop.focusX, 50)) || 50)),
+  y: Math.min(80, Math.max(20, Number(firstDefinedValue(crop.y, crop.focusY, 50)) || 50)),
+  zoom: Math.min(1.6, Math.max(1, Number(firstDefinedValue(crop.zoom, crop.scale, 1.12)) || 1.12)),
+});
+
+const buildSmartImageCrop = ({ width = 0, height = 0 } = {}) => {
+  const aspectRatio = width > 0 && height > 0 ? width / height : 1;
+
+  if (aspectRatio >= 1.9) {
+    return normalizeImageCrop({ x: 50, y: 48, zoom: 1.28 });
+  }
+
+  if (aspectRatio >= 1.45) {
+    return normalizeImageCrop({ x: 50, y: 47, zoom: 1.2 });
+  }
+
+  if (aspectRatio <= 0.9) {
+    return normalizeImageCrop({ x: 50, y: 38, zoom: 1.04 });
+  }
+
+  return normalizeImageCrop({ x: 50, y: 46, zoom: 1.12 });
+};
+
+const getImageRenderStyle = (image = {}, variant = 'default') => {
+  const crop = normalizeImageCrop(image.crop);
+  const variantZoom = {
+    hero: 1,
+    thumbnail: 1.08,
+    bottom: 1.04,
+    showcase: 1.04,
+    gallery: 1.02,
+    editor: 1,
+    default: 1,
+  };
+
+  return {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    objectPosition: `${crop.x}% ${crop.y}%`,
+    transform: `scale(${(crop.zoom || 1) * (variantZoom[variant] || 1)})`,
+    transformOrigin: `${crop.x}% ${crop.y}%`,
+  };
+};
 
 const normalizeSavedImages = (images = []) => (
   Array.isArray(images)
@@ -227,6 +278,7 @@ const normalizeSavedImages = (images = []) => (
             src: image,
             name: `Image ${index + 1}`,
             storagePath: null,
+            crop: normalizeImageCrop(),
           };
         }
 
@@ -238,6 +290,7 @@ const normalizeSavedImages = (images = []) => (
           src,
           name: image.name || `Image ${index + 1}`,
           storagePath: image.storagePath || null,
+          crop: normalizeImageCrop(image.crop || image),
         };
       })
       .filter(Boolean)
@@ -323,6 +376,7 @@ const uploadBrochureImages = async (brochureId, images, previousImages = []) => 
         src: image.src,
         name: image.name || `Image ${index + 1}`,
         storagePath: image.storagePath,
+        crop: normalizeImageCrop(image.crop || image),
       };
     }
 
@@ -339,6 +393,7 @@ const uploadBrochureImages = async (brochureId, images, previousImages = []) => 
       src: downloadURL,
       name: image.name || `Image ${index + 1}`,
       storagePath,
+      crop: normalizeImageCrop(image.crop || image),
     };
   }));
 
@@ -357,6 +412,18 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
   const fileInputRef = useRef(null);
   const [draggedImageId, setDraggedImageId] = useState(null);
   const [isFileDragActive, setIsFileDragActive] = useState(false);
+  const [selectedImageId, setSelectedImageId] = useState(null);
+
+  useEffect(() => {
+    if (!images.length) {
+      setSelectedImageId(null);
+      return;
+    }
+
+    if (!selectedImageId || !images.some((img) => img.id === selectedImageId)) {
+      setSelectedImageId(images[0].id);
+    }
+  }, [images, selectedImageId]);
 
   const processFiles = async (incomingFiles = []) => {
     const imageFiles = Array.from(incomingFiles).filter((file) => file.type.startsWith('image/'));
@@ -370,11 +437,16 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
     const readAsDataUrl = (file) => new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (event) => {
-        resolve({
+        const src = event.target.result;
+        const image = new Image();
+        image.onload = () => resolve({
           id: Date.now() + Math.random(),
-          src: event.target.result,
+          src,
           name: file.name,
+          crop: buildSmartImageCrop({ width: image.naturalWidth, height: image.naturalHeight }),
         });
+        image.onerror = () => reject(new Error(`Failed to process ${file.name}`));
+        image.src = src;
       };
       reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
       reader.readAsDataURL(file);
@@ -403,6 +475,15 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
     const img = images.find((i) => i.id === id);
     const rest = images.filter((i) => i.id !== id);
     onImagesChange([img, ...rest]);
+    setSelectedImageId(id);
+  };
+
+  const updateImageCrop = (id, updates = {}) => {
+    onImagesChange(images.map((img) => (
+      img.id === id
+        ? { ...img, crop: normalizeImageCrop({ ...(img.crop || {}), ...updates }) }
+        : img
+    )));
   };
 
   const moveImage = (sourceId, targetId) => {
@@ -461,6 +542,9 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
     setIsFileDragActive(false);
     await processFiles(event.dataTransfer.files);
   };
+
+  const selectedImage = images.find((img) => img.id === selectedImageId) || null;
+  const selectedCrop = normalizeImageCrop(selectedImage?.crop);
 
   return (
     <div className="space-y-3">
@@ -528,11 +612,21 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
               onDragOver={handleDragOver}
               onDrop={(event) => handleDrop(event, img.id)}
               onDragEnd={handleDragEnd}
-              className={`relative overflow-hidden rounded-lg border bg-white transition ${
-                draggedImageId === img.id ? 'border-cyan-400 opacity-60' : 'border-slate-200'
+              onClick={() => setSelectedImageId(img.id)}
+              className={`relative overflow-hidden rounded-lg border bg-white transition cursor-pointer ${
+                draggedImageId === img.id
+                  ? 'border-cyan-400 opacity-60'
+                  : selectedImageId === img.id
+                    ? 'border-cyan-500 ring-2 ring-cyan-200'
+                    : 'border-slate-200'
               }`}
             >
-              <img src={img.src} alt={img.name} className="h-24 w-full object-cover" />
+              <img
+                src={img.src}
+                alt={img.name}
+                className="h-24 w-full"
+                style={getImageRenderStyle(img, 'editor')}
+              />
               <div className="space-y-1 px-2 py-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
@@ -558,6 +652,59 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
             </div>
           ))}
         </div>
+        {selectedImage && (
+          <div className="mt-4 rounded-xl border border-cyan-200 bg-cyan-50/60 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-700">Image focus tuning</p>
+                <p className="text-xs text-slate-500">Adjust what stays centered in the PDF crops for the selected image.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateImageCrop(selectedImage.id, buildSmartImageCrop())}
+                className="rounded-lg border border-cyan-200 bg-white px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-50"
+              >
+                Reset smart crop
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <label className="space-y-1">
+                <span className="block text-xs font-medium text-slate-600">Horizontal focus</span>
+                <input
+                  type="range"
+                  min="20"
+                  max="80"
+                  value={selectedCrop.x}
+                  onChange={(event) => updateImageCrop(selectedImage.id, { x: Number(event.target.value) })}
+                  className="w-full"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-xs font-medium text-slate-600">Vertical focus</span>
+                <input
+                  type="range"
+                  min="20"
+                  max="80"
+                  value={selectedCrop.y}
+                  onChange={(event) => updateImageCrop(selectedImage.id, { y: Number(event.target.value) })}
+                  className="w-full"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-xs font-medium text-slate-600">Zoom</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="1.6"
+                  step="0.01"
+                  value={selectedCrop.zoom}
+                  onChange={(event) => updateImageCrop(selectedImage.id, { zoom: Number(event.target.value) })}
+                  className="w-full"
+                />
+              </label>
+            </div>
+          </div>
+        )}
         </div>
       )}
       </div>
@@ -572,6 +719,8 @@ const PricingTable = ({
   onPricingLabelsChange,
   monthlyPricing,
   onMonthlyPricingChange,
+  pricingSource,
+  onPricingSourceChange,
   displayPriceOverrides,
   onDisplayPriceOverridesChange,
 }) => {
@@ -579,8 +728,8 @@ const PricingTable = ({
   const normalizedPricingLabels = normalizePricingLabels(pricingLabels);
   const normalizedMonthlyPricing = normalizeMonthlyPricing(monthlyPricing);
   const normalizedDisplayPriceOverrides = normalizeDisplayPriceOverrides(displayPriceOverrides);
-  const displayPricing = getBrochureDisplayPricing({ pricing, monthlyPricing });
-  const displayPricingLabels = getBrochureDisplayPricingLabels({ pricing, monthlyPricing, pricingLabels });
+  const displayPricing = getBrochureDisplayPricing({ pricing, monthlyPricing, pricingSource });
+  const displayPricingLabels = getBrochureDisplayPricingLabels({ pricingSource, pricingLabels });
   const [draftPricing, setDraftPricing] = useState({});
   const [draftMonthlyPricing, setDraftMonthlyPricing] = useState({});
 
@@ -642,6 +791,29 @@ const PricingTable = ({
 
   return (
     <div className="space-y-5">
+      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+        <div>
+          <label className="text-sm font-semibold text-slate-700">Final brochure price source</label>
+          <p className="text-xs text-slate-500 mt-1">Choose whether the PDF and final brochure prices should follow the seasonal labels or the monthly template.</p>
+        </div>
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
+          <button
+            type="button"
+            onClick={() => onPricingSourceChange('seasonal')}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all ${pricingSource === 'seasonal' ? 'bg-cyan-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            Seasonal pricing
+          </button>
+          <button
+            type="button"
+            onClick={() => onPricingSourceChange('monthly')}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all ${pricingSource === 'monthly' ? 'bg-cyan-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            Monthly template
+          </button>
+        </div>
+      </div>
+
       <div className="space-y-3">
         <label className="text-sm font-semibold text-slate-700">Seasonal Pricing (€)</label>
         <p className="text-xs text-slate-500">The brochure preview and PDF display each price with a 5% markup. The input fields keep your base price.</p>
@@ -702,9 +874,9 @@ const PricingTable = ({
           <label className="text-sm font-semibold text-slate-700">Final Brochure Price (€)</label>
           <p className="text-xs text-slate-500 mt-1">These fields already show the original price plus 5%. Edit them only if you want to round the final brochure number manually.</p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3">
           {PRICING_PERIODS.map((period) => (
-            <div key={period.key} className="space-y-1 min-w-0">
+            <div key={period.key} className="space-y-1">
               <label className="text-xs font-medium text-slate-500 block text-center">{displayPricingLabels[period.key]}</label>
               <input
                 type="text"
@@ -712,7 +884,7 @@ const PricingTable = ({
                 value={getDisplayPriceValue(displayPricing[period.key], normalizedDisplayPriceOverrides[period.key]) || ''}
                 onChange={(e) => updateDisplayPriceOverride(period.key, e.target.value)}
                 placeholder="0"
-                className="w-full min-w-[120px] px-3 py-2 text-center text-sm font-semibold border border-cyan-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all bg-white"
+                className="w-full px-3 py-2 text-center text-sm font-semibold border border-cyan-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all bg-white"
               />
             </div>
           ))}
@@ -856,12 +1028,12 @@ const ChecklistSelector = ({ title, options, selectedValues, onToggle }) => (
 
 const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, selectedTemplate }, ref) {
   // First image is hero, next 3 are thumbnails
-  const heroImage = data.images && data.images.length > 0 ? data.images[0].src : null;
+  const heroImage = data.images && data.images.length > 0 ? data.images[0] : null;
   const thumbnailImages = data.images ? data.images.slice(1, 4) : [];
-  const firstBottomImage = data.images && data.images.length > 4 ? data.images[4].src : null;
+  const firstBottomImage = data.images && data.images.length > 4 ? data.images[4] : null;
   const secondBottomImage = data.images && data.images.length > 5
-    ? data.images[5].src
-    : (data.images && data.images.length > 3 ? data.images[3].src : null);
+    ? data.images[5]
+    : (data.images && data.images.length > 3 ? data.images[3] : null);
   const hasTwoBottomImages = Boolean(firstBottomImage && secondBottomImage);
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
@@ -902,14 +1074,9 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
             }}
           >
             <img
-              src={heroImage}
+              src={heroImage.src}
               alt="Boat"
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                objectPosition: 'center center',
-              }}
+              style={getImageRenderStyle(heroImage, 'hero')}
               crossOrigin="anonymous"
             />
           </div>
@@ -998,11 +1165,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
               <img
                 src={img.src}
                 alt={`Boat view ${idx + 2}`}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                }}
+                style={getImageRenderStyle(img, 'thumbnail')}
                 crossOrigin="anonymous"
               />
             </div>
@@ -1157,13 +1320,9 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
         >
           <div style={{ position: 'relative', flex: hasTwoBottomImages ? 1 : 2, overflow: 'hidden' }}>
             <img
-              src={firstBottomImage}
+              src={firstBottomImage.src}
               alt="Boat detail left"
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-              }}
+              style={getImageRenderStyle(firstBottomImage, 'bottom')}
               crossOrigin="anonymous"
             />
           </div>
@@ -1179,13 +1338,9 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
           {hasTwoBottomImages && (
             <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
               <img
-                src={secondBottomImage}
+                src={secondBottomImage.src}
                 alt="Boat detail right"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                }}
+                style={getImageRenderStyle(secondBottomImage, 'bottom')}
                 crossOrigin="anonymous"
               />
             </div>
@@ -1198,30 +1353,17 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
 
 const PortBaseSignature = ({ textColor }) => (
   <>
-    <h3
+    <p
       style={{
         margin: 0,
-        fontSize: '20px',
-        lineHeight: 1,
+        fontSize: '15px',
         color: textColor,
-        fontWeight: 600,
+        opacity: 0.82,
+        fontWeight: 500,
         letterSpacing: '0.2px',
       }}
     >
-      <span style={{ color: '#e9f1fb' }}>Port</span>
-      <span style={{ color: '#27c2f3' }}>Base</span>
-    </h3>
-    <p
-      style={{
-        margin: '5px 0 0',
-        fontSize: '10px',
-        color: textColor,
-        opacity: 0.82,
-        fontWeight: 400,
-        letterSpacing: '0.1px',
-      }}
-    >
-      The <span style={{ color: '#27c2f3', textDecoration: 'underline' }}>Trusted</span> Booking Network for Yacht Professionals
+      Powered by <span style={{ color: '#27c2f3' }}>PortBase</span>
     </p>
   </>
 );
@@ -1229,7 +1371,7 @@ const PortBaseSignature = ({ textColor }) => (
 const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, selectedTemplate }, ref) {
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
-  const showcaseImage = data.images && data.images.length > 6 ? data.images[6].src : null;
+  const showcaseImage = data.images && data.images.length > 6 ? data.images[6] : null;
   const includedItems = (data.includedItems && data.includedItems.length ? data.includedItems : DEFAULT_INCLUDED_ITEMS).slice(0, 8);
   const notIncludedItems = (data.notIncludedItems && data.notIncludedItems.length ? data.notIncludedItems : DEFAULT_NOT_INCLUDED_ITEMS).slice(0, 8);
   const checklistRowStyle = {
@@ -1331,7 +1473,7 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
         }}
       >
         {showcaseImage ? (
-          <img src={showcaseImage} alt="Boat detail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} crossOrigin="anonymous" />
+          <img src={showcaseImage.src} alt="Boat detail" style={getImageRenderStyle(showcaseImage, 'showcase')} crossOrigin="anonymous" />
         ) : (
           <div
             style={{
@@ -1507,7 +1649,7 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, 
               boxShadow: '0 12px 34px rgba(0,0,0,0.28)',
             }}
           >
-            <img src={img.src} alt={`Gallery image ${idx + 8}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} crossOrigin="anonymous" />
+            <img src={img.src} alt={`Gallery image ${idx + 8}`} style={getImageRenderStyle(img, 'gallery')} crossOrigin="anonymous" />
           </div>
         ))}
       </div>
@@ -1784,6 +1926,7 @@ const BoatBrochureBuilder = () => {
       pricing: normalizePricing(template.pricing),
       pricingLabels: normalizePricingLabels(template.pricingLabels),
       monthlyPricing: normalizeMonthlyPricing(template.monthlyPricing || template.pricing),
+      pricingSource: normalizePricingSource(template.pricingSource),
       displayPriceOverrides: normalizeDisplayPriceOverrides(template.displayPriceOverrides),
     });
     setSelectedTemplate(template.template || 'luxury');
@@ -2037,6 +2180,8 @@ const BoatBrochureBuilder = () => {
                   onPricingLabelsChange={(labels) => updateFormData('pricingLabels', labels)}
                   monthlyPricing={formData.monthlyPricing}
                   onMonthlyPricingChange={(p) => updateFormData('monthlyPricing', p)}
+                  pricingSource={formData.pricingSource}
+                  onPricingSourceChange={(source) => updateFormData('pricingSource', source)}
                   displayPriceOverrides={formData.displayPriceOverrides}
                   onDisplayPriceOverridesChange={(overrides) => updateFormData('displayPriceOverrides', overrides)}
                 />
