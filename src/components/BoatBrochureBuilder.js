@@ -90,7 +90,7 @@ const DEFAULT_INCLUDED_ITEMS = ['Captain', 'Soft drinks', 'Ice', 'Snorkel gear',
 const DEFAULT_NOT_INCLUDED_ITEMS = ['Fuel', 'Seabob', 'Overnight stay', 'Transfer service'];
 const DEFAULT_AMENITIES = ['Bedroom Cabin', 'Bathroom', 'Wi-Fi', 'Bluetooth Audio', 'Sunbed', 'Fridge', 'Deck Shower', 'Swim Ladder'];
 const EXTRA_GALLERY_PAGE_SIZE = 6;
-const MAX_BROCHURE_IMAGES = 10;
+const MAX_BROCHURE_IMAGES = 9;
 const BROCHURE_COLLECTION = 'boatBrochureTemplates';
 const PRICE_MARKUP_RATE = 0.05;
 
@@ -247,22 +247,30 @@ const buildSmartImageCrop = ({ width = 0, height = 0 } = {}) => {
 
 const getImageRenderStyle = (image = {}, variant = 'default') => {
   const crop = normalizeImageCrop(image.crop);
+  const width = Number(image.width) || 0;
+  const height = Number(image.height) || 0;
+  const aspectRatio = width > 0 && height > 0 ? width / height : null;
   const variantZoom = {
     hero: 1,
-    thumbnail: 1.08,
-    bottom: 1.04,
-    showcase: 1.04,
-    gallery: 1.02,
+    thumbnail: 1.03,
+    bottom: 1.02,
+    showcase: 1,
+    gallery: 1,
     editor: 1,
     default: 1,
   };
+  const useContainForAdaptiveSlots = (
+    (variant === 'showcase' || variant === 'gallery') &&
+    aspectRatio &&
+    (aspectRatio >= 1.95 || aspectRatio <= 0.95)
+  );
 
   return {
     width: '100%',
     height: '100%',
-    objectFit: 'cover',
+    objectFit: useContainForAdaptiveSlots ? 'contain' : 'cover',
     objectPosition: `${crop.x}% ${crop.y}%`,
-    transform: `scale(${(crop.zoom || 1) * (variantZoom[variant] || 1)})`,
+    transform: `scale(${useContainForAdaptiveSlots ? 1 : (crop.zoom || 1) * (variantZoom[variant] || 1)})`,
     transformOrigin: `${crop.x}% ${crop.y}%`,
   };
 };
@@ -278,6 +286,8 @@ const normalizeSavedImages = (images = []) => (
             src: image,
             name: `Image ${index + 1}`,
             storagePath: null,
+            width: null,
+            height: null,
             crop: normalizeImageCrop(),
           };
         }
@@ -290,6 +300,8 @@ const normalizeSavedImages = (images = []) => (
           src,
           name: image.name || `Image ${index + 1}`,
           storagePath: image.storagePath || null,
+          width: Number(firstDefinedValue(image.width, image.naturalWidth, null)) || null,
+          height: Number(firstDefinedValue(image.height, image.naturalHeight, null)) || null,
           crop: normalizeImageCrop(image.crop || image),
         };
       })
@@ -346,12 +358,17 @@ const applyPriceMarkup = (value) => {
   return formatDisplayPrice(adjustedValue);
 };
 
-const getDisplayPriceValue = (baseValue, overrideValue) => {
-  if (overrideValue !== '' && overrideValue !== null && overrideValue !== undefined) {
-    return formatDisplayPrice(overrideValue);
+const getDisplayPriceValue = (baseValue, overrideValue, extraCharge = 0) => {
+  const baseDisplayValue = overrideValue !== '' && overrideValue !== null && overrideValue !== undefined
+    ? formatDisplayPrice(overrideValue)
+    : applyPriceMarkup(baseValue);
+
+  if (baseDisplayValue === '') {
+    return '';
   }
 
-  return applyPriceMarkup(baseValue);
+  const adjustedValue = Number(baseDisplayValue) + (Number(extraCharge) || 0);
+  return formatDisplayPrice(adjustedValue);
 };
 
 const deleteStoredImages = async (images = []) => {
@@ -376,6 +393,8 @@ const uploadBrochureImages = async (brochureId, images, previousImages = []) => 
         src: image.src,
         name: image.name || `Image ${index + 1}`,
         storagePath: image.storagePath,
+        width: Number(image.width) || null,
+        height: Number(image.height) || null,
         crop: normalizeImageCrop(image.crop || image),
       };
     }
@@ -393,6 +412,8 @@ const uploadBrochureImages = async (brochureId, images, previousImages = []) => 
       src: downloadURL,
       name: image.name || `Image ${index + 1}`,
       storagePath,
+      width: Number(image.width) || null,
+      height: Number(image.height) || null,
       crop: normalizeImageCrop(image.crop || image),
     };
   }));
@@ -443,6 +464,8 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
           id: Date.now() + Math.random(),
           src,
           name: file.name,
+          width: image.naturalWidth,
+          height: image.naturalHeight,
           crop: buildSmartImageCrop({ width: image.naturalWidth, height: image.naturalHeight }),
         });
         image.onerror = () => reject(new Error(`Failed to process ${file.name}`));
@@ -633,7 +656,10 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
                     <GripVertical size={14} className="text-slate-400" />
                     <button
                       type="button"
-                      onClick={() => setMainImage(img.id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setMainImage(img.id);
+                      }}
                       className="text-[11px] font-semibold text-cyan-700 hover:text-cyan-800"
                     >
                       {idx === 0 ? 'HERO' : 'Set Main'}
@@ -641,10 +667,14 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
                   </div>
                   <button
                     type="button"
-                    onClick={() => removeImage(img.id)}
-                    className="text-slate-500 hover:text-red-600"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      removeImage(img.id);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-red-600 hover:bg-red-50"
                   >
                     <Trash2 size={14} />
+                    Delete
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400">Drag to reorder</p>
@@ -661,10 +691,23 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
               </div>
               <button
                 type="button"
-                onClick={() => updateImageCrop(selectedImage.id, buildSmartImageCrop())}
+                onClick={() => updateImageCrop(selectedImage.id, buildSmartImageCrop({
+                  width: selectedImage.width,
+                  height: selectedImage.height,
+                }))}
                 className="rounded-lg border border-cyan-200 bg-white px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-50"
               >
                 Reset smart crop
+              </button>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => removeImage(selectedImage.id)}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+              >
+                <Trash2 size={14} />
+                Delete selected image
               </button>
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1040,6 +1083,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
   const displayPricing = getBrochureDisplayPricing(data);
   const displayPricingLabels = getBrochureDisplayPricingLabels(data);
   const displayPriceOverrides = normalizeDisplayPriceOverrides(data.displayPriceOverrides);
+  const hotelPriceAdjustment = Number(data.hotelPriceAdjustment) || 0;
 
   return (
     <div
@@ -1268,7 +1312,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {getDisplayPriceValue(displayPricing[period.key], displayPriceOverrides[period.key]) || '—'}€
+              {getDisplayPriceValue(displayPricing[period.key], displayPriceOverrides[period.key], hotelPriceAdjustment) || '—'}€
             </div>
           </div>
         ))}
@@ -1368,7 +1412,7 @@ const PortBaseSignature = ({ textColor }) => (
   </>
 );
 
-const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, selectedTemplate }, ref) {
+const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, selectedTemplate, amenities = [] }, ref) {
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
   const showcaseImage = data.images && data.images.length > 6 ? data.images[6] : null;
@@ -1404,16 +1448,27 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
     opacity: 0.9,
   };
   const maxChecklistItems = Math.max(includedItems.length, notIncludedItems.length);
-  const showcaseTop = 100;
-  const showcaseGap = 28;
+  const showcaseTop = 48;
+  const showcaseGap = 24;
   const showcaseHeight = maxChecklistItems <= 4
-    ? 700
+    ? 610
     : maxChecklistItems <= 6
-      ? 670
+      ? 585
       : maxChecklistItems <= 8
-        ? 640
-        : 620;
+        ? 560
+        : 540;
   const checklistTop = showcaseTop + showcaseHeight + showcaseGap;
+  const checklistRows = Math.max(
+    1,
+    Math.ceil(includedItems.length / 2),
+    Math.ceil(notIncludedItems.length / 2)
+  );
+  const checklistBoxHeight = 78 + checklistRows * 46;
+  const checklistHeight = checklistBoxHeight;
+  const amenitiesRows = Math.max(1, Math.ceil(amenities.length / 3));
+  const hasAmenities = amenities.length > 0;
+  const amenitiesTop = checklistTop + checklistHeight + 20;
+  const amenitiesHeight = hasAmenities ? Math.min(160, 78 + amenitiesRows * 34) : 0;
 
   return (
     <div
@@ -1436,26 +1491,6 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
           zIndex: 1,
         }}
       />
-
-      <div
-        style={{
-          position: 'absolute',
-          top: '42px',
-          left: '56px',
-          right: '56px',
-          zIndex: 3,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <h2 style={{ margin: 0, color: primaryText, fontSize: '26px', fontWeight: 500, letterSpacing: '1px', textTransform: 'uppercase' }}>
-          {data.boatName || 'Boat Name'}
-        </h2>
-        <p style={{ margin: 0, color: hexToRgba(primaryText, 0.72), fontWeight: 400, letterSpacing: '3px', fontSize: '12px' }}>
-          GALLERY VIEW
-        </p>
-      </div>
 
       <div
         style={{
@@ -1496,16 +1531,16 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
           top: `${checklistTop}px`,
           left: '56px',
           right: '56px',
-          bottom: '170px',
+          height: `${checklistHeight}px`,
           zIndex: 4,
           display: 'grid',
           gridTemplateColumns: '1fr 1fr',
           gap: '14px',
         }}
       >
-        <div style={{ border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '22px 24px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <p style={{ margin: 0, marginBottom: '14px', color: primaryText, fontSize: '34px', fontWeight: 700, letterSpacing: '0.6px' }}>Included</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 20px', alignContent: 'start', flex: 1 }}>
+        <div style={{ height: `${checklistBoxHeight}px`, border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '20px 22px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <p style={{ margin: 0, marginBottom: '12px', color: primaryText, fontSize: '30px', fontWeight: 700, letterSpacing: '0.5px' }}>Included</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 18px', alignContent: 'start', flex: '0 0 auto' }}>
             {includedItems.map((item) => (
               <div key={`in-${item}`} style={checklistRowStyle}>
                 <span style={checkMarkStyle}>✓</span>
@@ -1515,9 +1550,9 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
           </div>
         </div>
 
-        <div style={{ border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '22px 24px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <p style={{ margin: 0, marginBottom: '14px', color: primaryText, fontSize: '34px', fontWeight: 700, letterSpacing: '0.6px' }}>Not Included</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 20px', alignContent: 'start', flex: 1 }}>
+        <div style={{ height: `${checklistBoxHeight}px`, border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '20px 22px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <p style={{ margin: 0, marginBottom: '12px', color: primaryText, fontSize: '30px', fontWeight: 700, letterSpacing: '0.5px' }}>Not Included</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 18px', alignContent: 'start', flex: '0 0 auto' }}>
             {notIncludedItems.map((item) => (
               <div key={`out-${item}`} style={checklistRowStyle}>
                 <span style={xMarkStyle}>×</span>
@@ -1527,6 +1562,46 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
           </div>
         </div>
       </div>
+
+      {hasAmenities && (
+        <div
+          style={{
+            position: 'absolute',
+            top: `${amenitiesTop}px`,
+            left: '56px',
+            right: '56px',
+            height: `${amenitiesHeight}px`,
+            zIndex: 4,
+            borderRadius: '18px',
+            border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`,
+            background: hexToRgba(templateStyle.footerBg, 0.52),
+            padding: '18px 22px',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ marginBottom: '12px' }}>
+            <p style={{ margin: 0, color: primaryText, fontWeight: 700, letterSpacing: '0.8px', fontSize: '18px', textTransform: 'uppercase' }}>Amenities</p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px 18px', alignContent: 'start' }}>
+            {amenities.map((item) => (
+              <div
+                key={`page-two-amenity-${item}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  color: primaryText,
+                  fontSize: '20px',
+                  lineHeight: 1.15,
+                }}
+              >
+                <span style={{ display: 'inline-flex', width: '16px', justifyContent: 'center', flexShrink: 0 }}>✓</span>
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
     </div>
   );
@@ -1775,6 +1850,9 @@ const BoatBrochureBuilder = () => {
   const pageOneRef = useRef(null);
   const pageTwoRef = useRef(null);
   const pageThreeRefs = useRef([]);
+  const hotelPageOneRef = useRef(null);
+  const hotelPageTwoRef = useRef(null);
+  const hotelPageThreeRefs = useRef([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState([]);
@@ -1803,6 +1881,10 @@ const BoatBrochureBuilder = () => {
   const brochureAmenities = getBrochureAmenities(formData);
   const extraGalleryPages = (() => {
     const remainingImages = formData.images.slice(7);
+    if (hasSecondPage) {
+      if (!remainingImages.length) return [];
+      return chunkImages(remainingImages, EXTRA_GALLERY_PAGE_SIZE).map((images) => ({ images, amenities: [] }));
+    }
     if (!remainingImages.length && !brochureAmenities.length) return [];
     if (!brochureAmenities.length) {
       return chunkImages(remainingImages, EXTRA_GALLERY_PAGE_SIZE).map((images) => ({ images, amenities: [] }));
@@ -1813,6 +1895,10 @@ const BoatBrochureBuilder = () => {
     return [{ images: firstPageImages, amenities: brochureAmenities }, ...otherPages];
   })();
   const totalPages = 1 + (hasSecondPage ? 1 : 0) + extraGalleryPages.length;
+  const hotelFormData = {
+    ...formData,
+    hotelPriceAdjustment: 200,
+  };
 
   // Load saved templates
   useEffect(() => {
@@ -2003,29 +2089,50 @@ const BoatBrochureBuilder = () => {
     }
   };
 
-  // Generate as PNG image (better for WhatsApp/social sharing)
-  const generateImage = async () => {
-    if (!pageOneRef.current) return;
+  const generateHotelPDF = async () => {
+    if (!hotelPageOneRef.current) return;
 
     setIsGenerating(true);
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
 
-      const canvas = await html2canvas(pageOneRef.current, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff',
-        logging: false,
+      const renderToImageData = async (node) => {
+        const canvas = await html2canvas(node, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+        });
+        return canvas.toDataURL('image/jpeg', 0.95);
+      };
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: [285, 357],
       });
 
-      const link = document.createElement('a');
-      link.download = `${formData.boatName || 'boat'}-brochure.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
+      const pageOneImage = await renderToImageData(hotelPageOneRef.current);
+      pdf.addImage(pageOneImage, 'JPEG', 0, 0, 285, 357);
+
+      if (hasSecondPage && hotelPageTwoRef.current) {
+        const pageTwoImage = await renderToImageData(hotelPageTwoRef.current);
+        pdf.addPage([285, 357], 'portrait');
+        pdf.addImage(pageTwoImage, 'JPEG', 0, 0, 285, 357);
+      }
+
+      for (const pageThreeRef of hotelPageThreeRefs.current.slice(0, extraGalleryPages.length)) {
+        if (!pageThreeRef) continue;
+        const pageThreeImage = await renderToImageData(pageThreeRef);
+        pdf.addPage([285, 357], 'portrait');
+        pdf.addImage(pageThreeImage, 'JPEG', 0, 0, 285, 357);
+      }
+
+      pdf.save(`${formData.boatName || 'boat'}-hotel-brochure.pdf`);
     } catch (err) {
-      console.error('Error generating image:', err);
-      alert('Failed to generate image. Please try again.');
+      console.error('Error generating hotel PDF:', err);
+      alert('Failed to generate hotel PDF. Please try again.');
     } finally {
       setIsGenerating(false);
     }
@@ -2319,7 +2426,7 @@ const BoatBrochureBuilder = () => {
             )}
             <div className="flex gap-3">
               <button
-                onClick={generateImage}
+                onClick={generateHotelPDF}
                 disabled={isGenerating}
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-violet-500 to-purple-500 text-white font-semibold rounded-xl hover:from-violet-600 hover:to-purple-600 shadow-lg shadow-violet-500/25 transition-all disabled:opacity-50"
               >
@@ -2330,8 +2437,8 @@ const BoatBrochureBuilder = () => {
                   </>
                 ) : (
                   <>
-                    <ImageIcon size={18} />
-                    Download PNG
+                    <Download size={18} />
+                    Download Hotel
                   </>
                 )}
               </button>
@@ -2353,9 +2460,6 @@ const BoatBrochureBuilder = () => {
                 )}
               </button>
             </div>
-            <p className="text-xs text-slate-500 text-center">
-              💡 PNG is best for WhatsApp & social media sharing
-            </p>
           </div>
 
           {/* Preview Container */}
@@ -2382,7 +2486,7 @@ const BoatBrochureBuilder = () => {
                     }}
                   >
                     <div style={{ transform: 'scale(0.333)', transformOrigin: 'top left', width: '1080px', height: '1350px' }}>
-                      <BrochurePageTwo data={formData} selectedTemplate={selectedTemplate} />
+                      <BrochurePageTwo data={formData} amenities={brochureAmenities} selectedTemplate={selectedTemplate} />
                     </div>
                   </div>
                 )}
@@ -2423,12 +2527,37 @@ const BoatBrochureBuilder = () => {
             }}
           >
             <BrochurePageOne ref={pageOneRef} data={formData} selectedTemplate={selectedTemplate} />
-            {hasSecondPage && <BrochurePageTwo ref={pageTwoRef} data={formData} selectedTemplate={selectedTemplate} />}
+            {hasSecondPage && <BrochurePageTwo ref={pageTwoRef} data={formData} amenities={brochureAmenities} selectedTemplate={selectedTemplate} />}
             {extraGalleryPages.map((page, index) => (
               <BrochurePageThree
                 key={`extra-gallery-${index}`}
                 ref={(element) => {
                   pageThreeRefs.current[index] = element;
+                }}
+                images={page.images}
+                amenities={page.amenities}
+                pageIndex={index}
+                totalPages={extraGalleryPages.length}
+                selectedTemplate={selectedTemplate}
+              />
+            ))}
+          </div>
+
+          <div
+            style={{
+              position: 'absolute',
+              left: '-9999px',
+              top: 0,
+              pointerEvents: 'none',
+            }}
+          >
+            <BrochurePageOne ref={hotelPageOneRef} data={hotelFormData} selectedTemplate={selectedTemplate} />
+            {hasSecondPage && <BrochurePageTwo ref={hotelPageTwoRef} data={hotelFormData} amenities={brochureAmenities} selectedTemplate={selectedTemplate} />}
+            {extraGalleryPages.map((page, index) => (
+              <BrochurePageThree
+                key={`hotel-extra-gallery-${index}`}
+                ref={(element) => {
+                  hotelPageThreeRefs.current[index] = element;
                 }}
                 images={page.images}
                 amenities={page.amenities}
