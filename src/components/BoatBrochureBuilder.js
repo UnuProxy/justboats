@@ -275,6 +275,12 @@ const getImageRenderStyle = (image = {}, variant = 'default') => {
   };
 };
 
+const getImageSrc = (image) => {
+  if (!image) return '';
+  if (typeof image === 'string') return image;
+  return image.src || image.url || image.downloadURL || '';
+};
+
 const normalizeSavedImages = (images = []) => (
   Array.isArray(images)
     ? images
@@ -1118,10 +1124,9 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
             }}
           >
             <img
-              src={heroImage.src}
+              src={getImageSrc(heroImage)}
               alt="Boat"
               style={getImageRenderStyle(heroImage, 'hero')}
-              crossOrigin="anonymous"
             />
           </div>
         ) : (
@@ -1207,10 +1212,9 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
               }}
             >
               <img
-                src={img.src}
+                src={getImageSrc(img)}
                 alt={`Boat view ${idx + 2}`}
                 style={getImageRenderStyle(img, 'thumbnail')}
-                crossOrigin="anonymous"
               />
             </div>
           ))
@@ -1364,10 +1368,9 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
         >
           <div style={{ position: 'relative', flex: hasTwoBottomImages ? 1 : 2, overflow: 'hidden' }}>
             <img
-              src={firstBottomImage.src}
+              src={getImageSrc(firstBottomImage)}
               alt="Boat detail left"
               style={getImageRenderStyle(firstBottomImage, 'bottom')}
-              crossOrigin="anonymous"
             />
           </div>
           {hasTwoBottomImages && (
@@ -1382,10 +1385,9 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
           {hasTwoBottomImages && (
             <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
               <img
-                src={secondBottomImage.src}
+                src={getImageSrc(secondBottomImage)}
                 alt="Boat detail right"
                 style={getImageRenderStyle(secondBottomImage, 'bottom')}
-                crossOrigin="anonymous"
               />
             </div>
           )}
@@ -1508,7 +1510,7 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
         }}
       >
         {showcaseImage ? (
-          <img src={showcaseImage.src} alt="Boat detail" style={getImageRenderStyle(showcaseImage, 'showcase')} crossOrigin="anonymous" />
+          <img src={getImageSrc(showcaseImage)} alt="Boat detail" style={getImageRenderStyle(showcaseImage, 'showcase')} />
         ) : (
           <div
             style={{
@@ -1724,7 +1726,7 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, 
               boxShadow: '0 12px 34px rgba(0,0,0,0.28)',
             }}
           >
-            <img src={img.src} alt={`Gallery image ${idx + 8}`} style={getImageRenderStyle(img, 'gallery')} crossOrigin="anonymous" />
+            <img src={getImageSrc(img)} alt={`Gallery image ${idx + 8}`} style={getImageRenderStyle(img, 'gallery')} />
           </div>
         ))}
       </div>
@@ -1779,15 +1781,22 @@ const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading, activeTem
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {templates.map((tmpl) => (
-        <button
+        <div
           key={tmpl.id}
-          type="button"
+          role="button"
+          tabIndex={0}
           onClick={() => onLoad(tmpl)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onLoad(tmpl);
+            }
+          }}
           className={`group p-4 bg-white border rounded-xl transition-all ${
             tmpl.id === activeTemplateId
               ? 'border-cyan-400 shadow-md ring-2 ring-cyan-100'
               : 'border-slate-200 hover:border-cyan-300 hover:shadow-md'
-          } text-left`}
+          } text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-200`}
         >
           <div className="flex items-start justify-between mb-2">
             <div>
@@ -1836,7 +1845,7 @@ const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading, activeTem
           <p className="mt-3 text-xs font-medium text-cyan-700">
             {tmpl.id === activeTemplateId ? 'Currently open in editor' : 'Tap to edit this brochure'}
           </p>
-        </button>
+        </div>
       ))}
     </div>
   );
