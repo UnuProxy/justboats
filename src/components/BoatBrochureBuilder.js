@@ -2161,18 +2161,18 @@ const BoatBrochureBuilder = () => {
         format: [285, 357], // Custom size matching 4:5 aspect ratio
       });
 
-      const pageOneImage = await renderToImageData(pageOneRef.current);
+      const pageOneImage = await renderNodeToImageData(pageOneRef.current);
       pdf.addImage(pageOneImage, 'JPEG', 0, 0, 285, 357);
 
       if (hasSecondPage && pageTwoRef.current) {
-        const pageTwoImage = await renderToImageData(pageTwoRef.current);
+        const pageTwoImage = await renderNodeToImageData(pageTwoRef.current);
         pdf.addPage([285, 357], 'portrait');
         pdf.addImage(pageTwoImage, 'JPEG', 0, 0, 285, 357);
       }
 
       for (const pageThreeRef of pageThreeRefs.current.slice(0, extraGalleryPages.length)) {
         if (!pageThreeRef) continue;
-        const pageThreeImage = await renderToImageData(pageThreeRef);
+        const pageThreeImage = await renderNodeToImageData(pageThreeRef);
         pdf.addPage([285, 357], 'portrait');
         pdf.addImage(pageThreeImage, 'JPEG', 0, 0, 285, 357);
       }
@@ -2199,18 +2199,18 @@ const BoatBrochureBuilder = () => {
         format: [285, 357],
       });
 
-      const pageOneImage = await renderToImageData(hotelPageOneRef.current);
+      const pageOneImage = await renderNodeToImageData(hotelPageOneRef.current);
       pdf.addImage(pageOneImage, 'JPEG', 0, 0, 285, 357);
 
       if (hasSecondPage && hotelPageTwoRef.current) {
-        const pageTwoImage = await renderToImageData(hotelPageTwoRef.current);
+        const pageTwoImage = await renderNodeToImageData(hotelPageTwoRef.current);
         pdf.addPage([285, 357], 'portrait');
         pdf.addImage(pageTwoImage, 'JPEG', 0, 0, 285, 357);
       }
 
       for (const pageThreeRef of hotelPageThreeRefs.current.slice(0, extraGalleryPages.length)) {
         if (!pageThreeRef) continue;
-        const pageThreeImage = await renderToImageData(pageThreeRef);
+        const pageThreeImage = await renderNodeToImageData(pageThreeRef);
         pdf.addPage([285, 357], 'portrait');
         pdf.addImage(pageThreeImage, 'JPEG', 0, 0, 285, 357);
       }
