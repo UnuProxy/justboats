@@ -93,6 +93,10 @@ const EXTRA_GALLERY_PAGE_SIZE = 6;
 const MAX_BROCHURE_IMAGES = 9;
 const BROCHURE_COLLECTION = 'boatBrochureTemplates';
 const PRICE_MARKUP_RATE = 0.05;
+const DEFAULT_BROCHURE_IMAGE_PROXY_URL = process.env.NODE_ENV === 'development'
+  ? (process.env.REACT_APP_BROCHURE_IMAGE_PROXY_URL || 'https://www.nautiqibiza-booking.com/api/brochure-image-proxy')
+  : '/api/brochure-image-proxy';
+const BROCHURE_IMAGE_PROXY_URL = process.env.REACT_APP_BROCHURE_IMAGE_PROXY_URL || DEFAULT_BROCHURE_IMAGE_PROXY_URL;
 
 const hexToRgba = (hex, alpha = 1) => {
   if (!hex || typeof hex !== 'string' || !hex.startsWith('#')) return `rgba(255,255,255,${alpha})`;
@@ -281,6 +285,98 @@ const getImageSrc = (image) => {
   return image.src || image.url || image.downloadURL || '';
 };
 
+const getStoragePathFromUrl = (src = '') => {
+  try {
+    const url = new URL(src);
+    if (url.hostname !== 'firebasestorage.googleapis.com') {
+      return null;
+    }
+
+    const match = url.pathname.match(/\/v0\/b\/[^/]+\/o\/(.+)$/);
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch (error) {
+    return null;
+  }
+};
+
+const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onloadend = () => resolve(reader.result);
+  reader.onerror = () => reject(new Error('Failed to read image blob.'));
+  reader.readAsDataURL(blob);
+});
+
+const waitForImageElement = (image) => new Promise((resolve) => {
+  if (image.complete) {
+    resolve();
+    return;
+  }
+
+  const finish = () => resolve();
+  image.addEventListener('load', finish, { once: true });
+  image.addEventListener('error', finish, { once: true });
+});
+
+const getPdfSafeImageSrc = async (src = '') => {
+  if (!src || src.startsWith('data:') || src.startsWith('blob:') || src.startsWith('/')) {
+    return src;
+  }
+
+  if (typeof window !== 'undefined' && src.startsWith(window.location.origin)) {
+    return src;
+  }
+
+  const response = await fetch(`${BROCHURE_IMAGE_PROXY_URL}?url=${encodeURIComponent(src)}`);
+  if (!response.ok) {
+    throw new Error(`Image proxy request failed with status ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  return blobToDataUrl(blob);
+};
+
+const renderNodeToImageData = async (node) => {
+  const clone = node.cloneNode(true);
+  clone.style.position = 'fixed';
+  clone.style.left = '-20000px';
+  clone.style.top = '0';
+  clone.style.zIndex = '-1';
+  clone.style.pointerEvents = 'none';
+  clone.style.margin = '0';
+  document.body.appendChild(clone);
+
+  try {
+    const images = Array.from(clone.querySelectorAll('img'));
+    await Promise.all(images.map(async (image) => {
+      const originalSrc = image.getAttribute('src') || image.src || '';
+      if (!originalSrc) return;
+
+      try {
+        const safeSrc = await getPdfSafeImageSrc(originalSrc);
+        if (safeSrc) {
+          image.src = safeSrc;
+        }
+      } catch (error) {
+        console.warn('Unable to prepare brochure image for PDF capture:', originalSrc, error);
+      }
+    }));
+
+    await Promise.all(images.map(waitForImageElement));
+
+    const canvas = await html2canvas(clone, {
+      scale: 2,
+      useCORS: false,
+      allowTaint: false,
+      backgroundColor: '#ffffff',
+      logging: false,
+    });
+
+    return canvas.toDataURL('image/jpeg', 0.95);
+  } finally {
+    clone.remove();
+  }
+};
+
 const normalizeSavedImages = (images = []) => (
   Array.isArray(images)
     ? images
@@ -305,7 +401,7 @@ const normalizeSavedImages = (images = []) => (
           id: createStoredImageId(image.id || image.storagePath || src, index),
           src,
           name: image.name || `Image ${index + 1}`,
-          storagePath: image.storagePath || null,
+          storagePath: image.storagePath || getStoragePathFromUrl(src) || null,
           width: Number(firstDefinedValue(image.width, image.naturalWidth, null)) || null,
           height: Number(firstDefinedValue(image.height, image.naturalHeight, null)) || null,
           crop: normalizeImageCrop(image.crop || image),
@@ -393,19 +489,22 @@ const deleteStoredImages = async (images = []) => {
 
 const uploadBrochureImages = async (brochureId, images, previousImages = []) => {
   const uploadedImages = await Promise.all(images.map(async (image, index) => {
-    if (image.storagePath && /^https?:/i.test(image.src || '')) {
+    const src = getImageSrc(image);
+    const existingStoragePath = image.storagePath || getStoragePathFromUrl(src);
+
+    if (existingStoragePath && /^https?:/i.test(src)) {
       return {
-        id: image.id || image.storagePath,
-        src: image.src,
+        id: image.id || existingStoragePath,
+        src,
         name: image.name || `Image ${index + 1}`,
-        storagePath: image.storagePath,
+        storagePath: existingStoragePath,
         width: Number(image.width) || null,
         height: Number(image.height) || null,
         crop: normalizeImageCrop(image.crop || image),
       };
     }
 
-    const imageBlob = await fetch(image.src).then((response) => response.blob());
+    const imageBlob = await fetch(src).then((response) => response.blob());
     const fileName = sanitizeFileName(image.name || `image-${index + 1}.jpg`);
     const storagePath = `boatBrochureTemplates/${brochureId}/${Date.now()}-${index}-${fileName}`;
     const storageRef = ref(storage, storagePath);
@@ -2054,17 +2153,6 @@ const BoatBrochureBuilder = () => {
       // Wait for images to fully load
       await new Promise((resolve) => setTimeout(resolve, 500));
 
-      const renderToImageData = async (node) => {
-        const canvas = await html2canvas(node, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#ffffff',
-          logging: false,
-        });
-        return canvas.toDataURL('image/jpeg', 0.95);
-      };
-
       // Custom dimensions for mobile-friendly format (1080x1350 = 4:5 ratio)
       // Converting to mm: 1080px = ~285mm at 96dpi, 1350px = ~357mm
       const pdf = new jsPDF({
@@ -2104,17 +2192,6 @@ const BoatBrochureBuilder = () => {
     setIsGenerating(true);
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
-
-      const renderToImageData = async (node) => {
-        const canvas = await html2canvas(node, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#ffffff',
-          logging: false,
-        });
-        return canvas.toDataURL('image/jpeg', 0.95);
-      };
 
       const pdf = new jsPDF({
         orientation: 'portrait',
