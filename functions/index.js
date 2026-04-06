@@ -144,6 +144,49 @@ function handleCors(req, res) {
   return false;
 }
 
+function hasPaymentLinkSyncAccess(req) {
+  const expectedSecret = String(
+    process.env.PAYMENT_LINK_SYNC_SECRET ||
+    process.env.PAYMENT_LINK_PROVIDER_API_KEY ||
+    ''
+  ).trim();
+
+  if (!expectedSecret) {
+    return false;
+  }
+
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ') && authHeader.substring(7).trim() === expectedSecret) {
+    return true;
+  }
+
+  const headerCandidates = [
+    req.headers['x-api-key'],
+    req.headers['x-sync-secret'],
+    req.headers['x-provider-token']
+  ]
+    .flat()
+    .filter(Boolean)
+    .map((value) => String(value).trim());
+
+  if (headerCandidates.includes(expectedSecret)) {
+    return true;
+  }
+
+  const bodyToken = req.body && typeof req.body === 'object'
+    ? String(
+        req.body.statusCallbackAuthToken ||
+        req.body.authToken ||
+        req.body.syncSecret ||
+        req.body.token ||
+        req.body.apiKey ||
+        ''
+      ).trim()
+    : '';
+
+  return Boolean(bodyToken && bodyToken === expectedSecret);
+}
+
 function mapHttpsErrorToStatus(error) {
   if (error instanceof HttpsError) {
     const statusMap = {
@@ -793,9 +836,11 @@ exports.refreshPaymentLinkStatusHttp = onRequest({
     return;
   }
 
-  const authContext = await authenticateHttpRequest(req, res, ['admin', 'staff']);
-  if (!authContext) {
-    return;
+  if (!hasPaymentLinkSyncAccess(req)) {
+    const authContext = await authenticateHttpRequest(req, res, ['admin', 'staff']);
+    if (!authContext) {
+      return;
+    }
   }
 
   const { paymentLinkId } = req.body || {};
