@@ -342,6 +342,26 @@ async function fetchLatestStripePaymentStatusForLink(stripeLinkId) {
   return { paymentStatus, session, sessionsFound };
 }
 
+function resolvePaymentLinkExpiry(data = {}) {
+  const rawValue = data.expiresAt;
+  if (!rawValue) return null;
+
+  if (typeof rawValue.toDate === 'function') {
+    return rawValue.toDate();
+  }
+
+  if (rawValue instanceof Date) {
+    return rawValue;
+  }
+
+  if (typeof rawValue === 'string') {
+    const parsed = new Date(rawValue);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  return null;
+}
+
 // Email sending function
 async function sendEmailDirectApi(emailData) {
   const apiKey = getApiKey();
@@ -411,7 +431,9 @@ async function createStripePaymentLinkInternal(data, authContext) {
     notes,
     sourceApp,
     statusCallbackUrl,
-    statusCallbackAuthToken
+    statusCallbackAuthToken,
+    expireInHours,
+    expiresAt
   } = data || {};
 
   const numericAmount = Number(amount);
@@ -426,6 +448,16 @@ async function createStripePaymentLinkInternal(data, authContext) {
   }
 
   const resolvedSourceApp = String(sourceApp || 'nautiq-app').trim();
+  const validatedExpireInHours = expireInHours === 24 || expireInHours === 48 ? expireInHours : null;
+  if (expireInHours != null && validatedExpireInHours == null) {
+    throw new HttpsError('invalid-argument', 'Expiration must be 24 or 48 hours.');
+  }
+  const requestedExpiresAt = typeof expiresAt === 'string' && expiresAt.trim()
+    ? new Date(expiresAt.trim())
+    : null;
+  const resolvedExpiresAt = validatedExpireInHours != null
+    ? new Date(Date.now() + validatedExpireInHours * 60 * 60 * 1000)
+    : (requestedExpiresAt && !Number.isNaN(requestedExpiresAt.getTime()) ? requestedExpiresAt : null);
   const callbackConfig = resolvePaymentLinkCallbackConfig(
     resolvedSourceApp,
     statusCallbackUrl,
@@ -485,6 +517,10 @@ async function createStripePaymentLinkInternal(data, authContext) {
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     paidAt: null,
     notes: notes || null,
+    expireInHours: validatedExpireInHours,
+    expiresAt: resolvedExpiresAt
+      ? admin.firestore.Timestamp.fromDate(resolvedExpiresAt)
+      : null,
     sourceApp: resolvedSourceApp,
     statusCallbackUrl: callbackConfig.statusCallbackUrl,
     statusCallbackAuthToken: callbackConfig.statusCallbackAuthToken
@@ -524,7 +560,7 @@ async function createStripePaymentLinkInternal(data, authContext) {
     id: link.id,
     amount: numericAmount,
     currency: currency.toLowerCase(),
-    expiresAt: link.expires_at || null
+    expiresAt: resolvedExpiresAt ? resolvedExpiresAt.toISOString() : link.expires_at || null
   };
 }
 
@@ -867,6 +903,53 @@ exports.refreshPaymentLinkStatusHttp = onRequest({
       return;
     }
 
+    const expiresAtDate = resolvePaymentLinkExpiry(data);
+    const isExpired = expiresAtDate
+      && !Number.isNaN(expiresAtDate.getTime())
+      && expiresAtDate.getTime() <= Date.now()
+      && data.paymentStatus !== 'paid'
+      && data.deactivationReason !== 'manual'
+      && !data.expiredAt;
+
+    if (isExpired) {
+      await stripe.paymentLinks.update(stripeLinkId, { active: false });
+      await ref.set({
+        status: 'inactive',
+        expiredAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      if (data.statusCallbackUrl) {
+        try {
+          await axios.post(
+            data.statusCallbackUrl,
+            {
+              stripePaymentLinkId: stripeLinkId,
+              status: 'expired'
+            },
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                ...(data.statusCallbackAuthToken
+                  ? { Authorization: `Bearer ${data.statusCallbackAuthToken}` }
+                  : {})
+              }
+            }
+          );
+        } catch (callbackError) {
+          console.error('Failed to notify external payment link expiry callback', callbackError);
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        paymentStatus: data.paymentStatus || 'pending',
+        status: 'expired',
+        stripeLinkId,
+        expiresAt: expiresAtDate.toISOString()
+      });
+      return;
+    }
+
     const { paymentStatus, session, sessionsFound } = await fetchLatestStripePaymentStatusForLink(stripeLinkId);
 
     // Persist a debug trail so "stuck pending" can be diagnosed from Firestore alone.
@@ -1119,6 +1202,50 @@ exports.reconcilePaymentLinks = onSchedule({
     if (!stripeLinkId) continue;
 
     try {
+      const expiresAtDate = resolvePaymentLinkExpiry(data);
+      const isExpired = expiresAtDate
+        && !Number.isNaN(expiresAtDate.getTime())
+        && expiresAtDate.getTime() <= Date.now()
+        && data.paymentStatus !== 'paid'
+        && data.deactivationReason !== 'manual'
+        && !data.expiredAt;
+
+      if (isExpired) {
+        try {
+          await stripe.paymentLinks.update(stripeLinkId, { active: false });
+        } catch (err) {
+          console.error('Reconcile failed to deactivate expired payment link', stripeLinkId, err);
+        }
+
+        await doc.ref.set({
+          status: 'inactive',
+          expiredAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        if (data.statusCallbackUrl) {
+          try {
+            await axios.post(
+              data.statusCallbackUrl,
+              {
+                stripePaymentLinkId: stripeLinkId,
+                status: 'expired'
+              },
+              {
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(data.statusCallbackAuthToken
+                    ? { Authorization: `Bearer ${data.statusCallbackAuthToken}` }
+                    : {})
+                }
+              }
+            );
+          } catch (callbackError) {
+            console.error('Failed to notify external expiry callback during reconcile', callbackError);
+          }
+        }
+        continue;
+      }
+
       // Grab the latest Checkout Session for this payment link
       const { paymentStatus, session } = await fetchLatestStripePaymentStatusForLink(stripeLinkId);
       if (!session) continue;

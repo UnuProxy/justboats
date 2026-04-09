@@ -140,6 +140,26 @@ async function deactivateStripePaymentLink(stripeLinkId) {
   }
 }
 
+function resolveExpiresAtDate(paymentLinkData) {
+  const rawValue = paymentLinkData?.expiresAt;
+  if (!rawValue) return null;
+
+  if (typeof rawValue?.toDate === 'function') {
+    return rawValue.toDate();
+  }
+
+  if (rawValue instanceof Date) {
+    return rawValue;
+  }
+
+  if (typeof rawValue === 'string') {
+    const parsed = new Date(rawValue);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  return null;
+}
+
 async function notifyPaymentLinkStatusCallback(paymentLinkData, stripeLinkId, paymentStatus, session) {
   if (
     paymentStatus !== 'paid' ||
@@ -246,6 +266,55 @@ export default async function handler(req, res) {
 
     if (!stripeLinkId) {
       res.status(400).json({ error: 'Payment link is missing stripeLinkId' });
+      return;
+    }
+
+    const expiresAtDate = resolveExpiresAtDate(data);
+    const isExpired =
+      expiresAtDate != null &&
+      !Number.isNaN(expiresAtDate.getTime()) &&
+      expiresAtDate.getTime() <= Date.now() &&
+      data.paymentStatus !== 'paid' &&
+      data.deactivationReason !== 'manual' &&
+      !data.expiredAt;
+
+    if (isExpired) {
+      await deactivateStripePaymentLink(stripeLinkId);
+      await ref.set(
+        {
+          status: 'inactive',
+          expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (data.statusCallbackUrl) {
+        try {
+          await fetch(data.statusCallbackUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(data.statusCallbackAuthToken
+                ? { Authorization: `Bearer ${data.statusCallbackAuthToken}` }
+                : {}),
+            },
+            body: JSON.stringify({
+              stripePaymentLinkId: stripeLinkId,
+              status: 'expired',
+            }),
+          });
+        } catch (error) {
+          console.error('Failed to notify external payment link expiry callback', error);
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        paymentStatus: data.paymentStatus || 'pending',
+        status: 'expired',
+        stripeLinkId,
+        expiresAt: expiresAtDate.toISOString(),
+      });
       return;
     }
 

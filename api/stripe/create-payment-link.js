@@ -98,6 +98,8 @@ async function createStripePaymentLink({
   sourceApp,
   statusCallbackUrl,
   statusCallbackAuthToken,
+  expireInHours,
+  expiresAt,
 }) {
   const numericAmount = Number(amount);
   if (!numericAmount || Number.isNaN(numericAmount) || numericAmount <= 0) {
@@ -110,6 +112,18 @@ async function createStripePaymentLink({
   }
 
   const resolvedSourceApp = String(sourceApp || 'external-app').trim();
+  const validatedExpireInHours = expireInHours === 24 || expireInHours === 48 ? expireInHours : null;
+  if (expireInHours != null && validatedExpireInHours == null) {
+    throw new Error('Expiration must be 24 or 48 hours.');
+  }
+  const requestedExpiresAt =
+    typeof expiresAt === 'string' && expiresAt.trim() ? new Date(expiresAt.trim()) : null;
+  const resolvedExpiresAt =
+    validatedExpireInHours != null
+      ? new Date(Date.now() + validatedExpireInHours * 60 * 60 * 1000)
+      : requestedExpiresAt && !Number.isNaN(requestedExpiresAt.getTime())
+        ? requestedExpiresAt
+        : null;
   const callbackConfig = resolveCallbackConfig(
     resolvedSourceApp,
     statusCallbackUrl,
@@ -171,6 +185,8 @@ async function createStripePaymentLink({
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         paidAt: null,
         notes: notes || null,
+        expireInHours: validatedExpireInHours,
+        expiresAt: resolvedExpiresAt ? admin.firestore.Timestamp.fromDate(resolvedExpiresAt) : null,
         sourceApp: resolvedSourceApp,
         statusCallbackUrl: callbackConfig.statusCallbackUrl,
         statusCallbackAuthToken: callbackConfig.statusCallbackAuthToken,
@@ -186,7 +202,7 @@ async function createStripePaymentLink({
     url: link.url,
     amount: numericAmount,
     currency: String(currency || 'eur').toLowerCase(),
-    expiresAt: link.expires_at || null,
+    expiresAt: resolvedExpiresAt ? resolvedExpiresAt.toISOString() : link.expires_at || null,
     sourceApp: resolvedSourceApp,
   };
 }
