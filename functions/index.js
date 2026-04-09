@@ -922,6 +922,99 @@ exports.refreshPaymentLinkStatusHttp = onRequest({
   }
 });
 
+// Manually deactivate a Stripe payment link (admin + staff or sync secret)
+exports.deactivatePaymentLinkHttp = onRequest({
+  region: "us-central1",
+  cors: false,
+  secrets: ["STRIPE_SECRET_KEY", "PAYMENT_LINK_PROVIDER_API_KEY", "PAYMENT_LINK_SYNC_SECRET"],
+  maxInstances: 10
+}, async (req, res) => {
+  if (handleCors(req, res)) {
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method Not Allowed' });
+    return;
+  }
+
+  if (!stripe) {
+    res.status(500).json({ error: 'Stripe not configured' });
+    return;
+  }
+
+  if (!hasPaymentLinkSyncAccess(req)) {
+    const authContext = await authenticateHttpRequest(req, res, ['admin', 'staff']);
+    if (!authContext) {
+      return;
+    }
+  }
+
+  const { paymentLinkId } = req.body || {};
+  if (!paymentLinkId) {
+    res.status(400).json({ error: 'paymentLinkId is required' });
+    return;
+  }
+
+  try {
+    let ref = db.collection('paymentLinks').doc(paymentLinkId);
+    let docSnap = await ref.get();
+
+    if (!docSnap.exists) {
+      const snapshot = await db
+        .collection('paymentLinks')
+        .where('stripeLinkId', '==', paymentLinkId)
+        .limit(1)
+        .get();
+
+      if (snapshot.empty) {
+        res.status(404).json({ error: 'Payment link not found' });
+        return;
+      }
+
+      docSnap = snapshot.docs[0];
+      ref = docSnap.ref;
+    }
+
+    const data = docSnap.data() || {};
+    const stripeLinkId = (paymentLinkId && paymentLinkId.startsWith('plink_'))
+      ? paymentLinkId
+      : data.stripeLinkId;
+
+    if (!stripeLinkId) {
+      res.status(400).json({ error: 'Payment link is missing stripeLinkId' });
+      return;
+    }
+
+    if (data.paymentStatus === 'paid') {
+      res.status(400).json({ error: 'Paid payment links cannot be deactivated' });
+      return;
+    }
+
+    await stripe.paymentLinks.update(stripeLinkId, { active: false });
+
+    await ref.set({
+      status: 'inactive',
+      paymentStatus: data.paymentStatus || 'pending',
+      deactivatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      deactivationReason: 'manual'
+    }, { merge: true });
+
+    res.status(200).json({
+      success: true,
+      paymentLinkId: ref.id,
+      stripeLinkId,
+      status: 'cancelled',
+      paymentStatus: data.paymentStatus || 'pending'
+    });
+  } catch (error) {
+    console.error('deactivatePaymentLinkHttp error:', error.response?.data || error);
+    const status = mapHttpsErrorToStatus(error);
+    const message = error.response?.data?.error?.message || error.message || 'Failed to deactivate payment link';
+    res.status(status).json({ error: message });
+  }
+});
+
 // Stripe webhook to update payment link payment status
 exports.stripeWebhook = onRequest({
   region: "us-central1",
