@@ -58,6 +58,13 @@ const TEMPLATE_STYLES = {
     textColor: '#ffffff',
     footerBg: '#064e3b',
   },
+  coastal: {
+    name: 'Coastal Blue',
+    headerBg: 'linear-gradient(135deg, #4f7892 0%, #608CA8 55%, #84adc5 100%)',
+    accentColor: '#f4e7c1',
+    textColor: '#ffffff',
+    footerBg: '#608CA8',
+  },
 };
 
 const DEFAULT_RESTAURANTS = [
@@ -1183,7 +1190,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
     ? data.images[5]
     : (data.images && data.images.length > 3 ? data.images[3] : null);
   const hasTwoBottomImages = Boolean(firstBottomImage && secondBottomImage);
-  const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
+  const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.coastal;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
   const displayPricing = getBrochureDisplayPricing(data);
   const displayPricingLabels = getBrochureDisplayPricingLabels(data);
@@ -1496,25 +1503,8 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
   );
 });
 
-const PortBaseSignature = ({ textColor }) => (
-  <>
-    <p
-      style={{
-        margin: 0,
-        fontSize: '15px',
-        color: textColor,
-        opacity: 0.82,
-        fontWeight: 500,
-        letterSpacing: '0.2px',
-      }}
-    >
-      Powered by <span style={{ color: '#27c2f3' }}>PortBase</span>
-    </p>
-  </>
-);
-
 const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, selectedTemplate, amenities = [] }, ref) {
-  const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
+  const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.coastal;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
   const showcaseImage = data.images && data.images.length > 6 ? data.images[6] : null;
   const includedItems = (data.includedItems && data.includedItems.length ? data.includedItems : DEFAULT_INCLUDED_ITEMS).slice(0, 8);
@@ -1709,7 +1699,7 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
 });
 
 const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, amenities, pageIndex, totalPages, selectedTemplate }, ref) {
-  const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.luxury;
+  const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.coastal;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
   const hasAmenitiesCard = amenities.length > 0;
   const amenitiesColumns = 3;
@@ -1848,7 +1838,6 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, 
             textAlign: 'center',
           }}
         >
-          <PortBaseSignature textColor={primaryText} />
         </div>
       )}
     </div>
@@ -1938,7 +1927,7 @@ const SavedTemplatesPanel = ({ templates, onLoad, onDelete, isLoading, activeTem
           </div>
           <div className="flex gap-2 text-xs text-slate-600">
             <span className="px-2 py-0.5 bg-slate-100 rounded-full">{tmpl.capacity || '?'} pax</span>
-            <span className="px-2 py-0.5 bg-slate-100 rounded-full">{tmpl.template || 'luxury'}</span>
+            <span className="px-2 py-0.5 bg-slate-100 rounded-full">{tmpl.template || 'coastal'}</span>
             <span className="px-2 py-0.5 bg-slate-100 rounded-full">{tmpl.images?.length || 0} imgs</span>
           </div>
           <p className="mt-3 text-xs font-medium text-cyan-700">
@@ -1982,7 +1971,7 @@ const BoatBrochureBuilder = () => {
     ...createEmptyFormData(),
   });
 
-  const [selectedTemplate, setSelectedTemplate] = useState('luxury');
+  const [selectedTemplate, setSelectedTemplate] = useState('coastal');
   const [footerType, setFooterType] = useState('restaurants');
   const [footerItems, setFooterItems] = useState(['cancarlito', 'esmoli', 'chezgerdi', 'tiburon', 'juanyandrea']);
   const hasSecondPage = formData.images && formData.images.length > 6;
@@ -2040,7 +2029,7 @@ const BoatBrochureBuilder = () => {
 
   const resetEditor = () => {
     setFormData(createEmptyFormData());
-    setSelectedTemplate('luxury');
+    setSelectedTemplate('coastal');
     setFooterType('restaurants');
     setFooterItems(['cancarlito', 'esmoli', 'chezgerdi', 'tiburon', 'juanyandrea']);
     setActiveTemplateId(null);
@@ -2123,7 +2112,7 @@ const BoatBrochureBuilder = () => {
       pricingSource: normalizePricingSource(template.pricingSource),
       displayPriceOverrides: normalizeDisplayPriceOverrides(template.displayPriceOverrides),
     });
-    setSelectedTemplate(template.template || 'luxury');
+    setSelectedTemplate(template.template || 'coastal');
     setFooterType(template.footerType || 'restaurants');
     setFooterItems(template.footerItems || []);
     setActiveTemplateId(template.id);

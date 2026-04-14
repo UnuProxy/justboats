@@ -13,6 +13,10 @@ import { useLocation } from "react-router-dom";
 const VAT_RATE = 0.21;
 const gbEur = new Intl.NumberFormat("en-GB", { style: "currency", currency: "EUR" });
 const fmt = (n) => gbEur.format(Math.round((Number(n) || 0) * 100) / 100);
+const PDF_BACKGROUND_OPTIONS = [
+  { label: "Soft white", value: "#fbfcff" },
+  { label: "Ocean blue", value: "#608CA8" },
+];
 
 export default function InvoiceGenerator() {
   const location = useLocation();
@@ -42,6 +46,7 @@ export default function InvoiceGenerator() {
     description: "",
     unitPrice: "",
     discount: "0",
+    backgroundColor: "#fbfcff",
     notes: "Courtesy drinks, towels and skipper included.",
     terms:
       "Payment terms: Net 30 days from invoice date. Please include the invoice number as the payment reference.",
@@ -257,6 +262,14 @@ export default function InvoiceGenerator() {
         .btn{appearance:none;border:1px solid var(--border);background:#fff;color:var(--ink);padding:10px 12px;border-radius:12px;font-size:14px;cursor:pointer;transition:box-shadow .2s ease,transform .06s ease}
         .btn:hover{box-shadow:var(--shadow)} .btn:active{transform:translateY(1px)}
         .btn-primary{background:var(--navy);border-color:transparent;color:#fff}
+        .color-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+        .color-option{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:14px;background:#fff;color:var(--ink);cursor:pointer;text-align:left;transition:border-color .2s ease,box-shadow .2s ease,transform .06s ease}
+        .color-option:hover{box-shadow:var(--shadow)}
+        .color-option.active{border-color:var(--navy);box-shadow:0 0 0 2px rgba(15,31,61,.12)}
+        .color-swatch{width:22px;height:22px;border-radius:999px;border:1px solid rgba(15,23,42,.12);flex:0 0 auto}
+        .color-meta{display:grid;gap:2px}
+        .color-meta strong{font-size:14px}
+        .color-meta span{font-size:12px;color:var(--muted)}
 
         /* Tabs (mobile) */
         .seg{display:none;gap:8px;margin:0 0 12px}
@@ -423,6 +436,30 @@ export default function InvoiceGenerator() {
               <div className="ph"><h2 className="pt">Notes & Terms</h2></div>
               <div className="pb grid">
                 <div>
+                  <label htmlFor="n0">PDF background</label>
+                  <div id="n0" className="color-options">
+                    {PDF_BACKGROUND_OPTIONS.map((option) => {
+                      const isActive = (invoice.backgroundColor || "#fbfcff") === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`color-option ${isActive ? "active" : ""}`}
+                          onClick={() => setInvoice((s) => ({ ...s, backgroundColor: option.value }))}
+                          aria-pressed={isActive}
+                          title={`${option.label} ${option.value}`}
+                        >
+                          <span className="color-swatch" style={{ background: option.value }} />
+                          <span className="color-meta">
+                            <strong>{option.label}</strong>
+                            <span>{option.value}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
                   <label htmlFor="n1">Notes to client</label>
                   <textarea id="n1" className="textarea" name="notes" value={invoice.notes} onChange={onInvoice} />
                 </div>
@@ -441,7 +478,7 @@ export default function InvoiceGenerator() {
 
           {/* Fluid preview (hidden on phones while editing) */}
           <div style={{ display: isNarrow && tab === "edit" ? "none" : "block" }}>
-            <section className="m-invoice">
+            <section className="m-invoice" style={{ background: invoice.backgroundColor || "#fbfcff" }}>
               <div className="m-hd">
                 <div className="m-brand"><span className="m-dot" /><h2 className="m-name">Nautiq Ibiza</h2></div>
                 <div style={{ textAlign: "right" }}>
@@ -543,7 +580,7 @@ export default function InvoiceGenerator() {
 
       {/* Hidden A4 layout for PDF (off-screen by default) */}
       <div className="pdf-stage" aria-hidden="true" ref={pdfRef}>
-        <div className="a4">
+        <div className="a4" style={{ background: invoice.backgroundColor || "#fbfcff" }}>
           <header className="a4-hd">
             <div className="a4-top">
               <div>
