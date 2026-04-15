@@ -267,13 +267,17 @@ const getImageRenderStyle = (image = {}, variant = 'default') => {
     bottom: 1.02,
     showcase: 1,
     gallery: 1,
+    gallerySingle: 1,
     editor: 1,
     default: 1,
   };
+  const forceContainVariant = false;
   const useContainForAdaptiveSlots = (
-    (variant === 'showcase' || variant === 'gallery') &&
-    aspectRatio &&
-    (aspectRatio >= 1.95 || aspectRatio <= 0.95)
+    forceContainVariant || (
+      (variant === 'showcase' || variant === 'gallery') &&
+      aspectRatio &&
+      (aspectRatio >= 1.95 || aspectRatio <= 0.95)
+    )
   );
 
   return {
@@ -1753,13 +1757,14 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, 
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.coastal;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
   const isLastGalleryPage = pageIndex === totalPages - 1;
+  const renderedImages = images.length === 1 ? [images[0], images[0]] : images;
   const hasAmenitiesCard = amenities.length > 0;
   const amenitiesColumns = 3;
   const amenitiesRows = Math.max(1, Math.ceil(amenities.length / amenitiesColumns));
   const amenitiesCardHeight = hasAmenitiesCard ? Math.min(420, 92 + amenitiesRows * 36) : 0;
-  const stackGalleryImages = images.length <= 2;
+  const stackGalleryImages = renderedImages.length <= 2;
   const columnCount = stackGalleryImages ? 1 : 2;
-  const galleryRows = Math.max(1, Math.ceil(images.length / columnCount));
+  const galleryRows = Math.max(1, Math.ceil(renderedImages.length / columnCount));
   const galleryTop = hasAmenitiesCard ? 68 + amenitiesCardHeight : 48;
   const galleryBottom = isLastGalleryPage ? 92 : 176;
   const galleryGap = 14;
@@ -1856,18 +1861,22 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, 
           alignContent: 'start',
         }}
       >
-        {images.map((img, idx) => (
+        {renderedImages.map((img, idx) => (
           <div
-            key={img.id || `extra-${pageIndex}-${idx}`}
+            key={`${img.id || `extra-${pageIndex}`}-${idx}`}
             style={{
-              borderRadius: '18px',
+              borderRadius: '16px',
               overflow: 'hidden',
-              border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.58)}`,
-              background: hexToRgba(templateStyle.footerBg, 0.55),
-              boxShadow: '0 12px 34px rgba(0,0,0,0.28)',
+              border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.34)}`,
+              background: hexToRgba(templateStyle.footerBg, 0.3),
+              boxShadow: '0 8px 22px rgba(0,0,0,0.18)',
             }}
           >
-            <img src={getImageSrc(img)} alt={`Gallery image ${idx + 8}`} style={getImageRenderStyle(img, 'gallery')} />
+            <img
+              src={getImageSrc(img)}
+              alt={`Gallery image ${idx + 8}`}
+              style={getImageRenderStyle(img, images.length === 1 ? 'gallerySingle' : 'gallery')}
+            />
           </div>
         ))}
       </div>
@@ -2002,7 +2011,8 @@ const BoatBrochureBuilder = () => {
   const hotelPageOneRef = useRef(null);
   const hotelPageTwoRef = useRef(null);
   const hotelPageThreeRefs = useRef([]);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isGeneratingHotelPdf, setIsGeneratingHotelPdf] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState([]);
   const [activeTemplateId, setActiveTemplateId] = useState(null);
@@ -2189,7 +2199,7 @@ const BoatBrochureBuilder = () => {
   const generatePDF = async () => {
     if (!pageOneRef.current) return;
 
-    setIsGenerating(true);
+    setIsGeneratingPdf(true);
     try {
       // Wait for images to fully load
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2223,14 +2233,14 @@ const BoatBrochureBuilder = () => {
       console.error('Error generating PDF:', err);
       alert('Failed to generate PDF. Please try again.');
     } finally {
-      setIsGenerating(false);
+      setIsGeneratingPdf(false);
     }
   };
 
   const generateHotelPDF = async () => {
     if (!hotelPageOneRef.current) return;
 
-    setIsGenerating(true);
+    setIsGeneratingHotelPdf(true);
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -2261,7 +2271,7 @@ const BoatBrochureBuilder = () => {
       console.error('Error generating hotel PDF:', err);
       alert('Failed to generate hotel PDF. Please try again.');
     } finally {
-      setIsGenerating(false);
+      setIsGeneratingHotelPdf(false);
     }
   };
 
@@ -2519,130 +2529,132 @@ const BoatBrochureBuilder = () => {
         </div>
 
         {/* Right: Preview & Actions */}
-        <div className="space-y-6">
-          {/* Action Buttons */}
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={resetEditor}
-                className="flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all"
-              >
-                <RefreshCw size={18} />
-                New Brochure
-              </button>
-              <button
-                onClick={() => setShowPreview(!showPreview)}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all"
-              >
-                <Eye size={18} />
-                {showPreview ? 'Hide Preview' : 'Preview'}
-              </button>
-              <button
-                onClick={handleSaveTemplate}
-                disabled={isSaving}
-                className="flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all disabled:opacity-50"
-              >
-                {isSaving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
-                {activeTemplateId ? 'Update Brochure' : 'Save Brochure'}
-              </button>
-            </div>
-            {activeTemplateId && (
-              <p className="rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">
-                Editing saved brochure: <span className="font-semibold">{formData.boatName || 'Untitled brochure'}</span>
-              </p>
-            )}
-            <div className="flex gap-3">
-              <button
-                onClick={generateHotelPDF}
-                disabled={isGenerating}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-violet-500 to-purple-500 text-white font-semibold rounded-xl hover:from-violet-600 hover:to-purple-600 shadow-lg shadow-violet-500/25 transition-all disabled:opacity-50"
-              >
-                {isGenerating ? (
-                  <>
-                    <RefreshCw size={18} className="animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Download size={18} />
-                    Download Hotel
-                  </>
-                )}
-              </button>
-              <button
-                onClick={generatePDF}
-                disabled={isGenerating}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-cyan-500 to-teal-500 text-white font-semibold rounded-xl hover:from-cyan-600 hover:to-teal-600 shadow-lg shadow-cyan-500/25 transition-all disabled:opacity-50"
-              >
-                {isGenerating ? (
-                  <>
-                    <RefreshCw size={18} className="animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Download size={18} />
-                    Download PDF
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Preview Container */}
-          {showPreview && (
-            <div className="bg-slate-100 rounded-2xl p-6 overflow-auto">
-              <div className="space-y-6">
-                <div
-                  className="mx-auto shadow-2xl rounded-xl overflow-hidden"
-                  style={{
-                    width: '360px',
-                    height: '450px',
-                  }}
+        <div className="space-y-6 self-start">
+          <div className="lg:sticky lg:top-6 space-y-6">
+            {/* Action Buttons */}
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={resetEditor}
+                  className="flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all"
                 >
-                  <div style={{ transform: 'scale(0.333)', transformOrigin: 'top left', width: '1080px', height: '1350px' }}>
-                    <BrochurePageOne data={formData} selectedTemplate={selectedTemplate} />
-                  </div>
-                </div>
-                {hasSecondPage && (
-                  <div
-                    className="mx-auto shadow-2xl rounded-xl overflow-hidden"
-                    style={{
-                      width: '360px',
-                      height: '450px',
-                    }}
-                  >
-                    <div style={{ transform: 'scale(0.333)', transformOrigin: 'top left', width: '1080px', height: '1350px' }}>
-                      <BrochurePageTwo data={formData} amenities={brochureAmenities} selectedTemplate={selectedTemplate} />
-                    </div>
-                  </div>
-                )}
-                {extraGalleryPages.map((page, index) => (
-                  <div
-                    key={`preview-extra-gallery-${index}`}
-                    className="mx-auto shadow-2xl rounded-xl overflow-hidden"
-                    style={{
-                      width: '360px',
-                      height: '450px',
-                    }}
-                  >
-                    <div style={{ transform: 'scale(0.333)', transformOrigin: 'top left', width: '1080px', height: '1350px' }}>
-                      <BrochurePageThree
-                        images={page.images}
-                        amenities={page.amenities}
-                        pageIndex={index}
-                        totalPages={extraGalleryPages.length}
-                        selectedTemplate={selectedTemplate}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  <RefreshCw size={18} />
+                  New Brochure
+                </button>
+                <button
+                  onClick={() => setShowPreview(!showPreview)}
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all"
+                >
+                  <Eye size={18} />
+                  {showPreview ? 'Hide Preview' : 'Preview'}
+                </button>
+                <button
+                  onClick={handleSaveTemplate}
+                  disabled={isSaving}
+                  className="flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all disabled:opacity-50"
+                >
+                  {isSaving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
+                  {activeTemplateId ? 'Update Brochure' : 'Save Brochure'}
+                </button>
               </div>
-              <p className="text-center text-xs text-slate-500 mt-3">
-                Preview at 33% scale • {totalPages} page{totalPages === 1 ? '' : 's'} • Actual size: 1080×1350px each
-              </p>
+              {activeTemplateId && (
+                <p className="rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">
+                  Editing saved brochure: <span className="font-semibold">{formData.boatName || 'Untitled brochure'}</span>
+                </p>
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={generateHotelPDF}
+                disabled={isGeneratingHotelPdf}
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-violet-500 to-purple-500 text-white font-semibold rounded-xl hover:from-violet-600 hover:to-purple-600 shadow-lg shadow-violet-500/25 transition-all disabled:opacity-50"
+                >
+                {isGeneratingHotelPdf ? (
+                    <>
+                      <RefreshCw size={18} className="animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Download size={18} />
+                      Download Hotel
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={generatePDF}
+                disabled={isGeneratingPdf}
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-cyan-500 to-teal-500 text-white font-semibold rounded-xl hover:from-cyan-600 hover:to-teal-600 shadow-lg shadow-cyan-500/25 transition-all disabled:opacity-50"
+                >
+                {isGeneratingPdf ? (
+                    <>
+                      <RefreshCw size={18} className="animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Download size={18} />
+                      Download PDF
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-          )}
+
+            {/* Preview Container */}
+            {showPreview && (
+              <div className="bg-slate-100 rounded-2xl p-6 overflow-auto max-h-[calc(100vh-3rem)]">
+                <div className="space-y-6">
+                  <div
+                    className="mx-auto shadow-2xl rounded-xl overflow-hidden"
+                    style={{
+                      width: '360px',
+                      height: '450px',
+                    }}
+                  >
+                    <div style={{ transform: 'scale(0.333)', transformOrigin: 'top left', width: '1080px', height: '1350px' }}>
+                      <BrochurePageOne data={formData} selectedTemplate={selectedTemplate} />
+                    </div>
+                  </div>
+                  {hasSecondPage && (
+                    <div
+                      className="mx-auto shadow-2xl rounded-xl overflow-hidden"
+                      style={{
+                        width: '360px',
+                        height: '450px',
+                      }}
+                    >
+                      <div style={{ transform: 'scale(0.333)', transformOrigin: 'top left', width: '1080px', height: '1350px' }}>
+                        <BrochurePageTwo data={formData} amenities={brochureAmenities} selectedTemplate={selectedTemplate} />
+                      </div>
+                    </div>
+                  )}
+                  {extraGalleryPages.map((page, index) => (
+                    <div
+                      key={`preview-extra-gallery-${index}`}
+                      className="mx-auto shadow-2xl rounded-xl overflow-hidden"
+                      style={{
+                        width: '360px',
+                        height: '450px',
+                      }}
+                    >
+                      <div style={{ transform: 'scale(0.333)', transformOrigin: 'top left', width: '1080px', height: '1350px' }}>
+                        <BrochurePageThree
+                          images={page.images}
+                          amenities={page.amenities}
+                          pageIndex={index}
+                          totalPages={extraGalleryPages.length}
+                          selectedTemplate={selectedTemplate}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-center text-xs text-slate-500 mt-3">
+                  Preview at 33% scale • {totalPages} page{totalPages === 1 ? '' : 's'} • Actual size: 1080×1350px each
+                </p>
+              </div>
+            )}
+          </div>
 
           {/* Hidden render target for PDF/Image generation */}
           <div
