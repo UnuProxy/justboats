@@ -8,7 +8,7 @@ import {
   Ship, Upload, Download, Trash2, Eye, Image as ImageIcon,
   Calendar, ChevronDown,
   Palette, FileText, Check, Sparkles, RefreshCw, Save,
-  Building2, Utensils, GripVertical
+  Building2, Utensils, GripVertical, Ruler, Users, Fuel
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -97,7 +97,7 @@ const DEFAULT_INCLUDED_ITEMS = ['Captain', 'Soft drinks', 'Ice', 'Snorkel gear',
 const DEFAULT_NOT_INCLUDED_ITEMS = ['Fuel', 'Seabob', 'Overnight stay', 'Transfer service'];
 const DEFAULT_AMENITIES = ['Bedroom Cabin', 'Bathroom', 'Wi-Fi', 'Bluetooth Audio', 'Sunbed', 'Fridge', 'Deck Shower', 'Swim Ladder'];
 const EXTRA_GALLERY_PAGE_SIZE = 6;
-const MAX_BROCHURE_IMAGES = 9;
+const MAX_BROCHURE_IMAGES = 6;
 const BROCHURE_COLLECTION = 'boatBrochureTemplates';
 const PRICE_MARKUP_RATE = 0.05;
 const DEFAULT_BROCHURE_IMAGE_PROXY_URL = process.env.NODE_ENV === 'development'
@@ -386,7 +386,7 @@ const renderNodeToImageData = async (node) => {
 
 const normalizeSavedImages = (images = []) => (
   Array.isArray(images)
-    ? images
+    ? images.slice(0, MAX_BROCHURE_IMAGES)
       .map((image, index) => {
         if (!image) return null;
         if (typeof image === 'string') {
@@ -729,14 +729,14 @@ const ImageUploader = ({ images, onImagesChange, maxImages = MAX_BROCHURE_IMAGES
           <p className="text-slate-600 font-medium">
             {isFileDragActive ? 'Drop boat images here' : 'Click to upload boat images'}
           </p>
-          <p className="text-slate-400 text-sm mt-1">PNG, JPG up to 10MB • First image is the hero</p>
+          <p className="text-slate-400 text-sm mt-1">PNG, JPG up to 10MB • Maximum 6 images • First image is the hero</p>
         </div>
       ) : (
         <div className={`rounded-2xl border-2 border-dashed p-3 transition-all ${
           isFileDragActive ? 'border-cyan-500 bg-cyan-50/60' : 'border-transparent'
         }`}>
           <div className="mb-2 text-center text-xs font-medium text-slate-500">
-            {isFileDragActive ? 'Drop images to add them to this brochure' : 'Drag images here to upload, or drag thumbnails to reorder'}
+            {isFileDragActive ? 'Drop images to add them to this brochure' : `Drag images here to upload, or drag thumbnails to reorder (${images.length}/${maxImages})`}
           </div>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           {images.map((img, idx) => (
@@ -1182,13 +1182,10 @@ const ChecklistSelector = ({ title, options, selectedValues, onToggle }) => (
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, selectedTemplate }, ref) {
-  // First image is hero, next 3 are thumbnails
+  // First image is hero, next 2 fill the bottom gallery strip
   const heroImage = data.images && data.images.length > 0 ? data.images[0] : null;
-  const thumbnailImages = data.images ? data.images.slice(1, 4) : [];
-  const firstBottomImage = data.images && data.images.length > 4 ? data.images[4] : null;
-  const secondBottomImage = data.images && data.images.length > 5
-    ? data.images[5]
-    : (data.images && data.images.length > 3 ? data.images[3] : null);
+  const firstBottomImage = data.images && data.images.length > 1 ? data.images[1] : null;
+  const secondBottomImage = data.images && data.images.length > 2 ? data.images[2] : null;
   const hasTwoBottomImages = Boolean(firstBottomImage && secondBottomImage);
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.coastal;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
@@ -1196,6 +1193,15 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
   const displayPricingLabels = getBrochureDisplayPricingLabels(data);
   const displayPriceOverrides = normalizeDisplayPriceOverrides(data.displayPriceOverrides);
   const hotelPriceAdjustment = Number(data.hotelPriceAdjustment) || 0;
+  const pricingNote = (data.includedNote || 'Crew and VAT 21% included. Fuel not included.')
+    .replace(/^\(/, '')
+    .replace(/\)$/, '')
+    .replace(/\bFUEL\b/g, 'Fuel');
+  const specItems = [
+    { key: 'length', icon: Ruler, value: `${data.length || '0'} m`, iconStroke: 2.1 },
+    { key: 'capacity', icon: Users, value: `${data.capacity || '0'} pax`, iconStroke: 2 },
+    { key: 'consumption', icon: Fuel, value: `${data.fuelConsumption || '0'} L/H`, iconStroke: 2 },
+  ];
 
   return (
     <div
@@ -1276,153 +1282,182 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
         </h1>
       </div>
 
-      {/* Dark Navy Bottom Section */}
+      {/* Floating overlay background */}
       <div
         style={{
           position: 'absolute',
-          top: '640px',
           left: 0,
           right: 0,
-          height: '710px',
-          background: templateStyle.footerBg,
+          top: '520px',
+          height: '424px',
           zIndex: 2,
+          background: `linear-gradient(180deg,
+            ${hexToRgba('#11abc5', 0)} 0%,
+            ${hexToRgba('#11abc5', 0.12)} 12%,
+            ${hexToRgba('#11abc5', 0.42)} 24%,
+            ${hexToRgba('#4f7892', 0.72)} 46%,
+            ${hexToRgba('#6b91ac', 0.82)} 78%,
+            ${hexToRgba('#6b91ac', 0.88)} 100%)`,
         }}
       />
 
-      {/* 3 Thumbnail Images - Positioned at the transition */}
+      {/* Specs pill */}
       <div
         style={{
           position: 'absolute',
-          top: '500px',
-          left: 0,
-          right: 0,
-          zIndex: 10,
-          display: 'flex',
-          gap: '24px',
-          padding: '0 60px',
-          justifyContent: 'center',
-        }}
-      >
-        {thumbnailImages.length > 0 ? (
-          thumbnailImages.map((img, idx) => (
-            <div
-              key={img.id || idx}
-              style={{
-                width: '300px',
-                height: '200px',
-                borderRadius: '16px',
-                overflow: 'hidden',
-                border: `4px solid ${hexToRgba(templateStyle.accentColor, 0.72)}`,
-                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-                background: templateStyle.footerBg,
-              }}
-            >
-              <img
-                src={getImageSrc(img)}
-                alt={`Boat view ${idx + 2}`}
-                style={getImageRenderStyle(img, 'thumbnail')}
-              />
-            </div>
-          ))
-        ) : (
-          // Placeholder boxes when no thumbnails
-          [1, 2, 3].map((n) => (
-            <div
-              key={n}
-              style={{
-                width: '300px',
-                height: '200px',
-                borderRadius: '16px',
-                border: `4px solid ${hexToRgba(templateStyle.accentColor, 0.58)}`,
-                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-                background: templateStyle.footerBg,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Ship size={40} color="rgba(255,255,255,0.3)" />
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Specs Line */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '715px',
+          top: '664px',
           left: 0,
           right: 0,
           zIndex: 10,
           textAlign: 'center',
-          padding: '0 60px',
+          padding: '0 76px',
         }}
       >
-        <p
+        <div
           style={{
-            fontSize: '28px',
-            fontWeight: 400,
-            color: primaryText,
-            margin: 0,
-            letterSpacing: '0.15px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexWrap: 'nowrap',
+            gap: '16px',
+            maxWidth: '920px',
+            padding: '16px 30px',
+            borderRadius: '999px',
+            color: '#ffffff',
+            position: 'relative',
+            zIndex: 2,
+            background: `linear-gradient(135deg,
+              ${hexToRgba('#3f637d', 0.98)} 0%,
+              ${hexToRgba('#537a96', 1)} 55%,
+              ${hexToRgba('#6488a3', 0.98)} 100%)`,
+            border: `1px solid ${hexToRgba('#f3fbff', 0.58)}`,
+            boxShadow: '0 14px 30px rgba(9, 27, 40, 0.34)',
           }}
         >
-          {data.length || '0'} x {data.beam || '0'} mtrs. • Capacity: {data.capacity || '0'} pax • Consumption {data.fuelConsumption || '0'}L/H
-        </p>
+          {specItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <React.Fragment key={item.key}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '24px auto',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    columnGap: '8px',
+                    minWidth: 0,
+                    height: '32px',
+                    fontSize: '26px',
+                    fontWeight: 700,
+                    letterSpacing: '0',
+                    lineHeight: 1,
+                    whiteSpace: 'nowrap',
+                    color: '#ffffff',
+                    fontFamily: 'Arial, Helvetica, sans-serif',
+                    textShadow: '0 2px 8px rgba(0,0,0,0.42)',
+                    position: 'relative',
+                    zIndex: 2,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      width: '24px',
+                      height: '24px',
+                      transform: 'translateY(1px)',
+                    }}
+                  >
+                    <Icon size={22} strokeWidth={2.4} color="#ffffff" />
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'flex-start',
+                      height: '32px',
+                      transform: 'translateY(-8px)',
+                    }}
+                  >
+                    {item.value}
+                  </div>
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Seasonal Pricing Row */}
+      {/* Seasonal Pricing Cards */}
       <div
         style={{
           position: 'absolute',
-          top: '790px',
-          left: 0,
-          right: 0,
+          top: '768px',
+          left: '64px',
+          right: '64px',
           zIndex: 10,
-          display: 'flex',
-          justifyContent: 'space-between',
-          padding: '0 100px',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+          gap: '14px',
         }}
       >
         {PRICING_PERIODS.map((period) => (
           <div
             key={period.key}
             style={{
-              textAlign: 'center',
-              width: '140px',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              minHeight: '112px',
+              minWidth: 0,
+              padding: '12px 14px 16px',
+              gap: '6px',
+              borderRadius: '22px',
+              background: `linear-gradient(180deg,
+                ${hexToRgba('#ffffff', 0.24)} 0%,
+                ${hexToRgba('#ffffff', 0.12)} 100%)`,
+              border: `1px solid ${hexToRgba('#ffffff', 0.2)}`,
+              boxShadow: '0 10px 20px rgba(10, 29, 42, 0.1)',
             }}
           >
             <div
               style={{
-                fontSize: '22px',
-                fontWeight: 400,
-                color: hexToRgba(primaryText, 0.82),
-                minHeight: '54px',
-                marginBottom: '8px',
-                letterSpacing: '0.2px',
+                fontSize: '21px',
+                fontWeight: 500,
+                color: hexToRgba('#ffffff', 0.84),
+                minHeight: '28px',
+                letterSpacing: '0.22px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 textAlign: 'center',
                 lineHeight: 1.2,
+                fontFamily: 'Arial, Helvetica, sans-serif',
               }}
             >
               {displayPricingLabels[period.key]}
             </div>
             <div
               style={{
-                fontSize: '32px',
-                fontWeight: 500,
-                color: primaryText,
-                letterSpacing: '0.2px',
+                fontSize: '37px',
+                fontWeight: 600,
+                color: '#ffffff',
+                letterSpacing: '0',
                 fontVariantNumeric: 'tabular-nums',
+                lineHeight: 1,
+                whiteSpace: 'nowrap',
+                fontFamily: 'Arial, Helvetica, sans-serif',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: '42px',
               }}
             >
-              {getDisplayPriceValue(displayPricing[period.key], displayPriceOverrides[period.key], hotelPriceAdjustment) || '—'}€
+              €{getDisplayPriceValue(displayPricing[period.key], displayPriceOverrides[period.key], hotelPriceAdjustment) || '—'}
             </div>
           </div>
         ))}
@@ -1432,7 +1467,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
       <div
         style={{
           position: 'absolute',
-          top: '905px',
+          top: '922px',
           left: 0,
           right: 0,
           zIndex: 10,
@@ -1442,17 +1477,33 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
       >
         <p
           style={{
-            fontSize: '17px',
-            color: hexToRgba(primaryText, 0.8),
+            fontSize: '15px',
+            color: hexToRgba('#ffffff', 0.76),
             margin: 0,
-            fontWeight: 300,
+            fontWeight: 400,
             fontStyle: 'italic',
-            letterSpacing: '0.1px',
+            letterSpacing: '0.12px',
           }}
         >
-          {data.includedNote || '(Crew and VAT 21% included. FUEL not included)'}
+          {pricingNote}
         </p>
       </div>
+
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: '936px',
+          height: '96px',
+          zIndex: 9,
+          background: `linear-gradient(180deg,
+            ${hexToRgba(templateStyle.footerBg, 0.18)} 0%,
+            ${hexToRgba(templateStyle.footerBg, 0.08)} 46%,
+            ${hexToRgba(templateStyle.footerBg, 0)} 100%)`,
+          pointerEvents: 'none',
+        }}
+      />
 
       {/* Bottom gallery block on page 1 */}
       {firstBottomImage && (
@@ -1472,7 +1523,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
             display: 'flex',
           }}
         >
-          <div style={{ position: 'relative', flex: hasTwoBottomImages ? 1 : 2, overflow: 'hidden' }}>
+          <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
             <img
               src={getImageSrc(firstBottomImage)}
               alt="Boat detail left"
@@ -1506,7 +1557,7 @@ const BrochurePageOne = React.forwardRef(function BrochurePageOne({ data, select
 const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, selectedTemplate, amenities = [] }, ref) {
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.coastal;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
-  const showcaseImage = data.images && data.images.length > 6 ? data.images[6] : null;
+  const showcaseImage = data.images && data.images.length > 3 ? data.images[3] : null;
   const includedItems = (data.includedItems && data.includedItems.length ? data.includedItems : DEFAULT_INCLUDED_ITEMS).slice(0, 8);
   const notIncludedItems = (data.notIncludedItems && data.notIncludedItems.length ? data.notIncludedItems : DEFAULT_NOT_INCLUDED_ITEMS).slice(0, 8);
   const checklistRowStyle = {
@@ -1554,12 +1605,12 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
     Math.ceil(includedItems.length / 2),
     Math.ceil(notIncludedItems.length / 2)
   );
-  const checklistBoxHeight = 78 + checklistRows * 46;
+  const checklistBoxHeight = 92 + checklistRows * 48;
   const checklistHeight = checklistBoxHeight;
   const amenitiesRows = Math.max(1, Math.ceil(amenities.length / 3));
   const hasAmenities = amenities.length > 0;
   const amenitiesTop = checklistTop + checklistHeight + 20;
-  const amenitiesHeight = hasAmenities ? Math.min(160, 78 + amenitiesRows * 34) : 0;
+  const amenitiesHeight = hasAmenities ? Math.min(176, 90 + amenitiesRows * 36) : 0;
 
   return (
     <div
@@ -1629,7 +1680,7 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
           gap: '14px',
         }}
       >
-        <div style={{ height: `${checklistBoxHeight}px`, border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '20px 22px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={{ height: `${checklistBoxHeight}px`, border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '20px 22px 28px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <p style={{ margin: 0, marginBottom: '12px', color: primaryText, fontSize: '30px', fontWeight: 700, letterSpacing: '0.5px' }}>Included</p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 18px', alignContent: 'start', flex: '0 0 auto' }}>
             {includedItems.map((item) => (
@@ -1641,7 +1692,7 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
           </div>
         </div>
 
-        <div style={{ height: `${checklistBoxHeight}px`, border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '20px 22px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={{ height: `${checklistBoxHeight}px`, border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`, borderRadius: '14px', padding: '20px 22px 28px', background: hexToRgba(templateStyle.footerBg, 0.52), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <p style={{ margin: 0, marginBottom: '12px', color: primaryText, fontSize: '30px', fontWeight: 700, letterSpacing: '0.5px' }}>Not Included</p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 18px', alignContent: 'start', flex: '0 0 auto' }}>
             {notIncludedItems.map((item) => (
@@ -1666,7 +1717,7 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
             borderRadius: '18px',
             border: `1px solid ${hexToRgba(templateStyle.accentColor, 0.45)}`,
             background: hexToRgba(templateStyle.footerBg, 0.52),
-            padding: '18px 22px',
+            padding: '18px 22px 26px',
             overflow: 'hidden',
           }}
         >
@@ -1701,6 +1752,7 @@ const BrochurePageTwo = React.forwardRef(function BrochurePageTwo({ data, select
 const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, amenities, pageIndex, totalPages, selectedTemplate }, ref) {
   const templateStyle = TEMPLATE_STYLES[selectedTemplate] || TEMPLATE_STYLES.coastal;
   const primaryText = selectedTemplate === 'elegant' ? '#f8fafc' : templateStyle.textColor;
+  const isLastGalleryPage = pageIndex === totalPages - 1;
   const hasAmenitiesCard = amenities.length > 0;
   const amenitiesColumns = 3;
   const amenitiesRows = Math.max(1, Math.ceil(amenities.length / amenitiesColumns));
@@ -1709,7 +1761,7 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, 
   const columnCount = stackGalleryImages ? 1 : 2;
   const galleryRows = Math.max(1, Math.ceil(images.length / columnCount));
   const galleryTop = hasAmenitiesCard ? 68 + amenitiesCardHeight : 48;
-  const galleryBottom = 176;
+  const galleryBottom = isLastGalleryPage ? 92 : 176;
   const galleryGap = 14;
   const galleryAvailableHeight = 1350 - galleryTop - galleryBottom;
   const computedRowHeight = Math.floor((galleryAvailableHeight - galleryGap * (galleryRows - 1)) / galleryRows);
@@ -1820,21 +1872,21 @@ const BrochurePageThree = React.forwardRef(function BrochurePageThree({ images, 
         ))}
       </div>
 
-      {pageIndex === totalPages - 1 && (
+      {isLastGalleryPage && (
         <div
           style={{
             position: 'absolute',
             left: 0,
             right: 0,
             bottom: 0,
-            height: '138px',
+            height: '92px',
             zIndex: 5,
             background: templateStyle.footerBg,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'flex-end',
-            padding: '0 40px 18px',
+            padding: '0 40px 12px',
             textAlign: 'center',
           }}
         >
@@ -1974,10 +2026,10 @@ const BoatBrochureBuilder = () => {
   const [selectedTemplate, setSelectedTemplate] = useState('coastal');
   const [footerType, setFooterType] = useState('restaurants');
   const [footerItems, setFooterItems] = useState(['cancarlito', 'esmoli', 'chezgerdi', 'tiburon', 'juanyandrea']);
-  const hasSecondPage = formData.images && formData.images.length > 6;
+  const hasSecondPage = formData.images && formData.images.length > 3;
   const brochureAmenities = getBrochureAmenities(formData);
   const extraGalleryPages = (() => {
-    const remainingImages = formData.images.slice(7);
+    const remainingImages = formData.images.slice(4);
     if (hasSecondPage) {
       if (!remainingImages.length) return [];
       return chunkImages(remainingImages, EXTRA_GALLERY_PAGE_SIZE).map((images) => ({ images, amenities: [] }));
@@ -2654,10 +2706,9 @@ const BoatBrochureBuilder = () => {
                 <ul className="text-sm text-slate-600 space-y-1.5">
                   <li>📱 <strong>Mobile-optimized</strong> - 1080×1350px (4:5 ratio) perfect for Instagram & WhatsApp</li>
                   <li>🖼️ <strong>First image</strong> = Large hero photo at the top</li>
-                  <li>📸 <strong>Images 2-4</strong> = Three thumbnails in the middle row</li>
-                  <li>🛥️ <strong>Images 5-6</strong> = Two-image gallery strip on page 1</li>
-                  <li>📘 <strong>Image 7</strong> = Page 2 hero image</li>
-                  <li>🖼️ <strong>Images 8+</strong> = Page 3 extra gallery grid (auto)</li>
+                  <li>🛥️ <strong>Images 2-3</strong> = Two-image gallery strip on page 1</li>
+                  <li>📘 <strong>Image 4</strong> = Page 2 hero image</li>
+                  <li>🖼️ <strong>Images 5-6</strong> = Extra gallery page when needed</li>
                   <li>💾 <strong>PNG format</strong> is best for sharing on social media</li>
                   <li>📄 <strong>PDF format</strong> is best for printing and email attachments</li>
                 </ul>
