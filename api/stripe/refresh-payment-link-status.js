@@ -84,7 +84,7 @@ async function fetchLatestStripePaymentStatusForLink(stripeLinkId) {
 
   const params = new URLSearchParams();
   params.set('payment_link', stripeLinkId);
-  params.set('limit', '1');
+  params.set('limit', '100');
 
   const response = await fetch(`${STRIPE_API_BASE}/checkout/sessions?${params.toString()}`, {
     headers: {
@@ -104,7 +104,8 @@ async function fetchLatestStripePaymentStatusForLink(stripeLinkId) {
     return { paymentStatus: 'pending', session: null, sessionsFound: 0 };
   }
 
-  const session = sessions[0];
+  const paidSession = sessions.find((session) => session?.payment_status === 'paid');
+  const session = paidSession || sessions[0];
   const paymentStatus =
     session?.payment_status === 'paid'
       ? 'paid'

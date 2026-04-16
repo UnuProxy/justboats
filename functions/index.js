@@ -235,6 +235,40 @@ function resolvePaymentLinkCallbackConfig(sourceApp, statusCallbackUrl, statusCa
   };
 }
 
+function buildStripePaymentLinkUpdate(existing = {}, paymentStatus, stripeObject = {}) {
+  const stripeObjectType = String(stripeObject?.object || '').trim();
+  const stripeSessionId = stripeObjectType === 'checkout.session' && stripeObject?.id
+    ? stripeObject.id
+    : null;
+  const stripePaymentIntentId = stripeObject?.payment_intent
+    || (stripeObjectType === 'payment_intent' && stripeObject?.id ? stripeObject.id : null);
+
+  const updateData = {
+    paymentStatus,
+    status: paymentStatus === 'paid' ? 'inactive' : existing.status || 'active'
+  };
+
+  if (stripeSessionId) {
+    updateData.lastStripeSessionId = stripeSessionId;
+  }
+
+  if (stripePaymentIntentId) {
+    updateData.lastStripePaymentIntent = stripePaymentIntentId;
+  }
+
+  if (paymentStatus === 'paid') {
+    if (stripeObject?.created) {
+      updateData.paidAt = admin.firestore.Timestamp.fromMillis(stripeObject.created * 1000);
+    } else if (!existing.paidAt) {
+      updateData.paidAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+  } else {
+    updateData.paidAt = admin.firestore.FieldValue.delete();
+  }
+
+  return updateData;
+}
+
 async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}) {
   if (!stripeLinkId) return;
 
@@ -259,20 +293,7 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
     }
 
     const existing = docSnap.data() || {};
-
-    if (existing.paymentStatus === 'paid' && paymentStatus === 'paid') {
-      return;
-    }
-
-    const updateData = {
-      paymentStatus,
-      status: paymentStatus === 'paid' ? 'inactive' : existing.status || 'active',
-      lastStripeSessionId: session.id || null,
-      lastStripePaymentIntent: session.payment_intent || null,
-      paidAt: paymentStatus === 'paid' && session.created
-        ? admin.firestore.Timestamp.fromMillis(session.created * 1000)
-        : admin.firestore.FieldValue.delete()
-    };
+    const updateData = buildStripePaymentLinkUpdate(existing, paymentStatus, session);
 
     await ref.set(updateData, { merge: true });
 
@@ -326,7 +347,7 @@ async function fetchLatestStripePaymentStatusForLink(stripeLinkId) {
 
   const { data: sessions } = await stripe.checkout.sessions.list({
     payment_link: stripeLinkId,
-    limit: 1
+    limit: 100
   });
 
   const sessionsFound = Array.isArray(sessions) ? sessions.length : 0;
@@ -334,7 +355,8 @@ async function fetchLatestStripePaymentStatusForLink(stripeLinkId) {
     return { paymentStatus: 'pending', session: null, sessionsFound: 0 };
   }
 
-  const session = sessions[0];
+  const paidSession = sessions.find((session) => session?.payment_status === 'paid');
+  const session = paidSession || sessions[0];
   const paymentStatus = session.payment_status === 'paid' ? 'paid'
     : session.payment_status === 'unpaid' ? 'pending'
     : session.payment_status;
@@ -1187,16 +1209,16 @@ exports.reconcilePaymentLinks = onSchedule({
     return;
   }
 
-  // Check the most recent pending/failed links to keep load low
-  const snapshot = await db
-    .collection('paymentLinks')
-    .where('paymentStatus', 'in', ['pending', 'failed'])
-    .limit(30)
-    .get();
+  const outstandingSnapshots = await Promise.all(
+    ['pending', 'failed'].map((paymentStatus) =>
+      db.collection('paymentLinks').where('paymentStatus', '==', paymentStatus).get()
+    )
+  );
+  const outstandingDocs = outstandingSnapshots.flatMap((snapshot) => snapshot.docs);
 
-  if (snapshot.empty) return;
+  if (!outstandingDocs.length) return;
 
-  for (const doc of snapshot.docs) {
+  for (const doc of outstandingDocs) {
     const data = doc.data();
     const stripeLinkId = (doc.id && doc.id.startsWith('plink_')) ? doc.id : data.stripeLinkId;
     if (!stripeLinkId) continue;

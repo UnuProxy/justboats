@@ -44,6 +44,40 @@ function getFirestore() {
   }
 }
 
+function buildStripePaymentLinkUpdate(existing = {}, paymentStatus, stripeObject = {}) {
+  const stripeObjectType = String(stripeObject?.object || '').trim();
+  const stripeSessionId = stripeObjectType === 'checkout.session' && stripeObject?.id
+    ? stripeObject.id
+    : null;
+  const stripePaymentIntentId = stripeObject?.payment_intent
+    || (stripeObjectType === 'payment_intent' && stripeObject?.id ? stripeObject.id : null);
+
+  const update = {
+    paymentStatus,
+    status: paymentStatus === 'paid' ? 'inactive' : existing.status || 'active',
+  };
+
+  if (stripeSessionId) {
+    update.lastStripeSessionId = stripeSessionId;
+  }
+
+  if (stripePaymentIntentId) {
+    update.lastStripePaymentIntent = stripePaymentIntentId;
+  }
+
+  if (paymentStatus === 'paid') {
+    if (stripeObject?.created) {
+      update.paidAt = admin.firestore.Timestamp.fromMillis(stripeObject.created * 1000);
+    } else if (!existing.paidAt) {
+      update.paidAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+  } else {
+    update.paidAt = admin.firestore.FieldValue.delete();
+  }
+
+  return update;
+}
+
 async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}) {
   const db = getFirestore();
   if (!db) {
@@ -71,18 +105,11 @@ async function updatePaymentLinkStatus(stripeLinkId, paymentStatus, session = {}
     }
 
     const existing = snap.data() || {};
-    const update = {
-      paymentStatus,
-      lastStripeSessionId: session.id || null,
-      lastStripePaymentIntent: session.payment_intent || null,
-      paidAt: paymentStatus === 'paid' && session.created
-        ? admin.firestore.Timestamp.fromMillis(session.created * 1000)
-        : admin.firestore.FieldValue.delete()
-    };
+    const update = buildStripePaymentLinkUpdate(existing, paymentStatus, session);
 
     await ref.set(update, { merge: true });
 
-    if (paymentStatus === 'paid' && existing.statusCallbackUrl) {
+    if (paymentStatus === 'paid' && existing.paymentStatus !== 'paid' && existing.statusCallbackUrl) {
       try {
         const callbackResponse = await fetch(existing.statusCallbackUrl, {
           method: 'POST',
